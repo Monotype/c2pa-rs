@@ -28,6 +28,9 @@ use crate::{
     error::{Error, Result},
 };
 
+#[cfg(feature = "xmp_write")]
+use crate::embedded_xmp::{add_manifest_uri_to_file, XMPIO};
+
 const II: [u8; 2] = *b"II";
 const MM: [u8; 2] = *b"MM";
 
@@ -1497,6 +1500,13 @@ impl AssetPatch for TiffIO {
                 "patch_cai_store store size mismatch.".to_string(),
             ))
         }
+    }
+}
+
+#[cfg(feature="xmp_write")]
+impl XMPIO for TiffIO {
+    fn add_manifest_uri(&self, asset_path: &std::path::Path, manifest_uri: &str) -> Result<()> {
+        add_manifest_uri_to_file(asset_path, manifest_uri)
     }
 }
 

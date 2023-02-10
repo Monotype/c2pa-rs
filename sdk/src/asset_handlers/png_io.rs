@@ -25,6 +25,9 @@ use crate::{
     error::{Error, Result},
 };
 
+#[cfg(feature="xmp_write")]
+use crate::embedded_xmp::{add_manifest_uri_to_file, XMPIO};
+
 const PNG_ID: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const CAI_CHUNK: [u8; 4] = *b"caBX";
 const IMG_HDR: [u8; 4] = *b"IHDR";
@@ -418,6 +421,13 @@ impl AssetIO for PngIO {
         std::fs::write(asset_path, png_buf)?;
 
         Ok(())
+    }
+}
+
+#[cfg(feature="xmp_write")]
+impl XMPIO for PngIO {
+    fn add_manifest_uri(&self, asset_path: &std::path::Path, manifest_uri: &str) -> Result<()> {
+        add_manifest_uri_to_file(asset_path, manifest_uri)
     }
 }
 

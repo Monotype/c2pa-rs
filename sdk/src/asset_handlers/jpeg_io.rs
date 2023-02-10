@@ -31,6 +31,9 @@ use crate::{
     error::{Error, Result},
 };
 
+#[cfg(feature="xmp_write")]
+use crate::embedded_xmp::{add_manifest_uri_to_file, XMPIO};
+
 const XMP_SIGNATURE: &[u8] = b"http://ns.adobe.com/xap/1.0/";
 const XMP_SIGNATURE_BUFFER_SIZE: usize = XMP_SIGNATURE.len() + 1; // skip null or space char at end
 
@@ -455,6 +458,13 @@ impl AssetIO for JpegIO {
             .map_err(|_err| Error::InvalidAsset("JPEG write error".to_owned()))?;
 
         Ok(())
+    }
+}
+
+#[cfg(feature="xmp_write")]
+impl XMPIO for JpegIO {
+    fn add_manifest_uri(&self, asset_path: &std::path::Path, manifest_uri: &str) -> Result<()> {
+        add_manifest_uri_to_file(asset_path, manifest_uri)
     }
 }
 

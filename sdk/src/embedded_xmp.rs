@@ -16,7 +16,39 @@ use std::path::Path;
 use log::error;
 use xmp_toolkit::{OpenFileOptions, XmpError, XmpErrorType, XmpFile, XmpMeta};
 
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    asset_handlers::{jpeg_io::JpegIO, png_io::PngIO, tiff_io::TiffIO}
+};
+
+
+/// XMP IO object.
+pub trait XMPIO {
+    /// Add the URI for the active manifest to the XMP packet for a file.
+    ///
+    /// This will replace any existing `dc:provenance` term
+    /// in the file's metadata, or create a new one if necessary.
+    ///
+    /// This does not check the claim at all; it is presumed
+    /// that the string that is passed is a valid signed claim.
+    fn add_manifest_uri(&self, asset_path: &Path, manifest_uri: &str) -> Result<()>;
+}
+
+/// Gets a XMP IO handler for writing a manifest URI
+/// 
+/// ## Arguments
+/// * `ext`: Extension of asset
+/// 
+/// Returns a `XMPIO` object for writing XMP data.
+pub fn get_xmp_io_handler(ext: &str) -> Option<Box<dyn XMPIO>> {
+    let ext = ext.to_lowercase();
+    match ext.as_ref() {
+        "jpg" | "jpeg" => Some(Box::new(JpegIO {})),
+        "png" => Some(Box::new(PngIO {})),
+        "tif" | "tiff" | "dng" => Some(Box::new(TiffIO {})),
+        _ => None,
+    }
+}
 
 /// Add the URI for the active manifest to the XMP packet for a file.
 ///

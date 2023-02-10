@@ -20,7 +20,7 @@ use std::{fs, path::Path};
 use log::error;
 
 #[cfg(all(feature = "xmp_write", feature = "file_io"))]
-use crate::embedded_xmp;
+use crate::embedded_xmp::get_xmp_io_handler;
 #[cfg(feature = "async_signer")]
 use crate::AsyncSigner;
 #[cfg(feature = "sign")]
@@ -55,12 +55,6 @@ use crate::{
     jumbf_io::{
         get_file_extension, get_supported_file_extension, is_bmff_format, load_jumbf_from_file,
         object_locations, remove_jumbf_from_file, save_jumbf_to_file,
-    },
-};
-#[cfg(all(feature = "otf", feature = "file_io"))]
-use crate:: {
-    jumbf_io::{
-        is_font_type,
     },
 };
 
@@ -1734,14 +1728,6 @@ impl Store {
             }
         };
 
-        // XMP doesn't make sense in the form of a font file, so we skip the creation of XMP
-        // for fonts
-        let is_font_type = match cfg!(feature = "otf") && cfg!(feature = "file_io") {
-            #[cfg(all(feature = "otf", feature = "file_io"))]
-            true => is_font_type(&ext),
-            _ => false,
-        };
-
         if asset_path != dest_path {
             fs::copy(asset_path, dest_path).map_err(Error::IoError)?;
         }
@@ -1756,10 +1742,10 @@ impl Store {
                 // the class embedded_xmp is not defined so we have to explicitly exclude it from the build
                 #[cfg(feature = "xmp_write")]
                 if let Some(provenance) = self.provenance_path() {
-                    if !is_font_type {
-                        // update XMP info & add xmp hash to provenance claim
-                        embedded_xmp::add_manifest_uri_to_file(dest_path, &provenance)?;
-                    }
+                    match get_xmp_io_handler(&ext) {
+                        Some(writer) => writer.add_manifest_uri(dest_path, &provenance),
+                        None => Ok(())
+                    }?;
                 } else {
                     return Err(Error::XmpWriteError);
                 }
@@ -1775,25 +1761,25 @@ impl Store {
                 }
             }
             crate::claim::RemoteManifest::Remote(_url) => {
-                if cfg!(feature = "xmp_write") && !is_font_type {
+                if cfg!(feature = "xmp_write") {
                     let d = dest_path.with_extension(MANIFEST_STORE_EXT);
                     // remove any previous c2pa manifest from the asset
                     remove_jumbf_from_file(dest_path)?;
-                    // even though this block is protected by the outer cfg!(feature = "xmp_write")
-                    // the class embedded_xmp is not defined so we have to explicitly exclude it from the build
-                    #[cfg(feature = "xmp_write")]
-                    embedded_xmp::add_manifest_uri_to_file(dest_path, &_url)?;
+                    match get_xmp_io_handler(&ext) {
+                        Some(writer) => writer.add_manifest_uri(dest_path, &_url),
+                        None => Err(Error::RemoteManifestNotSupported)
+                    }?;
                     d
                 } else {
                     return Err(Error::BadParam("requires 'xmp_write' feature".to_string()));
                 }
             }
             crate::claim::RemoteManifest::EmbedWithRemote(_url) => {
-                if cfg!(feature = "xmp_write") && !is_font_type {
-                    // even though this block is protected by the outer cfg!(feature = "xmp_write")
-                    // the class embedded_xmp is not defined so we have to explicitly exclude it from the build
-                    #[cfg(feature = "xmp_write")]
-                    embedded_xmp::add_manifest_uri_to_file(dest_path, &_url)?;
+                if cfg!(feature = "xmp_write") {
+                    match get_xmp_io_handler(&ext) {
+                        Some(writer) => writer.add_manifest_uri(dest_path, &_url),
+                        None => Err(Error::RemoteManifestNotSupported)
+                    }?;
 
                     dest_path.to_path_buf()
                 } else {
