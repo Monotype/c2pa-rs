@@ -91,26 +91,24 @@ impl CAILoader for OtfIO {
         let font_file: Font =
             Font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
 
-        if font_file.contains_table(NAME_TABLE_TAG) {
-            let name_table = font_file
-                .tables
-                .name()
-                .map_err(|_err| Error::DeserializationError)?
-                .ok_or(Error::NotFound)?;
+        let name_table = font_file
+            .tables
+            .name()
+            .map_err(|_err| Error::DeserializationError)?
+            .ok_or(Error::NotFound)?;
 
-            let it = name_table.records.iter();
-            for name_table_entry in it {
-                if name_table_entry.encodingID == C2PA_ENCODING_ID
-                    && name_table_entry.languageID == C2PA_LANGUAGE_ID
-                    && name_table_entry.nameID == C2PA_NAME_ID
-                    && name_table_entry.platformID == C2PA_PLATFORM_ID
-                {
-                    let data = base64_decode(name_table_entry.string.clone())
-                        .map_err(|_err| Error::ClaimDecoding)?;
-                    return Ok(data);
-                }
+        for name_table_entry in name_table.records.iter() {
+            if name_table_entry.encodingID == C2PA_ENCODING_ID
+                && name_table_entry.languageID == C2PA_LANGUAGE_ID
+                && name_table_entry.nameID == C2PA_NAME_ID
+                && name_table_entry.platformID == C2PA_PLATFORM_ID
+            {
+                let data = base64_decode(name_table_entry.string.clone())
+                    .map_err(|_err| Error::ClaimDecoding)?;
+                return Ok(data);
             }
         }
+
         Err(Error::NotFound)
     }
 
@@ -131,30 +129,28 @@ impl AssetIO for OtfIO {
     fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> Result<()> {
         let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
 
-        if font_file.contains_table(NAME_TABLE_TAG) {
-            let mut name_table = font_file
-                .tables
-                .name()
-                .map_err(|_err| Error::DeserializationError)?
-                .ok_or(Error::NotFound)?;
-            name_table.records.retain(|x: &NameRecord| {
-                x.encodingID != C2PA_ENCODING_ID
-                    && x.languageID != C2PA_LANGUAGE_ID
-                    && x.nameID != C2PA_NAME_ID
-                    && x.platformID != C2PA_PLATFORM_ID
-            });
-            let c2pa_name = NameRecord {
-                encodingID: C2PA_ENCODING_ID,
-                languageID: C2PA_LANGUAGE_ID,
-                nameID: C2PA_NAME_ID,
-                platformID: C2PA_PLATFORM_ID,
-                string: base64_encode(store_bytes),
-            };
-            name_table.records.push(c2pa_name);
-            font_file
-                .save(asset_path)
-                .expect("Unable to save font file");
-        }
+        let mut name_table = font_file
+            .tables
+            .name()
+            .map_err(|_err| Error::DeserializationError)?
+            .ok_or(Error::NotFound)?;
+        name_table.records.retain(|x: &NameRecord| {
+            x.encodingID != C2PA_ENCODING_ID
+                && x.languageID != C2PA_LANGUAGE_ID
+                && x.nameID != C2PA_NAME_ID
+                && x.platformID != C2PA_PLATFORM_ID
+        });
+        let c2pa_name = NameRecord {
+            encodingID: C2PA_ENCODING_ID,
+            languageID: C2PA_LANGUAGE_ID,
+            nameID: C2PA_NAME_ID,
+            platformID: C2PA_PLATFORM_ID,
+            string: base64_encode(store_bytes),
+        };
+        name_table.records.push(c2pa_name);
+        font_file
+            .save(asset_path)
+            .expect("Unable to save font file");
 
         Ok(())
     }
@@ -162,10 +158,9 @@ impl AssetIO for OtfIO {
     #[allow(unused_variables)]
     fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
         let mut positions: Vec<HashObjectPositions> = Vec::new();
-
         let table_header_sz: usize = 12;
         let table_entry_sz: usize = 16;
-        // We need to get the offset to the 'nam'e table and exclude the length of it and its data.
+        // We need to get the offset to the 'name' table and exclude the length of it and its data.
         let data: Vec<u8> = std::fs::read(asset_path)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
