@@ -20,8 +20,9 @@ use crate::{
     asset_io::{AssetIO, CAILoader, CAIRead, HashBlockObjectType, HashObjectPositions},
     error::{Error, Result},
 };
-use fonttools::font::{self, Font, Table};
+use fonttools::font::{self, Font};
 use fonttools::name::NameRecord;
+use fonttools::table_store::LoadedTable;
 
 const C2PA_PLATFORM_ID: u16 = 0;
 const C2PA_ENCODING_ID: u16 = 3;
@@ -87,13 +88,24 @@ impl CAILoader for OtfIO {
     #[allow(unused_variables)]
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
         let cai_data: Vec<u8> = Vec::new();
-        let mut font_file: Font = font::load(asset_reader).map_err(|_err| Error::FontLoadError)?;
+        //let mut font_file: Font = font::load(asset_reader).map_err(|_err| Error::FontLoadError)?;
+        let mut font_file: Font =
+            font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
 
+        /*
         if let Table::Name(name_table) = font_file
             .get_table(NAME_TABLE_TAG)
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::NotFound)?
-        {
+            */
+        if (font_file.contains_table(NAME_TABLE_TAG)) {
+            let nameTableItem = font_file.tables.tables[NAME_TABLE_TAG].value;
+            let nameTable = match nameTableItem {
+                Loaded(table) => table,
+                Unloaded => Panic!("No name table"),
+            };
+
+            //////////////////////////
             let it = name_table.records.iter();
             for name_table_entry in it {
                 if name_table_entry.encodingID == C2PA_ENCODING_ID
