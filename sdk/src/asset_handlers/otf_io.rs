@@ -148,6 +148,7 @@ impl AssetIO for OtfIO {
             string: base64_encode(store_bytes),
         };
         name_table.records.push(c2pa_name);
+
         font_file
             .save(asset_path)
             .expect("Unable to save font file");
@@ -231,5 +232,18 @@ impl AssetIO for OtfIO {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    #[test]
+    fn add_cai() {
+        let font_path = Path::new("C:/jira/c2pa50_updateFontTools/CultStd.otf");
+        let fake_manifest: [u8; 12] = [0u8; 12];
+        let otf_io = OtfIO {};
+        otf_io.save_cai_store(&font_path, &fake_manifest).ok();
     }
 }
