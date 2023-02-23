@@ -14,22 +14,22 @@ use std::{fs::File, fs::OpenOptions, path::*};
 
 use base64::decode as base64_decode;
 use base64::encode as base64_encode;
+use fonttools::{tables, types::*};
 use std::convert::TryFrom;
 
 use crate::{
     asset_io::{AssetIO, CAILoader, CAIRead, HashBlockObjectType, HashObjectPositions},
     error::{Error, Result},
 };
-use fonttools::font::{self, Font};
-use fonttools::name::NameRecord;
-use fonttools::table_store::LoadedTable;
+use fonttools::font::Font;
+use fonttools::tables::name::NameRecord;
 
 const C2PA_PLATFORM_ID: u16 = 0;
 const C2PA_ENCODING_ID: u16 = 3;
 const C2PA_LANGUAGE_ID: u16 = 1024;
 const C2PA_NAME_ID: u16 = 1024;
 /// Tag for the 'name' table in a font.
-const NAME_TABLE_TAG: &[u8; 4] = b"name";
+const NAME_TABLE_TAG: Tag = tables::name::TAG;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
@@ -89,8 +89,8 @@ impl CAILoader for OtfIO {
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
         let cai_data: Vec<u8> = Vec::new();
         //let mut font_file: Font = font::load(asset_reader).map_err(|_err| Error::FontLoadError)?;
-        let mut font_file: Font =
-            font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
+        let font_file: Font =
+            Font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
 
         /*
         if let Table::Name(name_table) = font_file
@@ -98,14 +98,15 @@ impl CAILoader for OtfIO {
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::NotFound)?
             */
-        if (font_file.contains_table(NAME_TABLE_TAG)) {
-            let nameTableItem = font_file.tables.tables[NAME_TABLE_TAG].value;
-            let nameTable = match nameTableItem {
-                Loaded(table) => table,
-                Unloaded => Panic!("No name table"),
-            };
+        ////////// Jeff: try redoing the above code..
+        if font_file.contains_table(NAME_TABLE_TAG) {
+            let name_table = font_file
+                .tables
+                .name()
+                .map_err(|_err| Error::DeserializationError)?
+                .ok_or(Error::NotFound)?;
+            ////////////////////////// Jeff: end test
 
-            //////////////////////////
             let it = name_table.records.iter();
             for name_table_entry in it {
                 if name_table_entry.encodingID == C2PA_ENCODING_ID
@@ -137,14 +138,14 @@ impl AssetIO for OtfIO {
     }
 
     fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> Result<()> {
-        let f: File = File::open(asset_path)?;
-        let mut font_file: Font = font::load(&f).map_err(|_err| Error::FontLoadError)?;
+        let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
 
-        if let Table::Name(name_table) = font_file
-            .get_table(NAME_TABLE_TAG)
-            .map_err(|_err| Error::DeserializationError)?
-            .ok_or(Error::NotFound)?
-        {
+        if font_file.contains_table(NAME_TABLE_TAG) {
+            let mut name_table = font_file
+                .tables
+                .name()
+                .map_err(|_err| Error::DeserializationError)?
+                .ok_or(Error::NotFound)?;
             name_table.records.retain(|x: &NameRecord| {
                 x.encodingID != C2PA_ENCODING_ID
                     && x.languageID != C2PA_LANGUAGE_ID
@@ -159,8 +160,9 @@ impl AssetIO for OtfIO {
                 string: base64_encode(store_bytes),
             };
             name_table.records.push(c2pa_name);
-            let mut f: File = OpenOptions::new().write(true).open(asset_path)?;
-            font_file.save(&mut f);
+            font_file
+                .save(asset_path)
+                .expect("Unable to save font file");
         }
 
         Ok(())
@@ -168,9 +170,10 @@ impl AssetIO for OtfIO {
 
     #[allow(unused_variables)]
     fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
+        let mut positions: Vec<HashObjectPositions> = Vec::new();
+        /*
         let table_header_sz: usize = 12;
         let table_entry_sz: usize = 16;
-        let mut positions: Vec<HashObjectPositions> = Vec::new();
         // We need to get the offset to the 'nam'e table and exclude the length of it and its data.
         let data: Vec<u8> = std::fs::read(asset_path)?;
         // Verify the font has a valid version in it before assuming the rest is
@@ -218,9 +221,14 @@ impl AssetIO for OtfIO {
             }
         }
         Err(Error::NotFound)
+        */
+
+        ///////// Fake returning Okay (from above) - remove this
+        return Ok(positions);
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
+        /*
         let f: File = File::open(asset_path)?;
         let mut font_file: Font = font::load(&f).map_err(|_err| Error::FontLoadError)?;
 
@@ -238,6 +246,7 @@ impl AssetIO for OtfIO {
             let mut f: File = OpenOptions::new().write(true).open(asset_path)?;
             font_file.save(&mut f);
         }
+        */
 
         Ok(())
     }
