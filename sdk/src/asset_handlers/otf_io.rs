@@ -149,6 +149,10 @@ impl AssetIO for OtfIO {
         };
         name_table.records.push(c2pa_name);
 
+        // Re-insert the modified name table, this saves a table without a
+        // raw pointer so he'll actually write out the modified table.
+        font_file.tables.insert(name_table);
+
         font_file
             .save(asset_path)
             .expect("Unable to save font file");
@@ -242,8 +246,11 @@ pub mod tests {
     #[test]
     fn add_cai() {
         let font_path = Path::new("C:/jira/c2pa50_updateFontTools/CultStd.otf");
-        let fake_manifest: [u8; 12] = [0u8; 12];
+        let manifest: [u8; 12] = [0u8; 12];
         let otf_io = OtfIO {};
-        otf_io.save_cai_store(&font_path, &fake_manifest).ok();
+        otf_io.save_cai_store(&font_path, &manifest).ok();
+        let parsed_manifest = otf_io.read_cai_store(&font_path).unwrap();
+        let parsed_manifest_slice = parsed_manifest.as_slice();
+        assert_eq!(manifest, parsed_manifest_slice);
     }
 }
