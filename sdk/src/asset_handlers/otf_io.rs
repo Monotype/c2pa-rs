@@ -24,6 +24,7 @@ use crate::{
 use fonttools::font::Font;
 use fonttools::tables::name::NameRecord;
 
+// Special record fields signally a C2PA manifest name table record.
 const C2PA_PLATFORM_ID: u16 = 0;
 const C2PA_ENCODING_ID: u16 = 3;
 const C2PA_LANGUAGE_ID: u16 = 1024;
@@ -87,16 +88,16 @@ pub struct OtfIO {}
 impl CAILoader for OtfIO {
     #[allow(unused_variables)]
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
-        let cai_data: Vec<u8> = Vec::new();
         let font_file: Font =
             Font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
-
+        // Grab the name table.
         let name_table = font_file
             .tables
             .name()
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::NotFound)?;
-
+        // Look for our special manifest record in the name table, returning
+        // manifest if we found it.
         for name_table_entry in name_table.records.iter() {
             if name_table_entry.encodingID == C2PA_ENCODING_ID
                 && name_table_entry.languageID == C2PA_LANGUAGE_ID
@@ -108,7 +109,6 @@ impl CAILoader for OtfIO {
                 return Ok(data);
             }
         }
-
         Err(Error::NotFound)
     }
 
@@ -128,18 +128,20 @@ impl AssetIO for OtfIO {
 
     fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> Result<()> {
         let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
-
+        // Get our name table.
         let mut name_table = font_file
             .tables
             .name()
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::NotFound)?;
+        // Remove any of our special manifest records.
         name_table.records.retain(|x: &NameRecord| {
             x.encodingID != C2PA_ENCODING_ID
                 && x.languageID != C2PA_LANGUAGE_ID
                 && x.nameID != C2PA_NAME_ID
                 && x.platformID != C2PA_PLATFORM_ID
         });
+        // Create a new manifest record with our manifest data.
         let c2pa_name = NameRecord {
             encodingID: C2PA_ENCODING_ID,
             languageID: C2PA_LANGUAGE_ID,
@@ -147,12 +149,13 @@ impl AssetIO for OtfIO {
             platformID: C2PA_PLATFORM_ID,
             string: base64_encode(store_bytes),
         };
+        // Add new record to the name table.  This will cause a copy to occur
+        // as the CowPtr creates a clone to occur as the push signals that a
+        // write is going to occur.
         name_table.records.push(c2pa_name);
-
-        // Re-insert the modified name table, this saves a table without a
-        // raw pointer so he'll actually write out the modified table.
+        // Re-insert the modified name table.
         font_file.tables.insert(name_table);
-
+        // Save back to the original file.
         font_file
             .save(asset_path)
             .expect("Unable to save font file");
@@ -217,23 +220,23 @@ impl AssetIO for OtfIO {
     fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
         let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
 
-        if font_file.contains_table(NAME_TABLE_TAG) {
-            let mut name_table = font_file
-                .tables
-                .name()
-                .map_err(|_err| Error::DeserializationError)?
-                .ok_or(Error::NotFound)?;
-
-            name_table.records.retain(|x: &NameRecord| {
-                x.encodingID != C2PA_ENCODING_ID
-                    && x.languageID != C2PA_LANGUAGE_ID
-                    && x.nameID != C2PA_NAME_ID
-                    && x.platformID != C2PA_PLATFORM_ID
-            });
-            font_file
-                .save(asset_path)
-                .expect("Unable to save font file")
-        }
+        // Grab our name table.
+        let mut name_table = font_file
+            .tables
+            .name()
+            .map_err(|_err| Error::DeserializationError)?
+            .ok_or(Error::NotFound)?;
+        // Remove any of our manifest name records.
+        name_table.records.retain(|x: &NameRecord| {
+            x.encodingID != C2PA_ENCODING_ID
+                && x.languageID != C2PA_LANGUAGE_ID
+                && x.nameID != C2PA_NAME_ID
+                && x.platformID != C2PA_PLATFORM_ID
+        });
+        // Write out modified font.
+        font_file
+            .save(asset_path)
+            .expect("Unable to save font file");
 
         Ok(())
     }
@@ -241,16 +244,21 @@ impl AssetIO for OtfIO {
 
 #[cfg(test)]
 pub mod tests {
+
+    /* Rudimentary integration test, left here to allow for quick verification until
+       property unit/integration testing has been implemented.
+
     use super::*;
 
-    #[test]
-    fn add_cai() {
-        let font_path = Path::new("C:/jira/c2pa50_updateFontTools/CultStd.otf");
-        let manifest: [u8; 12] = [0u8; 12];
-        let otf_io = OtfIO {};
-        otf_io.save_cai_store(&font_path, &manifest).ok();
-        let parsed_manifest = otf_io.read_cai_store(&font_path).unwrap();
-        let parsed_manifest_slice = parsed_manifest.as_slice();
-        assert_eq!(manifest, parsed_manifest_slice);
-    }
+        #[test]
+        fn add_cai() {
+            let font_path = Path::new("<path to font>/CultStd.otf");
+            let manifest: [u8; 12] = [0u8; 12];
+            let otf_io = OtfIO {};
+            otf_io.save_cai_store(&font_path, &manifest).ok();
+            let parsed_manifest = otf_io.read_cai_store(&font_path).unwrap();
+            let parsed_manifest_slice = parsed_manifest.as_slice();
+            assert_eq!(manifest, parsed_manifest_slice);
+        }
+    */
 }
