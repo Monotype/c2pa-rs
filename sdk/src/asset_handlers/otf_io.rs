@@ -158,7 +158,7 @@ impl AssetIO for OtfIO {
         // Save back to the original file.
         font_file
             .save(asset_path)
-            .expect("Unable to save font file");
+            .map_err(|_err| Error::FontSaveError)?;
 
         Ok(())
     }
@@ -236,7 +236,7 @@ impl AssetIO for OtfIO {
         // Write out modified font.
         font_file
             .save(asset_path)
-            .expect("Unable to save font file");
+            .map_err(|_err| Error::FontSaveError)?;
 
         Ok(())
     }
