@@ -10,10 +10,16 @@
 // implied. See the LICENSE-MIT and LICENSE-APACHE files for the
 // specific language governing permissions and limitations under
 // each license.
-use std::{convert::TryFrom, fs::File, path::*};
+use std::{
+    convert::TryFrom,
+    fs::File,
+    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    path::*,
+};
 
-use base64::{decode as base64_decode, encode as base64_encode};
-use fonttools::{font::Font, tables, tables::name::NameRecord, types::*};
+use byteorder::{BigEndian, ReadBytesExt};
+use fonttools::{font::Font, tables, tables::C2PA::C2PA, types::*};
+use log::debug;
 
 use crate::{
     asset_io::{
@@ -34,20 +40,15 @@ static SUPPORTED_TYPES: [&str; 7] = [
     "ttf",
 ];
 
-// Special record fields signally a C2PA manifest name table record.
-const C2PA_PLATFORM_ID: u16 = 0;
-const C2PA_ENCODING_ID: u16 = 3;
-const C2PA_LANGUAGE_ID: u16 = 1024;
-const C2PA_NAME_ID: u16 = 1024;
-/// Tag for the 'name' table in a font.
-const NAME_TABLE_TAG: Tag = tables::name::TAG;
+/// Tag for the 'C2PA' table in a font.
+const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
     /// TrueType (ttf) version for Windows and/or Adobe
     TrueType = 0x00010000,
     /// OpenType (otf) version
-    OpenType = 0x4F54544F,
+    OpenType = 0x4f54544f,
     /// Old style PostScript font housed in a sfnt wrapper
     Typ1 = 0x74797031,
     /// 'true' font, a TrueType font for OS X and iOS only
@@ -57,6 +58,7 @@ pub enum FontVersion {
 /// Used to try and convert from a u32 value to FontVersion
 impl TryFrom<u32> for FontVersion {
     type Error = ();
+
     /// Tries to convert from u32 to a valid font version.
     fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
         match v {
@@ -69,56 +71,143 @@ impl TryFrom<u32> for FontVersion {
     }
 }
 
-/// Tries to convert a &[u8] to a u32 value using big endian byte ordering
-/// as specified in the font spec.
-fn read_u32(x: &[u8]) -> Result<u32> {
-    let var = <&[u8] as std::convert::TryInto<&[u8; 4]>>::try_into(x)
-        .map_err(|_err| Error::BadParam("x".to_string()))?;
-    Ok(u32::from_be_bytes(*var))
+/// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
+fn get_object_locations_from_stream<T>(reader: &mut T) -> Result<Vec<HashObjectPositions>>
+where
+    T: Read + Seek + ?Sized,
+{
+    let mut positions: Vec<HashObjectPositions> = Vec::new();
+    let table_header_sz: usize = 12;
+    let table_entry_sz: usize = 16;
+    // Create a 16-byte buffer to hold each table entry as we read through the file
+    let mut table_entry_buf: [u8; 16] = [0; 16];
+    // We need to get the offset to the 'name' table and exclude the length of it and its data.
+    // Verify the font has a valid version in it before assuming the rest is
+    // valid (NOTE: we don't actually do anything with it, just as a safety check).
+    let sfnt_u32: u32 = reader.read_u32::<BigEndian>()?;
+    let _sfnt_version: FontVersion =
+        <u32 as std::convert::TryInto<FontVersion>>::try_into(sfnt_u32)
+            .map_err(|_err| Error::UnsupportedFontError)?;
+
+    // Using a counter to calculate the offset to the name table
+    let mut table_counter: usize = 0;
+    // Get the number of tables available from the next 2 bytes
+    let num_tables: u16 = reader.read_u16::<BigEndian>()?;
+    // Advance to the start of the table entries
+    reader.seek(SeekFrom::Start(12))?;
+
+    while reader.read_exact(&mut table_entry_buf).is_ok() {
+        if C2PA_TABLE_TAG.as_bytes() == &table_entry_buf[0..4] {
+            // We will need to add a position for the 'C2PA' entry since the
+            // checksum changes.
+            positions.push(HashObjectPositions {
+                offset: table_header_sz + (table_entry_sz * table_counter),
+                length: table_entry_sz,
+                htype: HashBlockObjectType::Cai,
+            });
+
+            // Then grab the offset and length of the actual name table to
+            // create the other exclusion zone.
+
+            let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
+            let length = (&table_entry_buf[12..16]).read_u32::<BigEndian>()?;
+            positions.push(HashObjectPositions {
+                offset: offset as usize,
+                length: length as usize,
+                htype: HashBlockObjectType::Cai,
+            });
+
+            // Finally return our collection of positions to ignore/exclude.
+            return Ok(positions);
+        }
+        table_counter += 1;
+
+        // If we have iterated over all of our tables, bail
+        if table_counter >= num_tables as usize {
+            break;
+        }
+    }
+    Ok(positions)
 }
 
-/// Tries to convert a &[u8] to a u16 value using big endian byte ordering
-/// as specified by the font spec.
-fn read_u16(x: &[u8]) -> Result<u16> {
-    let bytes: &[u8; 2] = <&[u8] as std::convert::TryInto<&[u8; 2]>>::try_into(x)
-        .map_err(|_err| Error::BadParam("x".to_string()))?;
-    Ok(u16::from_be_bytes(*bytes))
+/// Adds the manifest URI reference to the font at the given path.
+/// 
+/// ## Arguments
+/// 
+/// * `asset_path` - Path to a font file
+/// * `manifest_uri` - Reference URI to a manifest store
+fn add_reference_to_font(asset_path: &Path, manifest_uri: &str) -> Result<()> {
+    // open the font source
+    let mut font = std::fs::File::open(asset_path)?;
+    // Will use a buffer to create a stream over the data
+    let mut font_buffer = Vec::new();
+    // which is read from the font file
+    font.read_to_end(&mut font_buffer)?;
+    let mut font_stream = Cursor::new(font_buffer);
+
+    // And we will open the same file as write, truncating it
+    let mut new_file = std::fs::File::options()
+        .write(true)
+        .truncate(true)
+        .open(asset_path)?;
+
+    // Write the manifest URI to the stream
+    add_reference_to_stream(&mut font_stream, &mut new_file, manifest_uri)
 }
 
-/// Tries to convert a &[u8] to fixed &[u8; 4] array.
-fn read_u8_4(x: &[u8]) -> Result<&[u8; 4]> {
-    <&[u8] as std::convert::TryInto<&[u8; 4]>>::try_into(x)
-        .map_err(|_err| Error::BadParam("x".to_string()))
+/// Adds the specified reference to the font.
+/// 
+/// ## Arguments
+/// 
+/// * `source` - Source stream to read initial data from
+/// * `destination` - Destination stream to write data with new reference
+/// * `manifest_uri` - Reference URI to a manifest store
+fn add_reference_to_stream<TSource, TDest>(
+    source: &mut TSource,
+    destination: &mut TDest,
+    manifest_uri: &str,
+) -> Result<()>
+where
+    TSource: Read + Seek + ?Sized,
+    TDest: Write + ?Sized,
+{
+    let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    match font.tables.C2PA() {
+        Ok(Some(c2pa_table)) => {
+            font.tables.insert(C2PA::new(
+                Some(manifest_uri.to_string()),
+                c2pa_table.get_manifest_store().clone().map(|x| x.to_vec()),
+            ));
+        }
+        Ok(None) => font
+            .tables
+            .insert(C2PA::new(Some(manifest_uri.to_string()), None)),
+        Err(_) => return Err(Error::DeserializationError),
+    };
+    font.write(destination).map_err(|_| Error::FontSaveError)?;
+    Ok(())
 }
 
 /// Main OTF IO feature.
 pub struct OtfIO {}
+
+impl OtfIO {}
 
 /// OTF implementation of the CAILoader trait.
 impl CAIReader for OtfIO {
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
         let font_file: Font =
             Font::from_reader(asset_reader).map_err(|_err| Error::FontLoadError)?;
-        // Grab the name table.
-        let name_table = font_file
+        // Grab the C2PA table.
+        let c2pa_table = font_file
             .tables
-            .name()
+            .C2PA()
             .map_err(|_err| Error::DeserializationError)?
-            .ok_or(Error::NotFound)?;
-        // Look for our special manifest record in the name table, returning
-        // manifest if we found it.
-        for name_table_entry in name_table.records.iter() {
-            if name_table_entry.encodingID == C2PA_ENCODING_ID
-                && name_table_entry.languageID == C2PA_LANGUAGE_ID
-                && name_table_entry.nameID == C2PA_NAME_ID
-                && name_table_entry.platformID == C2PA_PLATFORM_ID
-            {
-                let data = base64_decode(name_table_entry.string.clone())
-                    .map_err(|_err| Error::ClaimDecoding)?;
-                return Ok(data);
-            }
+            .ok_or(Error::JumbfNotFound)?;
+        match c2pa_table.get_manifest_store() {
+            Some(manifest_store) => Ok(manifest_store.to_vec()),
+            _ => Ok(vec![]),
         }
-        Err(Error::NotFound)
     }
 
     #[allow(unused_variables)]
@@ -141,9 +230,9 @@ impl CAIWriter for OtfIO {
 
     fn get_object_locations_from_stream(
         &self,
-        _input_stream: &mut dyn CAIRead,
+        input_stream: &mut dyn CAIRead,
     ) -> Result<Vec<HashObjectPositions>> {
-        todo!("Implement for streaming")
+        get_object_locations_from_stream(input_stream)
     }
 
     fn remove_cai_store_from_stream(
@@ -167,12 +256,19 @@ impl AssetIO for OtfIO {
     fn get_handler(&self, asset_type: &str) -> Box<dyn AssetIO> {
         Box::new(OtfIO::new(asset_type))
     }
+
     fn get_reader(&self) -> &dyn CAIReader {
         self
     }
+
     fn get_writer(&self, asset_type: &str) -> Option<Box<dyn CAIWriter>> {
         Some(Box::new(OtfIO::new(asset_type)))
     }
+
+    fn remote_ref_writer_ref(&self) -> Option<&dyn RemoteRefEmbed> {
+        Some(self)
+    }
+
     fn supported_types(&self) -> &[&str] {
         &SUPPORTED_TYPES
     }
@@ -183,112 +279,36 @@ impl AssetIO for OtfIO {
     }
 
     fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> Result<()> {
+        debug!("Saving to file path: {:?}", asset_path);
         let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
-        // Get our name table.
-        let mut name_table = font_file
-            .tables
-            .name()
-            .map_err(|_err| Error::DeserializationError)?
-            .ok_or(Error::NotFound)?;
-        // Remove any of our special manifest records.
-        name_table.records.retain(|x: &NameRecord| {
-            x.encodingID != C2PA_ENCODING_ID
-                && x.languageID != C2PA_LANGUAGE_ID
-                && x.nameID != C2PA_NAME_ID
-                && x.platformID != C2PA_PLATFORM_ID
-        });
-        // Create a new manifest record with our manifest data.
-        let c2pa_name = NameRecord {
-            encodingID: C2PA_ENCODING_ID,
-            languageID: C2PA_LANGUAGE_ID,
-            nameID: C2PA_NAME_ID,
-            platformID: C2PA_PLATFORM_ID,
-            string: base64_encode(store_bytes),
+        match font_file.tables.C2PA() {
+            Ok(Some(c2pa_table)) => {
+                font_file.tables.insert(C2PA::new(
+                    c2pa_table.activeManifestUri.clone(),
+                    Some(store_bytes.to_vec()),
+                ));
+            }
+            Ok(None) => font_file
+                .tables
+                .insert(C2PA::new(None, Some(store_bytes.to_vec()))),
+            Err(_) => return Err(Error::DeserializationError),
         };
-        // Add new record to the name table.  This will cause a copy to occur
-        // as the CowPtr creates a clone to occur as the push signals that a
-        // write is going to occur.
-        name_table.records.push(c2pa_name);
-        // Re-insert the modified name table.
-        font_file.tables.insert(name_table);
         // Save back to the original file.
         font_file
             .save(asset_path)
             .map_err(|_err| Error::FontSaveError)?;
-
         Ok(())
     }
 
-    #[allow(unused_variables)]
     fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
-        let mut positions: Vec<HashObjectPositions> = Vec::new();
-        let table_header_sz: usize = 12;
-        let table_entry_sz: usize = 16;
-        // We need to get the offset to the 'name' table and exclude the length of it and its data.
-        let data: Vec<u8> = std::fs::read(asset_path)?;
-        // Verify the font has a valid version in it before assuming the rest is
-        // valid (NOTE: we don't actually do anything with it, just as a safety check).
-        let sfnt_u32: u32 = read_u32(&data[0..4])?;
-        let sfnt_version: FontVersion =
-            <u32 as std::convert::TryInto<FontVersion>>::try_into(sfnt_u32)
-                .map_err(|_err| Error::UnsupportedFontError)?;
-        let num_tables: u16 = read_u16(&data[4..6])?;
-        // Get the slice of the table array
-        let tables: &[u8] = &data[12..];
-        // Using a counter to calculate the offset to the name table
-        let mut table_counter: usize = 0;
-
-        // Then enumerate over all of the table entries looking for a name table
-        for table_slice in tables.chunks_exact(table_entry_sz) {
-            // Check for the name table from the tag entry
-            if NAME_TABLE_TAG.as_bytes() == read_u8_4(&table_slice[0..4])? {
-                // We will need to add a position for the 'name' entry since the
-                // checksum changes.
-                positions.push(HashObjectPositions {
-                    offset: table_header_sz + (table_entry_sz * table_counter),
-                    length: table_entry_sz,
-                    htype: HashBlockObjectType::Cai,
-                });
-
-                // Then grab the offset and length of the actual name table to
-                // create the other exclusion zone.
-                let offset = read_u32(&table_slice[8..12])?;
-                let length = read_u32(&table_slice[12..16])?;
-                positions.push(HashObjectPositions {
-                    offset: offset as usize,
-                    length: length as usize,
-                    htype: HashBlockObjectType::Cai,
-                });
-
-                // Finally return our collection of positions to ignore/exclude.
-                return Ok(positions);
-            }
-            table_counter += 1;
-
-            // If we have iterated over all of our tables, bail
-            if table_counter >= num_tables as usize {
-                break;
-            }
-        }
-        Err(Error::NotFound)
+        let file = std::fs::File::open(asset_path)?;
+        let mut buf_reader = BufReader::new(file);
+        get_object_locations_from_stream(&mut buf_reader)
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
         let mut font_file: Font = Font::load(asset_path).map_err(|_err| Error::FontLoadError)?;
-
-        // Grab our name table.
-        let mut name_table = font_file
-            .tables
-            .name()
-            .map_err(|_err| Error::DeserializationError)?
-            .ok_or(Error::NotFound)?;
-        // Remove any of our manifest name records.
-        name_table.records.retain(|x: &NameRecord| {
-            x.encodingID != C2PA_ENCODING_ID
-                && x.languageID != C2PA_LANGUAGE_ID
-                && x.nameID != C2PA_NAME_ID
-                && x.platformID != C2PA_PLATFORM_ID
-        });
+        font_file.tables.remove(C2PA_TABLE_TAG);
         // Write out modified font.
         font_file
             .save(asset_path)
@@ -306,19 +326,29 @@ impl RemoteRefEmbed for OtfIO {
         embed_ref: crate::asset_io::RemoteRefEmbedType,
     ) -> Result<()> {
         match embed_ref {
-            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
+                add_reference_to_font(asset_path, &manifest_uri)
+            }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::Watermark(_) => Err(Error::UnsupportedType),
         }
     }
+
     fn embed_reference_to_stream(
         &self,
-        _source_stream: &mut dyn CAIRead,
-        _output_stream: &mut dyn CAIReadWrite,
-        _embed_ref: RemoteRefEmbedType,
+        source_stream: &mut dyn CAIRead,
+        output_stream: &mut dyn CAIReadWrite,
+        embed_ref: RemoteRefEmbedType,
     ) -> Result<()> {
-        Err(Error::UnsupportedType)
+        match embed_ref {
+            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
+                add_reference_to_stream(source_stream, output_stream, &manifest_uri)
+            }
+            crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::Watermark(_) => Err(Error::UnsupportedType),
+        }
     }
 }
 
