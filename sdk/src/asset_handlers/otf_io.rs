@@ -13,13 +13,14 @@
 use std::{
     convert::TryFrom,
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     path::*,
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
 use log::debug;
+use tempfile::TempDir;
 
 use crate::{
     asset_io::{
@@ -29,9 +30,53 @@ use crate::{
     error::{Error, Result},
 };
 
+struct TempFile {
+    #[allow(dead_code)]
+    temp_dir: TempDir,
+    path: Box<Path>,
+    file: File,
+}
+
+impl TempFile {
+    /// Creates a new temporary file within the `env::temp_dir()` directory,
+    /// which should be deleted once the object is dropped.
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_name` - Base name to use for the temporary file name
+    pub fn new(base_name: &Path) -> Result<Self> {
+        let temp_dir = TempDir::new()?;
+        let temp_dir_path = temp_dir.path();
+        let path = temp_dir_path.join(
+            base_name
+                .file_name()
+                .ok_or_else(|| Error::BadParam("Invalid file name".to_string()))?,
+        );
+        let file = File::create(&path)?;
+        Ok(Self {
+            temp_dir,
+            path: path.into(),
+            file,
+        })
+    }
+
+    /// Get the path of the temporary file
+    pub fn get_path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
+    /// Get a mutable reference to the temporary file
+    pub fn get_mut_file(&mut self) -> &mut File {
+        &mut self.file
+    }
+}
+
 /// Supported extension and mime-types
-static SUPPORTED_TYPES: [&str; 7] = [
-    "application/font-snft",
+static SUPPORTED_TYPES: [&str; 10] = [
+    "application/font-sfnt",
+    "application/x-font-opentype",
+    "application/x-font-ttf",
+    "application/x-font-truetype",
     "font/otf",
     "font/sfnt",
     "font/otf",
@@ -42,6 +87,8 @@ static SUPPORTED_TYPES: [&str; 7] = [
 
 /// Tag for the 'C2PA' table in a font.
 const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
+/// Tag for the 'head' table in a font.
+const HEAD_TABLE_TAG: Tag = tables::head::TAG;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
@@ -78,22 +125,10 @@ impl TryFrom<u32> for FontVersion {
 /// * `font_path` - Path to a font file
 /// * `manifest_store_data` - C2PA manifest store data to add to the font file
 fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
-    debug!("Saving to file path: {:?}", font_path);
-    // open the font source
-    let mut font = std::fs::File::open(font_path)?;
-    // Will use a buffer to create a stream over the data
-    let mut font_buffer = Vec::new();
-    // which is read from the font file
-    font.read_to_end(&mut font_buffer)?;
-    let mut font_stream = Cursor::new(font_buffer);
-
-    // And we will open the same file as write, truncating it
-    let mut new_file = std::fs::File::options()
-        .write(true)
-        .truncate(true)
-        .open(font_path)?;
-
-    add_c2pa_to_stream(&mut font_stream, &mut new_file, manifest_store_data)
+    process_file_with_streams(font_path, move |input_stream, temp_file| {
+        // Add the C2PA data to the temp file
+        add_c2pa_to_stream(input_stream, temp_file.get_mut_file(), manifest_store_data)
+    })
 }
 
 /// Adds C2PA manifest store data to a font stream
@@ -112,7 +147,7 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
-    let mut font_file: Font = Font::from_reader(source).map_err(|_err| Error::FontLoadError)?;
+    let mut font_file: Font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
     match font_file.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
             font_file.tables.insert(C2PA::new(
@@ -136,25 +171,13 @@ where
 ///
 /// ## Arguments
 ///
-/// * `asset_path` - Path to a font file
+/// * `font_path` - Path to a font file
 /// * `manifest_uri` - Reference URI to a manifest store
-fn add_reference_to_font(asset_path: &Path, manifest_uri: &str) -> Result<()> {
-    // open the font source
-    let mut font = std::fs::File::open(asset_path)?;
-    // Will use a buffer to create a stream over the data
-    let mut font_buffer = Vec::new();
-    // which is read from the font file
-    font.read_to_end(&mut font_buffer)?;
-    let mut font_stream = Cursor::new(font_buffer);
-
-    // And we will open the same file as write, truncating it
-    let mut new_file = std::fs::File::options()
-        .write(true)
-        .truncate(true)
-        .open(asset_path)?;
-
-    // Write the manifest URI to the stream
-    add_reference_to_stream(&mut font_stream, &mut new_file, manifest_uri)
+fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
+    process_file_with_streams(font_path, move |input_stream, temp_file| {
+        // Write the manifest URI to the stream
+        add_reference_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
+    })
 }
 
 /// Adds the specified reference to the font.
@@ -178,7 +201,7 @@ where
         Ok(Some(c2pa_table)) => {
             font.tables.insert(C2PA::new(
                 Some(manifest_uri.to_string()),
-                c2pa_table.get_manifest_store().clone().map(|x| x.to_vec()),
+                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
             ));
         }
         Ok(None) => font
@@ -187,6 +210,40 @@ where
         Err(_) => return Err(Error::DeserializationError),
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
+    Ok(())
+}
+
+/// Opens a BufReader for the given file path
+///
+/// ## Arguments
+///
+/// * `file_path` - Valid path to a file to open in a buffer reader
+///
+/// ## Returns
+///
+/// A BufReader<File> object
+fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
+    let file = File::open(file_path)?;
+    Ok(BufReader::new(file))
+}
+
+/// Processes a font file using a streams to process.
+///
+/// ## Arguments
+///
+/// * `font_path` - Path to the font file to process
+/// * `callback` - Method to process the stream
+fn process_file_with_streams(
+    font_path: &Path,
+    callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> Result<()>,
+) -> Result<()> {
+    // Open the font source for a buffer read
+    let mut font_buffer = open_bufreader_for_file(font_path)?;
+    // Open a temporary file, which will be deleted after destroyed
+    let mut temp_file = TempFile::new(font_path)?;
+    callback(&mut font_buffer, &mut temp_file)?;
+    // Finally copy the temporary file, replacing the original file
+    std::fs::copy(temp_file.get_path(), font_path)?;
     Ok(())
 }
 
@@ -201,12 +258,7 @@ where
 #[allow(dead_code)]
 fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
     // open the font source
-    let mut font = std::fs::File::open(font_path)?;
-    // Will use a buffer to create a stream over the data
-    let mut font_buffer = Vec::new();
-    // which is read from the font file
-    font.read_to_end(&mut font_buffer)?;
-    let mut font_stream = Cursor::new(font_buffer);
+    let mut font_stream = open_bufreader_for_file(font_path)?;
     read_reference_to_stream(&mut font_stream)
 }
 
@@ -234,24 +286,12 @@ where
 ///
 /// ## Arguments
 ///
-/// * `asset_path` - path to the font file to remove C2PA from
-fn remove_c2pa_from_font(asset_path: &Path) -> Result<()> {
-    // open the font source
-    let mut font = std::fs::File::open(asset_path)?;
-    // Will use a buffer to create a stream over the data
-    let mut font_buffer = Vec::new();
-    // which is read from the font file
-    font.read_to_end(&mut font_buffer)?;
-    let mut font_stream = Cursor::new(font_buffer);
-
-    // And we will open the same file as write, truncating it
-    let mut new_file = std::fs::File::options()
-        .write(true)
-        .truncate(true)
-        .open(asset_path)?;
-
-    // Write the manifest URI to the stream
-    remove_c2pa_from_stream(&mut font_stream, &mut new_file)
+/// * `font_path` - path to the font file to remove C2PA from
+fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
+    process_file_with_streams(font_path, move |input_stream, temp_file| {
+        // Remove the C2PA manifest store from the stream
+        remove_c2pa_from_stream(input_stream, temp_file.get_mut_file())
+    })
 }
 
 /// Remove the `C2PA` font table from the font data stream, writing to the
@@ -307,7 +347,7 @@ where
             let manifest_uri = c2pa_table.activeManifestUri.clone();
             font.tables.insert(C2PA::new(
                 None,
-                c2pa_table.get_manifest_store().clone().map(|x| x.to_vec()),
+                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
             ));
             manifest_uri
         }
@@ -352,7 +392,9 @@ where
     reader.seek(SeekFrom::Start(12))?;
 
     while reader.read_exact(&mut table_entry_buf).is_ok() {
-        if C2PA_TABLE_TAG.as_bytes() == &table_entry_buf[0..4] {
+        let table_tag = &table_entry_buf[0..4];
+        // Add the contents of the C2PA table to the exclusion
+        if C2PA_TABLE_TAG.as_bytes() == table_tag {
             // We will need to add a position for the 'C2PA' entry since the
             // checksum changes.
             positions.push(HashObjectPositions {
@@ -363,7 +405,6 @@ where
 
             // Then grab the offset and length of the actual name table to
             // create the other exclusion zone.
-
             let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
             let length = (&table_entry_buf[12..16]).read_u32::<BigEndian>()?;
             positions.push(HashObjectPositions {
@@ -371,9 +412,17 @@ where
                 length: length as usize,
                 htype: HashBlockObjectType::Cai,
             });
-
-            // Finally return our collection of positions to ignore/exclude.
-            return Ok(positions);
+        }
+        // Add the `head[checksumAdjustment]` value as it will change after
+        // adding C2PA
+        else if HEAD_TABLE_TAG.as_bytes() == table_tag {
+            let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
+            // Add in the `head`[checksumAdjustment] to the exclusions
+            positions.push(HashObjectPositions {
+                offset: offset as usize + 8,
+                length: 4,
+                htype: HashBlockObjectType::Cai,
+            });
         }
         table_counter += 1;
 
@@ -382,18 +431,14 @@ where
             break;
         }
     }
-    // We must provide positions for operations to work, so if we don't have
-    // one we will default to the entire file
-    if positions.is_empty() {
-        let current_pos = reader.stream_position()?;
-        reader.seek(SeekFrom::End(0))?;
-        let stream_len = reader.stream_position()?;
-        reader.seek(SeekFrom::Start(current_pos))?;
-        positions.push(HashObjectPositions {
-            offset: 0,
-            length: stream_len as usize,
-            htype: HashBlockObjectType::Cai,
-        });
+    // Add the table directory headers
+    positions.push(HashObjectPositions {
+        offset: table_header_sz,
+        length: table_entry_sz * num_tables as usize,
+        htype: HashBlockObjectType::Cai,
+    });
+    for position in positions.iter().as_ref() {
+        debug!("Position for C2PA in font: {:?}", &position);
     }
     Ok(positions)
 }
@@ -504,8 +549,7 @@ impl AssetIO for OtfIO {
     }
 
     fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
-        let file = File::open(asset_path)?;
-        let mut buf_reader = BufReader::new(file);
+        let mut buf_reader = open_bufreader_for_file(asset_path)?;
         get_object_locations_from_stream(&mut buf_reader)
     }
 
@@ -550,6 +594,11 @@ impl RemoteRefEmbed for OtfIO {
 
 #[cfg(test)]
 pub mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(clippy::panic)]
+    #![allow(clippy::unwrap_used)]
+    use std::io::Cursor;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -607,8 +656,8 @@ pub mod tests {
         let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
         // Should have one position reported for the entire "file"
         assert_eq!(1, positions.len());
-        assert_eq!(0, positions.get(0).unwrap().offset);
-        assert_eq!(6, positions.get(0).unwrap().length);
+        assert_eq!(12, positions.get(0).unwrap().offset);
+        assert_eq!(0, positions.get(0).unwrap().length);
     }
 
     /// Verify when reading the object locations for hashing, we get zero
@@ -629,10 +678,10 @@ pub mod tests {
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
-        // Should have one position reported for the entire "file"
+        // Should have one position reported for the table directory
         assert_eq!(1, positions.len());
-        assert_eq!(0, positions.get(0).unwrap().offset);
-        assert_eq!(29, positions.get(0).unwrap().length);
+        assert_eq!(12, positions.get(0).unwrap().offset);
+        assert_eq!(16, positions.get(0).unwrap().length);
     }
 
     /// Verifies the correct object positions are returned when a font contains
@@ -659,8 +708,8 @@ pub mod tests {
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
-        // Should have 2 positions reported
-        assert_eq!(2, positions.len());
+        // Should have 3 positions reported
+        assert_eq!(3, positions.len());
         // The first one is the position to the table header entry which describes where
         // the C2PA table is
         assert_eq!(16, positions.get(0).unwrap().length);
@@ -668,6 +717,58 @@ pub mod tests {
         // The second one is the position of the actual C2PA table
         assert_eq!(26, positions.get(1).unwrap().length);
         assert_eq!(28, positions.get(1).unwrap().offset);
+        // And the third is the position of the actual directory table
+        assert_eq!(16, positions.get(2).unwrap().length);
+        assert_eq!(12, positions.get(2).unwrap().offset);
+    }
+
+    /// Verifies the correct object positions are returned when a font contains
+    /// C2PA data
+    #[test]
+    fn get_object_locations_with_head_and_c2pa_tables() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x02, // 2 tables
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x32, // offset to table data
+            0x00, 0x00, 0x00, 0x1a, // length of table data
+            0x68, 0x65, 0x61, 0x64, // head table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x4c, // offset to table data
+            0x00, 0x00, 0x00, 0x0d, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x12, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x00, // fontRevision
+            0x00, 0x00, 0x00, 0x00, // checksumAdjustment
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
+        // Should have 4 positions reported
+        assert_eq!(4, positions.len());
+        // The first one is the position to the table header entry which describes where
+        // the C2PA table is
+        assert_eq!(16, positions.get(0).unwrap().length);
+        assert_eq!(12, positions.get(0).unwrap().offset);
+        // The second one is the position of the actual C2PA table
+        assert_eq!(26, positions.get(1).unwrap().length);
+        assert_eq!(50, positions.get(1).unwrap().offset);
+        // The third is the position of the `head[checksumAdjustment]` table entry
+        assert_eq!(4, positions.get(2).unwrap().length);
+        assert_eq!(84, positions.get(2).unwrap().offset);
+        // The fourth is the position of the actual directory table
+        assert_eq!(32, positions.get(3).unwrap().length);
+        assert_eq!(12, positions.get(3).unwrap().offset);
     }
 
     /// Verify the C2PA table data can be read from a font stream
