@@ -31,6 +31,9 @@ use crate::{
 };
 
 struct TempFile {
+    // The temp_dir must be referenced during the duration of the use of the
+    // temporary file, as soon as it is dropped the temporary directory and the
+    // contents thereof are deleted
     #[allow(dead_code)]
     temp_dir: TempDir,
     path: Box<Path>,
