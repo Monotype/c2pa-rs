@@ -21,6 +21,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
 use log::debug;
 use tempfile::TempDir;
+use uuid::Uuid;
+use xmp_toolkit::{XmpMeta, XmpErrorType, XmpError, FromStrOptions};
 
 use crate::{
     asset_io::{
@@ -176,6 +178,7 @@ where
 ///
 /// * `font_path` - Path to a font file
 /// * `manifest_uri` - Reference URI to a manifest store
+#[allow(dead_code)]
 fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Write the manifest URI to the stream
@@ -467,7 +470,22 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<CowP
 /// Main OTF IO feature.
 pub struct OtfIO {}
 
-impl OtfIO {}
+impl OtfIO {
+    #[allow(dead_code)]
+    pub fn default_document_id() -> String {
+        format!("fontsoftware:did:{}", Uuid::new_v4())
+    }
+
+    #[allow(dead_code)]
+    pub fn default_instance_id() -> String {
+        format!("fontsoftware:iid:{}", Uuid::new_v4())
+    }
+
+    #[allow(dead_code)]
+    pub fn default_format() -> &'static str {
+        "application/font-sfnt"
+    }
+}
 
 /// OTF implementation of the CAILoader trait.
 impl CAIReader for OtfIO {
@@ -479,10 +497,13 @@ impl CAIReader for OtfIO {
         }
     }
 
-    #[allow(unused_variables)]
     fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
         // Fonts have no XMP data.
-        None
+        // BUT, for now we will pretend it does and read from the reference
+        match read_reference_to_stream(asset_reader) {
+            Ok(reference) => reference,
+            Err(_) => None,
+        }
     }
 }
 
@@ -570,7 +591,7 @@ impl RemoteRefEmbed for OtfIO {
     ) -> Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                add_reference_to_font(asset_path, &manifest_uri)
+                add_reference_as_xmp_to_font(asset_path, &manifest_uri)
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -586,7 +607,8 @@ impl RemoteRefEmbed for OtfIO {
     ) -> Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                add_reference_to_stream(source_stream, output_stream, &manifest_uri)
+                //add_reference_to_stream(source_stream, output_stream, &manifest_uri)
+                add_reference_as_xmp_to_stream(source_stream, output_stream, &manifest_uri)
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -595,6 +617,84 @@ impl RemoteRefEmbed for OtfIO {
     }
 }
 
+fn build_xmp_from_stream<TSource>(
+    source: &mut TSource,
+) -> Result<XmpMeta>
+where
+    TSource: Read + Seek + ?Sized,
+{
+    Ok(match read_reference_to_stream(source)? {
+        // For now we pretend the reference read from the stream is really XMP
+        // data
+        Some(xmp) => {
+            // If we did have reference data in the stream, we assume it is
+            // really XMP data, and will read as such
+            XmpMeta::from_str_with_options(xmp.as_str(), FromStrOptions::default())
+                .map_err(xmp_write_err)?
+        },
+        None => {
+            let xmp_mm_namespace = "http://ns.adobe.com/xap/1.0/mm/";
+            // If there was no reference in the stream, then we build up
+            // a default XMP data
+            let mut xmp_meta = XmpMeta::new().map_err(xmp_write_err)?;
+
+            debug!("{}", xmp_meta.to_string());
+            xmp_meta.set_property(
+                xmp_mm_namespace,
+                "DocumentID",
+                &OtfIO::default_document_id().into())
+            .map_err(xmp_write_err)?;
+
+            xmp_meta.set_property(
+                xmp_mm_namespace,
+                "InstanceID",
+                &OtfIO::default_instance_id().into())
+            .map_err(xmp_write_err)?;
+            debug!("{}", xmp_meta.to_string());
+
+            xmp_meta
+        },
+    })
+}
+
+fn xmp_write_err(err: XmpError) -> crate::Error {
+    match err.error_type {
+        // convert to OS permission error code so we can detect it correctly upstream
+        XmpErrorType::FilePermission => Error::IoError(std::io::Error::from_raw_os_error(13)),
+        XmpErrorType::NoFile => Error::NotFound,
+        XmpErrorType::NoFileHandler => Error::UnsupportedType,
+        _ => Error::XmpWriteError,
+    }
+}
+
+fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
+    process_file_with_streams(font_path, move |input_stream, temp_file| {
+        // Write the manifest URI to the stream
+        add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
+    })
+}
+#[allow(dead_code)]
+fn add_reference_as_xmp_to_stream<TSource, TDest> (
+    source: &mut TSource,
+    destination: &mut TDest,
+    reference: &str
+) -> Result<()> 
+where
+    TSource: Read + Seek + ?Sized,
+    TDest: Write + ?Sized,
+{
+    XmpMeta::register_namespace("http://purl.org/dc/terms/", "dcterms").map_err(xmp_write_err)?;
+    let mut xmp_meta = build_xmp_from_stream(source)?;
+    // Reset the source stream to the beginning
+    source.seek(SeekFrom::Start(0))?;
+    xmp_meta.set_property(
+        "http://purl.org/dc/terms/",
+        "provenance",
+        &reference.into())
+    .map_err(xmp_write_err)?;
+    add_reference_to_stream(source, destination, &xmp_meta.to_string())?;
+    Ok(())
+}
 #[cfg(test)]
 pub mod tests {
     #![allow(clippy::expect_used)]

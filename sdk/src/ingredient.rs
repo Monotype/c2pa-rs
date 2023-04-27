@@ -407,6 +407,7 @@ impl Ingredient {
             "ogg" => "audio/ogg",
             "pdf" => "application/pdf",
             "ai" => "application/postscript",
+            "ttf" | "otf" => "application/font-sfnt",
             _ => "application/octet-stream",
         }
         .to_owned();
