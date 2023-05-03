@@ -22,7 +22,8 @@ use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, typ
 use log::debug;
 use tempfile::TempDir;
 use uuid::Uuid;
-use xmp_toolkit::{XmpMeta, XmpErrorType, XmpError, FromStrOptions};
+#[cfg(feature = "xmp_write")]
+use xmp_toolkit::{FromStrOptions, XmpError, XmpErrorType, XmpMeta};
 
 use crate::{
     asset_io::{
@@ -493,7 +494,7 @@ impl CAIReader for OtfIO {
         let c2pa_table = read_c2pa_from_stream(asset_reader)?;
         match c2pa_table.get_manifest_store() {
             Some(manifest_store) => Ok(manifest_store.to_vec()),
-            _ => Ok(vec![]),
+            _ => Err(Error::JumbfNotFound),
         }
     }
 
@@ -591,7 +592,11 @@ impl RemoteRefEmbed for OtfIO {
     ) -> Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                add_reference_as_xmp_to_font(asset_path, &manifest_uri)
+                if cfg!(feature = "xmp_write") {
+                    add_reference_as_xmp_to_font(asset_path, &manifest_uri)
+                } else {
+                    add_reference_to_font(asset_path, &manifest_uri)
+                }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -607,8 +612,11 @@ impl RemoteRefEmbed for OtfIO {
     ) -> Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                //add_reference_to_stream(source_stream, output_stream, &manifest_uri)
-                add_reference_as_xmp_to_stream(source_stream, output_stream, &manifest_uri)
+                if cfg!(feature = "xmp_write") {
+                    add_reference_as_xmp_to_stream(source_stream, output_stream, &manifest_uri)
+                } else {
+                    add_reference_to_stream(source_stream, output_stream, &manifest_uri)
+                }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -617,9 +625,22 @@ impl RemoteRefEmbed for OtfIO {
     }
 }
 
-fn build_xmp_from_stream<TSource>(
-    source: &mut TSource,
-) -> Result<XmpMeta>
+/// Builds a `XmpMeta` element from the data within the source stream
+///
+/// ### Parameters
+///
+/// - `source` - Source stream to read data from to build the `XmpMeta` object
+///
+/// ### Returns
+///
+/// A new `XmpMeta` object, either based on information that already exists in
+/// the stream or using defaults
+///
+/// ### Remarks
+/// The use of this function really shouldn't be needed, but currently the SDK
+/// is tightly coupled to the use of XMP with assets.
+#[cfg(feature = "xmp_write")]
+fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<XmpMeta>
 where
     TSource: Read + Seek + ?Sized,
 {
@@ -631,7 +652,7 @@ where
             // really XMP data, and will read as such
             XmpMeta::from_str_with_options(xmp.as_str(), FromStrOptions::default())
                 .map_err(xmp_write_err)?
-        },
+        }
         None => {
             let xmp_mm_namespace = "http://ns.adobe.com/xap/1.0/mm/";
             // If there was no reference in the stream, then we build up
@@ -639,24 +660,38 @@ where
             let mut xmp_meta = XmpMeta::new().map_err(xmp_write_err)?;
 
             debug!("{}", xmp_meta.to_string());
-            xmp_meta.set_property(
-                xmp_mm_namespace,
-                "DocumentID",
-                &OtfIO::default_document_id().into())
-            .map_err(xmp_write_err)?;
+            xmp_meta
+                .set_property(
+                    xmp_mm_namespace,
+                    "DocumentID",
+                    &OtfIO::default_document_id().into(),
+                )
+                .map_err(xmp_write_err)?;
 
-            xmp_meta.set_property(
-                xmp_mm_namespace,
-                "InstanceID",
-                &OtfIO::default_instance_id().into())
-            .map_err(xmp_write_err)?;
+            xmp_meta
+                .set_property(
+                    xmp_mm_namespace,
+                    "InstanceID",
+                    &OtfIO::default_instance_id().into(),
+                )
+                .map_err(xmp_write_err)?;
             debug!("{}", xmp_meta.to_string());
 
             xmp_meta
-        },
+        }
     })
 }
 
+/// Maps the errors from the xmp_toolkit crate
+///
+/// ### Parameters
+///
+/// - `err` - The `XmpError` to map to an internal error type
+///
+/// ### Remarks
+/// This is nearly a copy/paste from `embedded_xmp` crate, we should clean this
+/// up at some point
+#[cfg(feature = "xmp_write")]
 fn xmp_write_err(err: XmpError) -> crate::Error {
     match err.error_type {
         // convert to OS permission error code so we can detect it correctly upstream
@@ -667,34 +702,69 @@ fn xmp_write_err(err: XmpError) -> crate::Error {
     }
 }
 
+/// Adds a C2PA manifest reference as XMP data to a font file
+///
+/// ### Parameters
+/// - `font_path` - Path to the font file to add the reference to
+/// - `manifest_uri` - A C2PA manifest URI (JUMBF or URL based)
+///
+/// ### Remarks
+/// This method is considered a stop-gap for now until the official SDK
+/// offers a more generic method to indicate a document ID, instance ID,
+/// and a reference to the a remote manifest.
+#[cfg(feature = "xmp_write")]
 fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Write the manifest URI to the stream
         add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
     })
 }
+
+/// Adds a C2PA manifest reference as XMP data to the stream
+///
+/// ### Parameters
+/// - `source` - Source stream to read from
+/// - `destination` - Destination stream to write the reference to
+/// - `reference` - A C2PA manifest URI (JUMBF or URL based)
+///
+/// ### Remarks
+/// This method is considered a stop-gap for now until the official SDK
+/// offers a more generic method to indicate a document ID, instance ID,
+/// and a reference to the a remote manifest.
 #[allow(dead_code)]
-fn add_reference_as_xmp_to_stream<TSource, TDest> (
+#[cfg(feature = "xmp_write")]
+fn add_reference_as_xmp_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    reference: &str
-) -> Result<()> 
+    manifest_uri: &str,
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
+    // We must register the namespace for dcterms, to be able to set the
+    // provenance
     XmpMeta::register_namespace("http://purl.org/dc/terms/", "dcterms").map_err(xmp_write_err)?;
+    // Build a simple XMP meta element from the current source stream
     let mut xmp_meta = build_xmp_from_stream(source)?;
     // Reset the source stream to the beginning
     source.seek(SeekFrom::Start(0))?;
-    xmp_meta.set_property(
-        "http://purl.org/dc/terms/",
-        "provenance",
-        &reference.into())
-    .map_err(xmp_write_err)?;
+    // We don't really care if there was a provenance before, since we are
+    // writing a new one we will either be adding or overwriting what
+    // was there.
+    xmp_meta
+        .set_property(
+            "http://purl.org/dc/terms/",
+            "provenance",
+            &manifest_uri.into(),
+        )
+        .map_err(xmp_write_err)?;
+    // Finally write the XMP data as a string to the stream
     add_reference_to_stream(source, destination, &xmp_meta.to_string())?;
+
     Ok(())
 }
+
 #[cfg(test)]
 pub mod tests {
     #![allow(clippy::expect_used)]
