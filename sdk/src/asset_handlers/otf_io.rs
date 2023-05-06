@@ -31,11 +31,75 @@ use crate::{
     error::{Error, Result},
 };
 
+/// This module is a temporary implementation of a very basic support for XMP in
+/// fonts. Ideally the reading/writing of the following should be independent of
+/// XMP support:
+///
+/// - `InstanceID` - Unique identifier of the instance
+/// - `DocumentID` - Unique identifier of the document
+/// - `Provenance` - Url/Uri of the provenance
+///
+/// But as the authoring of this module the Rust SDK still assumes the remote
+/// manifest reference comes from the XMP when building the `Ingredient` (as
+/// seen in the ingredient module). The instance/document ID also are read from
+/// the XMP when building the ingredient, so until this type of logic has been
+/// abstracted this is meant as a temporary hack to provide a working
+/// implementation for remote manifests.
+///
+/// ### Remarks
+///
+/// This module depends on the `feature = "xmp_write"` to be enabled.
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
     use xmp_toolkit::{FromStrOptions, XmpError, XmpErrorType, XmpMeta};
 
     use super::*;
+
+    /// Creates a default `XmpMeta` object for fonts
+    ///
+    /// ### Arguments
+    ///
+    /// - `document_id` - optional unique identifier for the document
+    /// - `instance_id` - optional unique identifier for the instance
+    ///
+    /// ### Remarks
+    ///
+    /// Default/random values will be used for the document/instance IDs as
+    /// needed.
+    fn default_font_xmp_meta(
+        document_id: Option<String>,
+        instance_id: Option<String>,
+    ) -> Result<XmpMeta> {
+        // But we could build up a default document/instance ID for a font and
+        // use it to seed the data. Doing this would only make sense if creating
+        // and writing the data to the font
+        let xmp_mm_namespace = "http://ns.adobe.com/xap/1.0/mm/";
+        // If there was no reference in the stream, then we build up
+        // a default XMP data
+        let mut xmp_meta = XmpMeta::new().map_err(xmp_write_err)?;
+
+        // Add a document ID
+        xmp_meta
+            .set_property(
+                xmp_mm_namespace,
+                "DocumentID",
+                // Use the supplied document ID or default to one if needed
+                &document_id.unwrap_or(OtfIO::default_document_id()).into(),
+            )
+            .map_err(xmp_write_err)?;
+
+        // Add an instance ID
+        xmp_meta
+            .set_property(
+                xmp_mm_namespace,
+                "InstanceID",
+                // Use the supplied instance ID or default to one if needed
+                &instance_id.unwrap_or(OtfIO::default_instance_id()).into(),
+            )
+            .map_err(xmp_write_err)?;
+
+        Ok(xmp_meta)
+    }
 
     /// Builds a `XmpMeta` element from the data within the source stream
     ///
@@ -55,42 +119,18 @@ mod font_xmp_support {
     where
         TSource: Read + Seek + ?Sized,
     {
-        Ok(match read_reference_to_stream(source)? {
+        match read_reference_to_stream(source)? {
             // For now we pretend the reference read from the stream is really XMP
             // data
             Some(xmp) => {
                 // If we did have reference data in the stream, we assume it is
                 // really XMP data, and will read as such
                 XmpMeta::from_str_with_options(xmp.as_str(), FromStrOptions::default())
-                    .map_err(xmp_write_err)?
+                    .map_err(xmp_write_err)
             }
-            None => {
-                let xmp_mm_namespace = "http://ns.adobe.com/xap/1.0/mm/";
-                // If there was no reference in the stream, then we build up
-                // a default XMP data
-                let mut xmp_meta = XmpMeta::new().map_err(xmp_write_err)?;
-
-                debug!("{}", xmp_meta.to_string());
-                xmp_meta
-                    .set_property(
-                        xmp_mm_namespace,
-                        "DocumentID",
-                        &OtfIO::default_document_id().into(),
-                    )
-                    .map_err(xmp_write_err)?;
-
-                xmp_meta
-                    .set_property(
-                        xmp_mm_namespace,
-                        "InstanceID",
-                        &OtfIO::default_instance_id().into(),
-                    )
-                    .map_err(xmp_write_err)?;
-                debug!("{}", xmp_meta.to_string());
-
-                xmp_meta
-            }
-        })
+            // Mention there is no data representing XMP found
+            None => Err(Error::NotFound),
+        }
     }
 
     /// Maps the errors from the xmp_toolkit crate
@@ -155,7 +195,15 @@ mod font_xmp_support {
         XmpMeta::register_namespace("http://purl.org/dc/terms/", "dcterms")
             .map_err(xmp_write_err)?;
         // Build a simple XMP meta element from the current source stream
-        let mut xmp_meta = build_xmp_from_stream(source)?;
+        let mut xmp_meta = match build_xmp_from_stream(source) {
+            // Use the data already available
+            Ok(meta) => meta,
+            // If data was not found for building out the XMP, we will default
+            // to some good starting points
+            Err(Error::NotFound) => default_font_xmp_meta(None, None)?,
+            // At this point, the font is considered to be invalid possibly
+            Err(error) => return Err(error),
+        };
         // Reset the source stream to the beginning
         source.seek(SeekFrom::Start(0))?;
         // We don't really care if there was a provenance before, since we are
@@ -876,9 +924,11 @@ pub mod tests {
         match read_reference_from_font(&output) {
             Ok(Some(manifest_uri)) => {
                 let xmp_meta = XmpMeta::from_str(manifest_uri.as_str()).unwrap();
-                let provenance = xmp_meta.property("http://purl.org/dc/terms/", "provenance").unwrap();
+                let provenance = xmp_meta
+                    .property("http://purl.org/dc/terms/", "provenance")
+                    .unwrap();
                 assert_eq!(expected_manifest_uri, provenance.value.as_str());
-            },
+            }
             _ => panic!("Expected to read a reference from the font file"),
         };
     }
@@ -1107,4 +1157,38 @@ pub mod tests {
         // Which should work out to be the same in the end
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
+
+    #[cfg(feature="xmp_write")]
+    #[cfg(test)]
+    pub mod font_xmp_support_tests {
+        use std::io::Cursor;
+
+        use crate::{asset_handlers::otf_io::font_xmp_support, Error};
+
+        /// Verifies the `font_xmp_support::build_xmp_from_stream` method
+        /// correctly returns error for NotFound when there is no data in the
+        /// stream to return.
+        #[test]
+        fn build_xmp_from_stream_without_reference() {
+            let font_data = vec![
+                0x4f, 0x54, 0x54, 0x4f, // OTTO
+                0x00, 0x01, // 1 tables
+                0x00, 0x00, // search range
+                0x00, 0x00, // entry selector
+                0x00, 0x00, // range shift
+                0x43, 0x32, 0x50, 0x42, // C2PB table tag
+                0x00, 0x00, 0x00, 0x00, // Checksum
+                0x00, 0x00, 0x00, 0x1c, // offset to table data
+                0x00, 0x00, 0x00, 0x01, // length of table data
+                0x00, // C2PB data
+            ];
+            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+            match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
+                Ok(_) => panic!("Did not expect an OK result, as data is missing"),
+                Err(Error::NotFound) => {},
+                Err(_) => panic!("Unexpected error when building XMP data"),
+            }
+        }
+    }
+
 }
