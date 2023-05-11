@@ -671,11 +671,6 @@ impl OtfIO {
     pub fn default_instance_id() -> String {
         format!("fontsoftware:iid:{}", Uuid::new_v4())
     }
-
-    #[allow(dead_code)]
-    pub fn default_format() -> &'static str {
-        "application/font-sfnt"
-    }
 }
 
 /// OTF implementation of the CAILoader trait.
@@ -1158,12 +1153,61 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature="xmp_write")]
+    #[cfg(feature = "xmp_write")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
-        use std::io::Cursor;
+        use std::{fs::File, io::Cursor, str::FromStr};
 
-        use crate::{asset_handlers::otf_io::font_xmp_support, Error};
+        use tempfile::tempdir;
+        use xmp_toolkit::XmpMeta;
+
+        use crate::{
+            asset_handlers::otf_io::{font_xmp_support, OtfIO},
+            asset_io::CAIReader,
+            utils::test::temp_dir_path,
+            Error,
+        };
+
+        /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
+        /// able to add a reference to as XMP when there is already data in the
+        /// reference field.
+        #[test]
+        fn add_reference_as_xmp_to_stream_with_data() {
+            // Load the basic OTF test fixture
+            let source = crate::utils::test::fixture_path("font.otf");
+
+            // Create a temporary output for the file
+            let temp_dir = tempdir().unwrap();
+            let output = temp_dir_path(&temp_dir, "test.otf");
+
+            // Copy the source to the output
+            std::fs::copy(source, &output).unwrap();
+
+            // Add a reference to the font
+            match font_xmp_support::add_reference_as_xmp_to_font(&output, "test data") {
+                Ok(_) => {}
+                Err(_) => panic!("Unexpected error when building XMP data"),
+            }
+
+            // Add again, with a new value
+            match font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data") {
+                Ok(_) => {}
+                Err(_) => panic!("Unexpected error when building XMP data"),
+            }
+
+            let otf_handler = OtfIO {};
+            let mut f: File = File::open(output).unwrap();
+            match otf_handler.read_xmp(&mut f) {
+                Some(xmp_data_str) => {
+                    let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
+                    match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
+                        Some(xmp_value) => assert_eq!("new test data", xmp_value.value),
+                        None => panic!("Expected a value for provenance"),
+                    }
+                }
+                None => panic!("Expected to read XMP from the resource."),
+            }
+        }
 
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
@@ -1185,10 +1229,39 @@ pub mod tests {
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
                 Ok(_) => panic!("Did not expect an OK result, as data is missing"),
-                Err(Error::NotFound) => {},
+                Err(Error::NotFound) => {}
+                Err(_) => panic!("Unexpected error when building XMP data"),
+            }
+        }
+
+        /// Verifies the `font_xmp_support::build_xmp_from_stream` method
+        /// correctly returns error for NotFound when there is no data in the
+        /// stream to return.
+        #[test]
+        fn build_xmp_from_stream_with_reference_not_xmp() {
+            let font_data = vec![
+                0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+                0x00, 0x01, // 1 tables
+                0x00, 0x00, // search range
+                0x00, 0x00, // entry selector
+                0x00, 0x00, // range shift
+                0x43, 0x32, 0x50, 0x41, // C2PA table tag
+                0x00, 0x00, 0x00, 0x00, // Checksum
+                0x00, 0x00, 0x00, 0x1c, // offset to table data
+                0x00, 0x00, 0x00, 0x1a, // length of table data
+                0x00, 0x00, // Major version
+                0x00, 0x01, // Minor version
+                0x00, 0x00, 0x00, 0x12, // Active manifest URI offset
+                0x00, 0x08, // Active manifest URI length
+                0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
+                0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
+                0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
+            ];
+            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+            match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
+                Ok(_xmp_data) => {}
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
         }
     }
-
 }
