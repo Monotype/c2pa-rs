@@ -343,6 +343,7 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
+    source.rewind()?;
     let mut font_file: Font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
     match font_file.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
@@ -568,6 +569,7 @@ fn get_object_locations_from_stream<T>(reader: &mut T) -> Result<Vec<HashObjectP
 where
     T: Read + Seek + ?Sized,
 {
+    reader.rewind()?;
     let mut positions: Vec<HashObjectPositions> = Vec::new();
     let table_header_sz: usize = 12;
     let table_entry_sz: usize = 16;
