@@ -509,6 +509,7 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
+    source.rewind()?;
     // Load the font from the stream
     let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
