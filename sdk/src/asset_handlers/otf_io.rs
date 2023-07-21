@@ -394,6 +394,7 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
+    source.rewind()?;
     let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
     match font.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
