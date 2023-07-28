@@ -1444,13 +1444,24 @@ impl Store {
         #[cfg(feature = "otf")]
         {
             // Setup to assume fragmented CAI blocks
-            let mut exclusions = Vec::new();
+            let mut exclusions = Vec::<(usize, usize)>::new();
             for item in block_locations {
                 // find start of jumbf
                 if item.htype == HashBlockObjectType::Cai {
                     // Make sure we have a valid range
                     if item.offset < (item.offset + item.length) {
-                        exclusions.push((item.offset, item.offset + item.length));
+                        let mut exclusion = (item.offset, item.offset + item.length);
+                        // Setup to defragment sections that are contiguous but may have
+                        // been listed as separate
+                        if let Some(last_exclusion) = exclusions.last() {
+                            // If the last exclusion ends where this one starts,
+                            // merge them
+                            if last_exclusion.1 == exclusion.0 {
+                                exclusion.0 = last_exclusion.0;
+                                exclusions.pop();
+                            }
+                        }
+                        exclusions.push(exclusion);
                     }
                 }
             }
