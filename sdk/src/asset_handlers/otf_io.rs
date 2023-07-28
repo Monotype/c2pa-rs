@@ -1174,7 +1174,8 @@ pub mod tests {
             0x00, 0x00, // 0 tables
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
+        let otf_io = OtfIO {};
+        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
         // Should have one position reported for the entire "file"
         assert_eq!(1, positions.len());
         assert_eq!(12, positions.get(0).unwrap().offset);
@@ -1198,7 +1199,8 @@ pub mod tests {
             0x00, // C2PB data
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
+        let otf_io = OtfIO {};
+        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
         // Should have one position reported for the table directory
         assert_eq!(1, positions.len());
         assert_eq!(12, positions.get(0).unwrap().offset);
@@ -1228,7 +1230,8 @@ pub mod tests {
             0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
+        let otf_io = OtfIO {};
+        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
         // Should have 3 positions reported
         assert_eq!(3, positions.len());
         // The first one is the position to the table header entry which describes where
@@ -1274,7 +1277,8 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // checksumAdjustment
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let positions = get_object_locations_from_stream(&mut font_stream).unwrap();
+        let otf_io = OtfIO {};
+        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
         // Should have 4 positions reported
         assert_eq!(4, positions.len());
         // The first one is the position to the table header entry which describes where
