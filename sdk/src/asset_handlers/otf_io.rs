@@ -1221,6 +1221,27 @@ pub mod tests {
         assert_eq!(1, table.length);
     }
 
+    #[test]
+    fn get_object_locations() {
+        // Load the basic OTF test fixture
+        let source = fixture_path("font.otf");
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.otf");
+
+        // Copy the source to the output
+        std::fs::copy(source, &output).unwrap();
+
+        // Create our OtfIO asset handler for testing
+        let otf_io = OtfIO {};
+        // The font has 11 records, 11 tables, 1 table directory
+        // but the head table will expand from 1 to 3 positions bringing it to 25
+        // And then the required C2PA chunks will be added, bringing it to 27
+        let object_positions = otf_io.get_object_locations(&output).unwrap();
+        assert_eq!(27, object_positions.len());
+    }
+
     /// Verify the C2PA table data can be read from a font stream
     #[test]
     fn reads_c2pa_table_from_stream() {
