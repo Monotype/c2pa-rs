@@ -19,7 +19,7 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
-use log::trace;
+use log::debug;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -303,16 +303,6 @@ pub enum FontVersion {
 /// Declares the type of chunks of data within a font
 #[derive(Debug)]
 pub enum ChunkType {
-    /// The C2PA table record entry in the table directory
-    C2PARecord,
-    /// The C2PA data
-    C2PA,
-    /// The head table preamble
-    HeadPreamble,
-    /// The head table checksum adjustment
-    HeadChecksumAdjustment,
-    /// The data after the checksum adjustment in the head table
-    HeadPostChecksumAdjustment,
     /// Table directory, excluding the table record array
     TableDirectory,
     /// Table data
@@ -381,15 +371,15 @@ impl SfntChunkReader for OtfIO {
             chunk_type: ChunkType::TableDirectory,
         });
 
-        // Using a counter to calculate the offset to the name table
-        let mut table_counter: u32 = 0;
+        // Table counter, to keep up with how many tables we have processed.
+        let mut table_counter = 0;
         // Get the number of tables available from the next 2 bytes
         let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
         // Advance to the start of the table entries
         source_stream.seek(SeekFrom::Start(12))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
-        // will be added afterwards
+        // will be added after the table records have been added
         let mut table_offset_pos = Vec::new();
 
         // Loop through the `tableRecords` array
@@ -413,43 +403,15 @@ impl SfntChunkReader for OtfIO {
             name.copy_from_slice(&table_tag);
 
             // Create a table record chunk position as a default table record type
-            let mut table_record_chunk_pos = SfntChunkPositions {
+            // and add it to the collection of positions
+            positions.push(SfntChunkPositions {
                 offset: (table_header_sz + (table_entry_sz * table_counter)) as u64,
                 length: table_entry_sz,
                 name,
                 chunk_type: ChunkType::TableRecord,
-            };
+            });
 
-            // But we need to special case a few scenarios, the first being the
-            // actual C2PA table
-            if C2PA_TABLE_TAG.as_bytes() == &table_tag {
-                table_record_chunk_pos.chunk_type = ChunkType::C2PARecord;
-                table_offset_pos.pop();
-                table_offset_pos.push((offset, length, table_tag, ChunkType::C2PA));
-            }
-            // Then the 'head' table, as it has a checksum which must be ignored
-            else if HEAD_TABLE_TAG.as_bytes() == &table_tag {
-                // Remove the previous offset/position pushed becase we need to break it down
-                table_offset_pos.pop();
-                let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
-                table_offset_pos.push((offset, 8, table_tag, ChunkType::HeadPreamble));
-                table_offset_pos.push((
-                    offset + 8,
-                    4,
-                    table_tag,
-                    ChunkType::HeadChecksumAdjustment,
-                ));
-                table_offset_pos.push((
-                    offset + 12,
-                    length - 12,
-                    table_tag,
-                    ChunkType::HeadPostChecksumAdjustment,
-                ));
-            }
-
-            // At this point we should be able to add the chunk position to the
-            // collection of positions.
-            positions.push(table_record_chunk_pos);
+            // Increment the table counter
             table_counter += 1;
 
             // If we have iterated over all of our tables, bail
@@ -472,8 +434,12 @@ impl SfntChunkReader for OtfIO {
                 chunk_type: entry.3,
             });
         }
-        for position in positions.iter().as_ref() {
-            trace!("Position for C2PA in font: {:?}", &position);
+
+        // Do not iterate if the log level are not set to at least debug
+        if log::max_level().cmp(&log::LevelFilter::Debug).is_ge() {
+            for position in positions.iter().as_ref() {
+                debug!("Position for C2PA in font: {:?}", &position);
+            }
         }
         Ok(positions)
     }
@@ -803,22 +769,72 @@ where
     let mut positions: Vec<HashObjectPositions> = Vec::new();
     let chunk_positions = otf_io.get_chunk_positions(&mut output_stream)?;
     for chunk_position in chunk_positions {
-        let position = match chunk_position.chunk_type {
+        let mut position_objs = match chunk_position.chunk_type {
             // Exclude
-            ChunkType::C2PA | ChunkType::C2PARecord | ChunkType::HeadChecksumAdjustment => {
-                HashObjectPositions {
-                    offset: chunk_position.offset as usize,
-                    length: chunk_position.length as usize,
-                    htype: HashBlockObjectType::Cai,
-                }
-            }
-            _ => HashObjectPositions {
+            ChunkType::TableDirectory => vec![HashObjectPositions {
                 offset: chunk_position.offset as usize,
                 length: chunk_position.length as usize,
                 htype: HashBlockObjectType::Other,
+            }],
+            ChunkType::TableRecord => {
+                let table_record_pos = if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
+                    vec![HashObjectPositions {
+                        offset: chunk_position.offset as usize,
+                        length: chunk_position.length as usize,
+                        htype: HashBlockObjectType::Cai,
+                    }]
+                } else {
+                    vec![HashObjectPositions {
+                        offset: chunk_position.offset as usize,
+                        length: chunk_position.length as usize,
+                        htype: HashBlockObjectType::Other,
+                    }]
+                };
+                table_record_pos
+            },
+            ChunkType::Table => {
+                let mut table_positions = Vec::<HashObjectPositions>::new();
+                // We must split out the head table to ignore the checksum
+                // adjustment, because it changes after the C2PA table is
+                // written to the font
+                if &chunk_position.name == HEAD_TABLE_TAG.as_bytes() {
+                    let head_offset = &chunk_position.offset;
+                    let head_length = &chunk_position.length;
+                    // Include the major/minor/revision version numbers
+                    table_positions.push(HashObjectPositions {
+                        offset: head_offset.clone() as usize,
+                        length: 8,
+                        htype: HashBlockObjectType::Other,
+                    });
+                    // Indicate the checksumAdjustment value as CAI
+                    table_positions.push(HashObjectPositions {
+                        offset: (head_offset + 8) as usize,
+                        length: 4,
+                        htype: HashBlockObjectType::Cai,
+                    });
+                    // And the remainder of the table as other
+                    table_positions.push(HashObjectPositions {
+                        offset: (head_offset + 12) as usize,
+                        length: (head_length - 12) as usize,
+                        htype: HashBlockObjectType::Other,
+                    });
+                } else if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
+                    table_positions.push(HashObjectPositions {
+                        offset: chunk_position.offset as usize,
+                        length: chunk_position.length as usize,
+                        htype: HashBlockObjectType::Cai,
+                    });
+                } else {
+                    table_positions.push(HashObjectPositions {
+                        offset: chunk_position.offset as usize,
+                        length: chunk_position.length as usize,
+                        htype: HashBlockObjectType::Other,
+                    });
+                }
+                table_positions
             },
         };
-        positions.push(position);
+        positions.append(&mut position_objs);
     }
     Ok(positions)
 }
