@@ -13,19 +13,21 @@
 use std::{
     convert::TryFrom,
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom, Write},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     path::*,
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
-use log::debug;
+use log::trace;
+use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
 
 use crate::{
+    assertions::BoxMap,
     asset_io::{
-        AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
+        AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
     },
     error::{Error, Result},
@@ -298,6 +300,185 @@ pub enum FontVersion {
     AppleTrue = 0x74727565,
 }
 
+/// Declares the type of chunks of data within a font
+#[derive(Debug)]
+pub enum ChunkType {
+    /// The C2PA table record entry in the table directory
+    C2PARecord,
+    /// The C2PA data
+    C2PA,
+    /// The head table preamble
+    HeadPreamble,
+    /// The head table checksum adjustment
+    HeadChecksumAdjustment,
+    /// The data after the checksum adjustment in the head table
+    HeadPostChecksumAdjustment,
+    /// Table directory, excluding the table record array
+    TableDirectory,
+    /// Table data
+    Table,
+    /// Table record entry in the table directory
+    TableRecord,
+}
+
+/// Represents positions within a font file that may be of interest when it
+/// comes to hashing data for C2PA
+#[derive(Debug)]
+pub struct SfntChunkPositions {
+    /// Offset to the start of the chunk
+    pub offset: u64,
+    /// Length of the chunk
+    pub length: u32,
+    /// Tag of the chunk
+    pub name: [u8; 4],
+    /// Type of chunk
+    pub chunk_type: ChunkType,
+}
+
+/// Custom trait for reading chunks of data from a scalable font (SFNT).
+pub trait SfntChunkReader {
+    type Error;
+    /// Gets a collection of positions of chunks within the font.
+    ///
+    /// ## Arguments
+    /// * `source_stream` - Source stream to read data from
+    ///
+    /// ## Returns
+    /// A collection of positions/offsets and length to omit from hashing.
+    fn get_chunk_positions<T: Read + Seek + ?Sized>(
+        &self,
+        source_stream: &mut T,
+    ) -> core::result::Result<Vec<SfntChunkPositions>, Self::Error>;
+}
+
+impl SfntChunkReader for OtfIO {
+    type Error = crate::error::Error;
+
+    fn get_chunk_positions<T: Read + Seek + ?Sized>(
+        &self,
+        source_stream: &mut T,
+    ) -> core::result::Result<Vec<SfntChunkPositions>, Self::Error> {
+        source_stream.rewind()?;
+        let mut positions: Vec<SfntChunkPositions> = Vec::new();
+        let table_header_sz: u32 = 12;
+        let table_entry_sz: u32 = 16;
+        // Create a 16-byte buffer to hold each table entry as we read through the file
+        let mut table_entry_buf: [u8; 16] = [0; 16];
+        // We need to get the offset to the 'name' table and exclude the length of it and its data.
+        // Verify the font has a valid version in it before assuming the rest is
+        // valid (NOTE: we don't actually do anything with it, just as a safety check).
+        let sfnt_u32: u32 = source_stream.read_u32::<BigEndian>()?;
+        let _sfnt_version: FontVersion =
+            <u32 as std::convert::TryInto<FontVersion>>::try_into(sfnt_u32)
+                .map_err(|_err| Error::UnsupportedFontError)?;
+
+        // Add the position of the table directory, excluding the actual table
+        // records, as those positions will be added separately
+        positions.push(SfntChunkPositions {
+            offset: 0,
+            length: 12,
+            name: [0; 4],
+            chunk_type: ChunkType::TableDirectory,
+        });
+
+        // Using a counter to calculate the offset to the name table
+        let mut table_counter: u32 = 0;
+        // Get the number of tables available from the next 2 bytes
+        let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
+        // Advance to the start of the table entries
+        source_stream.seek(SeekFrom::Start(12))?;
+
+        // Create a temporary vector to hold the table offsets and lengths, which
+        // will be added afterwards
+        let mut table_offset_pos = Vec::new();
+
+        // Loop through the `tableRecords` array
+        while source_stream.read_exact(&mut table_entry_buf).is_ok() {
+            // Grab the tag of the table record entry
+            let mut table_tag: [u8; 4] = [0; 4];
+            table_tag.copy_from_slice(&table_entry_buf[0..4]);
+
+            // Then grab the offset and length of the actual name table to
+            // create the other exclusion zone.
+            let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
+            let length = (&table_entry_buf[12..16]).read_u32::<BigEndian>()?;
+
+            // At this point we will add the table record entry to the temporary
+            // buffer as just a regular table
+            table_offset_pos.push((offset, length, table_tag, ChunkType::Table));
+
+            // Build up table record chunk to add to the positions
+            let mut name: [u8; 4] = [0; 4];
+            // Copy from the table tag to be owned by the chunk position record
+            name.copy_from_slice(&table_tag);
+
+            // Create a table record chunk position as a default table record type
+            let mut table_record_chunk_pos = SfntChunkPositions {
+                offset: (table_header_sz + (table_entry_sz * table_counter)) as u64,
+                length: table_entry_sz,
+                name,
+                chunk_type: ChunkType::TableRecord,
+            };
+
+            // But we need to special case a few scenarios, the first being the
+            // actual C2PA table
+            if C2PA_TABLE_TAG.as_bytes() == &table_tag {
+                table_record_chunk_pos.chunk_type = ChunkType::C2PARecord;
+                table_offset_pos.pop();
+                table_offset_pos.push((offset, length, table_tag, ChunkType::C2PA));
+            }
+            // Then the 'head' table, as it has a checksum which must be ignored
+            else if HEAD_TABLE_TAG.as_bytes() == &table_tag {
+                // Remove the previous offset/position pushed becase we need to break it down
+                table_offset_pos.pop();
+                let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
+                table_offset_pos.push((offset, 8, table_tag, ChunkType::HeadPreamble));
+                table_offset_pos.push((
+                    offset + 8,
+                    4,
+                    table_tag,
+                    ChunkType::HeadChecksumAdjustment,
+                ));
+                table_offset_pos.push((
+                    offset + 12,
+                    length - 12,
+                    table_tag,
+                    ChunkType::HeadPostChecksumAdjustment,
+                ));
+            }
+
+            // At this point we should be able to add the chunk position to the
+            // collection of positions.
+            positions.push(table_record_chunk_pos);
+            table_counter += 1;
+
+            // If we have iterated over all of our tables, bail
+            if table_counter >= num_tables as u32 {
+                break;
+            }
+        }
+        // Now we can add the table offsets and lengths to the positions, appearing
+        // after the table record chunks, staying as close to the original font layout
+        // as possible
+        // NOTE: The font specification doesn't necessarily ensure the table data records
+        //       have to be in order, but that shouldn't really matter.
+        for entry in table_offset_pos {
+            let mut name = [0; 4];
+            name.copy_from_slice(entry.2.as_slice());
+            positions.push(SfntChunkPositions {
+                offset: entry.0 as u64,
+                length: entry.1,
+                name,
+                chunk_type: entry.3,
+            });
+        }
+        for position in positions.iter().as_ref() {
+            trace!("Position for C2PA in font: {:?}", &position);
+        }
+        Ok(positions)
+    }
+}
+
 /// Used to try and convert from a u32 value to FontVersion
 impl TryFrom<u32> for FontVersion {
     type Error = ();
@@ -409,6 +590,47 @@ where
         Err(_) => return Err(Error::DeserializationError),
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
+    Ok(())
+}
+
+/// Adds the required chunks to the stream for supporting C2PA, if the chunks are
+/// already present nothing is done.
+///
+/// ### Parameters
+/// - `input_stream` - Source stream to read initial data from
+/// - `output_stream` - Destination stream to write data with the added required
+///                     chunks
+///
+/// ### Remarks
+/// Neither streams are rewound before and/or after the operation, so it is up
+/// to the caller.
+///
+/// ### Returns
+/// A Result indicating success or failure
+fn add_required_chunks_to_stream<TReader, TWriter>(
+    input_stream: &mut TReader,
+    output_stream: &mut TWriter,
+) -> Result<()>
+where
+    TReader: Read + Seek + ?Sized,
+    TWriter: Read + Seek + ?Sized + Write,
+{
+    // Read the font from the input stream
+    let mut font = Font::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    // If the C2PA table does not exist, then we will add an empty one
+    match font.tables.C2PA() {
+        Ok(None) => {
+            font.tables.insert(C2PA::new(None, None));
+        }
+        Ok(_) => {
+            // Do nothing
+        }
+        Err(_) => return Err(Error::DeserializationError),
+    }
+    // Write the font to the output stream
+    font.write(output_stream)
+        .map_err(|_| Error::FontSaveError)?;
+
     Ok(())
 }
 
@@ -567,79 +789,36 @@ where
 /// ## Returns
 ///
 /// A collection of positions/offsets and length to omit from hashing.
-fn get_object_locations_from_stream<T>(reader: &mut T) -> Result<Vec<HashObjectPositions>>
+fn get_object_locations_from_stream<T>(
+    otf_io: &OtfIO,
+    reader: &mut T,
+) -> Result<Vec<HashObjectPositions>>
 where
     T: Read + Seek + ?Sized,
 {
-    reader.rewind()?;
+    let output_vec: Vec<u8> = Vec::new();
+    let mut output_stream = Cursor::new(output_vec);
+    add_required_chunks_to_stream(reader, &mut output_stream)?;
+    output_stream.rewind()?;
     let mut positions: Vec<HashObjectPositions> = Vec::new();
-    let table_header_sz: usize = 12;
-    let table_entry_sz: usize = 16;
-    // Create a 16-byte buffer to hold each table entry as we read through the file
-    let mut table_entry_buf: [u8; 16] = [0; 16];
-    // We need to get the offset to the 'name' table and exclude the length of it and its data.
-    // Verify the font has a valid version in it before assuming the rest is
-    // valid (NOTE: we don't actually do anything with it, just as a safety check).
-    let sfnt_u32: u32 = reader.read_u32::<BigEndian>()?;
-    let _sfnt_version: FontVersion =
-        <u32 as std::convert::TryInto<FontVersion>>::try_into(sfnt_u32)
-            .map_err(|_err| Error::UnsupportedFontError)?;
-
-    // Using a counter to calculate the offset to the name table
-    let mut table_counter: usize = 0;
-    // Get the number of tables available from the next 2 bytes
-    let num_tables: u16 = reader.read_u16::<BigEndian>()?;
-    // Advance to the start of the table entries
-    reader.seek(SeekFrom::Start(12))?;
-
-    while reader.read_exact(&mut table_entry_buf).is_ok() {
-        let table_tag = &table_entry_buf[0..4];
-        // Add the contents of the C2PA table to the exclusion
-        if C2PA_TABLE_TAG.as_bytes() == table_tag {
-            // We will need to add a position for the 'C2PA' entry since the
-            // checksum changes.
-            positions.push(HashObjectPositions {
-                offset: table_header_sz + (table_entry_sz * table_counter),
-                length: table_entry_sz,
-                htype: HashBlockObjectType::Cai,
-            });
-
-            // Then grab the offset and length of the actual name table to
-            // create the other exclusion zone.
-            let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
-            let length = (&table_entry_buf[12..16]).read_u32::<BigEndian>()?;
-            positions.push(HashObjectPositions {
-                offset: offset as usize,
-                length: length as usize,
-                htype: HashBlockObjectType::Cai,
-            });
-        }
-        // Add the `head[checksumAdjustment]` value as it will change after
-        // adding C2PA
-        else if HEAD_TABLE_TAG.as_bytes() == table_tag {
-            let offset = (&table_entry_buf[8..12]).read_u32::<BigEndian>()?;
-            // Add in the `head`[checksumAdjustment] to the exclusions
-            positions.push(HashObjectPositions {
-                offset: offset as usize + 8,
-                length: 4,
-                htype: HashBlockObjectType::Cai,
-            });
-        }
-        table_counter += 1;
-
-        // If we have iterated over all of our tables, bail
-        if table_counter >= num_tables as usize {
-            break;
-        }
-    }
-    // Add the table directory headers
-    positions.push(HashObjectPositions {
-        offset: table_header_sz,
-        length: table_entry_sz * num_tables as usize,
-        htype: HashBlockObjectType::Cai,
-    });
-    for position in positions.iter().as_ref() {
-        debug!("Position for C2PA in font: {:?}", &position);
+    let chunk_positions = otf_io.get_chunk_positions(&mut output_stream)?;
+    for chunk_position in chunk_positions {
+        let position = match chunk_position.chunk_type {
+            // Exclude
+            ChunkType::C2PA | ChunkType::C2PARecord | ChunkType::HeadChecksumAdjustment => {
+                HashObjectPositions {
+                    offset: chunk_position.offset as usize,
+                    length: chunk_position.length as usize,
+                    htype: HashBlockObjectType::Cai,
+                }
+            }
+            _ => HashObjectPositions {
+                offset: chunk_position.offset as usize,
+                length: chunk_position.length as usize,
+                htype: HashBlockObjectType::Other,
+            },
+        };
+        positions.push(position);
     }
     Ok(positions)
 }
@@ -712,7 +891,7 @@ impl CAIWriter for OtfIO {
         &self,
         input_stream: &mut dyn CAIRead,
     ) -> Result<Vec<HashObjectPositions>> {
-        get_object_locations_from_stream(input_stream)
+        get_object_locations_from_stream(self, input_stream)
     }
 
     fn remove_cai_store_from_stream(
@@ -764,11 +943,37 @@ impl AssetIO for OtfIO {
 
     fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
         let mut buf_reader = open_bufreader_for_file(asset_path)?;
-        get_object_locations_from_stream(&mut buf_reader)
+        get_object_locations_from_stream(self, &mut buf_reader)
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
         remove_c2pa_from_font(asset_path)
+    }
+
+    fn asset_box_hash_ref(&self) -> Option<&dyn AssetBoxHash> {
+        Some(self)
+    }
+}
+
+// Implementation for the asset box hash trait for general box hash support
+impl AssetBoxHash for OtfIO {
+    fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
+        // Get the chunk positions
+        let positions = self.get_chunk_positions(input_stream)?;
+        // Create a box map vector to map the chunk positions to
+        let mut box_maps = Vec::<BoxMap>::new();
+        for position in positions {
+            let box_map = BoxMap {
+                names: vec![format!("{:?}", position.chunk_type)],
+                alg: None,
+                hash: ByteBuf::from(Vec::new()),
+                pad: ByteBuf::from(Vec::new()),
+                range_start: position.offset as usize,
+                range_len: position.length as usize,
+            };
+            box_maps.push(box_map);
+        }
+        Ok(box_maps)
     }
 }
 
