@@ -301,7 +301,7 @@ pub enum FontVersion {
 }
 
 /// Declares the type of chunks of data within a font
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ChunkType {
     /// Table directory, excluding the table record array
     TableDirectory,
@@ -1067,7 +1067,7 @@ pub mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::utils::test::temp_dir_path;
+    use crate::utils::test::{fixture_path, temp_dir_path};
 
     #[test]
     #[cfg(not(feature = "xmp_write"))]
@@ -1077,7 +1077,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = crate::utils::test::fixture_path("font.otf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1124,7 +1124,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = crate::utils::test::fixture_path("font.otf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1168,24 +1168,24 @@ pub mod tests {
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font contains zero tables
     #[test]
-    fn get_object_locations_without_any_tables() {
+    fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
             0x4f, 0x54, 0x54, 0x4f, // OTTO
             0x00, 0x00, // 0 tables
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let otf_io = OtfIO {};
-        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
-        // Should have one position reported for the entire "file"
+        let positions = otf_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have one position reported for the table directory itself
         assert_eq!(1, positions.len());
-        assert_eq!(12, positions.get(0).unwrap().offset);
-        assert_eq!(0, positions.get(0).unwrap().length);
+        assert_eq!(0, positions.get(0).unwrap().offset);
+        assert_eq!(12, positions.get(0).unwrap().length);
     }
 
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font does not contain a C2PA font table
     #[test]
-    fn get_object_locations_without_c2pa_table() {
+    fn get_chunk_positions_without_c2pa_table() {
         let font_data = vec![
             0x4f, 0x54, 0x54, 0x4f, // OTTO
             0x00, 0x01, // 1 tables
@@ -1200,100 +1200,25 @@ pub mod tests {
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let otf_io = OtfIO {};
-        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
-        // Should have one position reported for the table directory
-        assert_eq!(1, positions.len());
-        assert_eq!(12, positions.get(0).unwrap().offset);
-        assert_eq!(16, positions.get(0).unwrap().length);
-    }
-
-    /// Verifies the correct object positions are returned when a font contains
-    /// C2PA data
-    #[test]
-    fn get_object_locations_with_table() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
-            0x00, 0x01, // 1 tables
-            0x00, 0x00, // search range
-            0x00, 0x00, // entry selector
-            0x00, 0x00, // range shift
-            0x43, 0x32, 0x50, 0x41, // C2PA table tag
-            0x00, 0x00, 0x00, 0x00, // Checksum
-            0x00, 0x00, 0x00, 0x1c, // offset to table data
-            0x00, 0x00, 0x00, 0x1a, // length of table data
-            0x00, 0x00, // Major version
-            0x00, 0x01, // Minor version
-            0x00, 0x00, 0x00, 0x12, // Active manifest URI offset
-            0x00, 0x08, // Active manifest URI length
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
-            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let otf_io = OtfIO {};
-        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
-        // Should have 3 positions reported
+        let positions = otf_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have 3 positions reported for the table directory, table
+        // record, and the table data
         assert_eq!(3, positions.len());
-        // The first one is the position to the table header entry which describes where
-        // the C2PA table is
-        assert_eq!(16, positions.get(0).unwrap().length);
-        assert_eq!(12, positions.get(0).unwrap().offset);
-        // The second one is the position of the actual C2PA table
-        assert_eq!(26, positions.get(1).unwrap().length);
-        assert_eq!(28, positions.get(1).unwrap().offset);
-        // And the third is the position of the actual directory table
-        assert_eq!(16, positions.get(2).unwrap().length);
-        assert_eq!(12, positions.get(2).unwrap().offset);
-    }
 
-    /// Verifies the correct object positions are returned when a font contains
-    /// C2PA data
-    #[test]
-    fn get_object_locations_with_head_and_c2pa_tables() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
-            0x00, 0x02, // 2 tables
-            0x00, 0x00, // search range
-            0x00, 0x00, // entry selector
-            0x00, 0x00, // range shift
-            0x43, 0x32, 0x50, 0x41, // C2PA table tag
-            0x00, 0x00, 0x00, 0x00, // Checksum
-            0x00, 0x00, 0x00, 0x32, // offset to table data
-            0x00, 0x00, 0x00, 0x1a, // length of table data
-            0x68, 0x65, 0x61, 0x64, // head table tag
-            0x00, 0x00, 0x00, 0x00, // Checksum
-            0x00, 0x00, 0x00, 0x4c, // offset to table data
-            0x00, 0x00, 0x00, 0x0d, // length of table data
-            0x00, 0x00, // Major version
-            0x00, 0x01, // Minor version
-            0x00, 0x00, 0x00, 0x12, // Active manifest URI offset
-            0x00, 0x08, // Active manifest URI length
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
-            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
-            0x00, 0x00, // Major version
-            0x00, 0x01, // Minor version
-            0x00, 0x00, 0x00, 0x00, // fontRevision
-            0x00, 0x00, 0x00, 0x00, // checksumAdjustment
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let otf_io = OtfIO {};
-        let positions = get_object_locations_from_stream(&otf_io, &mut font_stream).unwrap();
-        // Should have 4 positions reported
-        assert_eq!(4, positions.len());
-        // The first one is the position to the table header entry which describes where
-        // the C2PA table is
-        assert_eq!(16, positions.get(0).unwrap().length);
-        assert_eq!(12, positions.get(0).unwrap().offset);
-        // The second one is the position of the actual C2PA table
-        assert_eq!(26, positions.get(1).unwrap().length);
-        assert_eq!(50, positions.get(1).unwrap().offset);
-        // The third is the position of the `head[checksumAdjustment]` table entry
-        assert_eq!(4, positions.get(2).unwrap().length);
-        assert_eq!(84, positions.get(2).unwrap().offset);
-        // The fourth is the position of the actual directory table
-        assert_eq!(32, positions.get(3).unwrap().length);
-        assert_eq!(12, positions.get(3).unwrap().offset);
+        let table_directory = positions.get(0).unwrap();
+        assert_eq!(ChunkType::TableDirectory, table_directory.chunk_type);
+        assert_eq!(0, table_directory.offset);
+        assert_eq!(12, table_directory.length);
+
+        let table_record = positions.get(1).unwrap();
+        assert_eq!(ChunkType::TableRecord, table_record.chunk_type);
+        assert_eq!(12, table_record.offset);
+        assert_eq!(16, table_record.length);
+
+        let table = positions.get(2).unwrap();
+        assert_eq!(ChunkType::Table, table.chunk_type);
+        assert_eq!(28, table.offset);
+        assert_eq!(1, table.length);
     }
 
     /// Verify the C2PA table data can be read from a font stream
@@ -1337,7 +1262,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = crate::utils::test::fixture_path("font.otf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1372,7 +1297,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = crate::utils::test::fixture_path("font.otf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
