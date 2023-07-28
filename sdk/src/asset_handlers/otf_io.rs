@@ -762,20 +762,29 @@ fn get_object_locations_from_stream<T>(
 where
     T: Read + Seek + ?Sized,
 {
+    // We must take into account a font that may not have a C2PA table in it at
+    // this point, adding any required chunks needed for C2PA to work correctly.
     let output_vec: Vec<u8> = Vec::new();
     let mut output_stream = Cursor::new(output_vec);
     add_required_chunks_to_stream(reader, &mut output_stream)?;
     output_stream.rewind()?;
+
+    // Build up the positions we will hand back to the caller
     let mut positions: Vec<HashObjectPositions> = Vec::new();
+
+    // Which will be built up from the different chunks from the file
     let chunk_positions = otf_io.get_chunk_positions(&mut output_stream)?;
     for chunk_position in chunk_positions {
         let mut position_objs = match chunk_position.chunk_type {
-            // Exclude
+            // The table directory, other than the table records array will be
+            // added as "other"
             ChunkType::TableDirectory => vec![HashObjectPositions {
                 offset: chunk_position.offset as usize,
                 length: chunk_position.length as usize,
                 htype: HashBlockObjectType::Other,
             }],
+            // For the table record entries, we will specialize the C2PA table
+            // record and all others will be added as is
             ChunkType::TableRecord => {
                 let table_record_pos = if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
                     vec![HashObjectPositions {
@@ -792,6 +801,9 @@ where
                 };
                 table_record_pos
             },
+            // Similarly for the actual table data, we need to specialize C2PA
+            // and in this case the `head` table as well, to ignore the checksum
+            // adjustment
             ChunkType::Table => {
                 let mut table_positions = Vec::<HashObjectPositions>::new();
                 // We must split out the head table to ignore the checksum
