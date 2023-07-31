@@ -19,7 +19,7 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt};
 use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
-use log::debug;
+use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -287,6 +287,8 @@ static SUPPORTED_TYPES: [&str; 10] = [
 const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: Tag = tables::head::TAG;
+/// Lenght of the table directory header (i.e., before the table records)
+const TABLE_DIRECTORY_HEADER_LENGTH: u32 = 12;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
@@ -354,7 +356,6 @@ impl SfntChunkReader for OtfIO {
         let table_entry_sz: u32 = 16;
         // Create a 16-byte buffer to hold each table entry as we read through the file
         let mut table_entry_buf: [u8; 16] = [0; 16];
-        // We need to get the offset to the 'name' table and exclude the length of it and its data.
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
         let sfnt_u32: u32 = source_stream.read_u32::<BigEndian>()?;
@@ -366,7 +367,7 @@ impl SfntChunkReader for OtfIO {
         // records, as those positions will be added separately
         positions.push(SfntChunkPositions {
             offset: 0,
-            length: 12,
+            length: TABLE_DIRECTORY_HEADER_LENGTH,
             name: [0; 4],
             chunk_type: ChunkType::TableDirectory,
         });
@@ -376,7 +377,7 @@ impl SfntChunkReader for OtfIO {
         // Get the number of tables available from the next 2 bytes
         let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
         // Advance to the start of the table entries
-        source_stream.seek(SeekFrom::Start(12))?;
+        source_stream.seek(SeekFrom::Start(TABLE_DIRECTORY_HEADER_LENGTH as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
@@ -435,10 +436,10 @@ impl SfntChunkReader for OtfIO {
             });
         }
 
-        // Do not iterate if the log level are not set to at least debug
-        if log::max_level().cmp(&log::LevelFilter::Debug).is_ge() {
+        // Do not iterate if the log level is not set to at least trace 
+        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
             for position in positions.iter().as_ref() {
-                debug!("Position for C2PA in font: {:?}", &position);
+                trace!("Position for C2PA in font: {:?}", &position);
             }
         }
         Ok(positions)
@@ -786,7 +787,7 @@ where
             // For the table record entries, we will specialize the C2PA table
             // record and all others will be added as is
             ChunkType::TableRecord => {
-                let table_record_pos = if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
+                if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
                     vec![HashObjectPositions {
                         offset: chunk_position.offset as usize,
                         length: chunk_position.length as usize,
@@ -798,8 +799,7 @@ where
                         length: chunk_position.length as usize,
                         htype: HashBlockObjectType::Other,
                     }]
-                };
-                table_record_pos
+                }
             },
             // Similarly for the actual table data, we need to specialize C2PA
             // and in this case the `head` table as well, to ignore the checksum
@@ -814,7 +814,7 @@ where
                     let head_length = &chunk_position.length;
                     // Include the major/minor/revision version numbers
                     table_positions.push(HashObjectPositions {
-                        offset: head_offset.clone() as usize,
+                        offset: *head_offset as usize,
                         length: 8,
                         htype: HashBlockObjectType::Other,
                     });
