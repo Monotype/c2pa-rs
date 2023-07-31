@@ -1449,7 +1449,7 @@ impl Store {
                 // find start of jumbf
                 if item.htype == HashBlockObjectType::Cai {
                     // Make sure we have a valid range
-                    if item.offset < (item.offset + item.length) {
+                    if item.offset <= (item.offset + item.length) {
                         let mut exclusion = (item.offset, item.offset + item.length);
                         // Setup to defragment sections that are contiguous but may have
                         // been listed as separate
@@ -1470,7 +1470,9 @@ impl Store {
                 // add exclusion hash for bytes before and after jumbf
                 let mut dh = DataHash::new("jumbf manifest", alg);
                 for exclusion in &exclusions {
-                    dh.add_exclusion(HashRange::new(exclusion.0, exclusion.1 - exclusion.0));
+                    if exclusion.1 > exclusion.0 {
+                        dh.add_exclusion(HashRange::new(exclusion.0, exclusion.1 - exclusion.0));
+                    }
                 }
 
                 if calc_hashes {
