@@ -287,7 +287,7 @@ static SUPPORTED_TYPES: [&str; 10] = [
 const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: Tag = tables::head::TAG;
-/// Lenght of the table directory header (i.e., before the table records)
+/// Length of the table directory header (i.e., before the table records)
 const TABLE_DIRECTORY_HEADER_LENGTH: u32 = 12;
 
 /// Various valid version tags seen in a OTF/TTF file.
