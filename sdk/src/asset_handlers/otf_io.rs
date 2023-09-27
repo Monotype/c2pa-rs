@@ -18,11 +18,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
-#use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
-#Ah yeah okay this needs estructur.
-need to update the spike we made
-
-
+use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
 
 use log::trace;
 use serde_bytes::ByteBuf;
@@ -293,9 +289,9 @@ const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: Tag = tables::head::TAG;
 /// Length of the table directory header (i.e., before the table records)
-const SFNT_HEADER_LENGTH: u32 = 12;
+const SFNT_HEADER_LENGTH: usize = 12;
 /// Length of Table Directory Entries
-const SFNT_DIRENT_LENGTH: u32 = 16;
+const SFNT_DIRENT_LENGTH: usize = 16;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
@@ -359,8 +355,8 @@ impl SfntChunkReader for OtfIO {
     ) -> core::result::Result<Vec<SfntChunkPositions>, Self::Error> {
         source_stream.rewind()?;
         let mut positions: Vec<SfntChunkPositions> = Vec::new();
-        let table_header_sz: u32 = SFNT_HEADER_LENGTH;
-        let table_entry_sz: u32 = SFNT_DIRENT_LENGTH;
+        let table_header_sz: u32 = SFNT_HEADER_LENGTH as u32;
+        let table_entry_sz: u32 = SFNT_DIRENT_LENGTH as u32;
         // Create a 16-byte buffer to hold each table entry as we read through the file
         let mut table_entry_buf: [u8; SFNT_DIRENT_LENGTH] = [0; SFNT_DIRENT_LENGTH];
         // Verify the font has a valid version in it before assuming the rest is
@@ -374,7 +370,7 @@ impl SfntChunkReader for OtfIO {
         // records, as those positions will be added separately
         positions.push(SfntChunkPositions {
             offset: 0,
-            length: SFNT_HEADER_LENGTH,
+            length: SFNT_HEADER_LENGTH as u32,
             name: [0; 4],
             chunk_type: ChunkType::TableDirectory,
         });
