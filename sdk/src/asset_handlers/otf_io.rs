@@ -18,7 +18,12 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
-use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
+#use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
+#Ah yeah okay this needs estructur.
+need to update the spike we made
+
+
+
 use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
