@@ -21,6 +21,7 @@ use std::{
 use lazy_static::lazy_static;
 
 use crate::asset_handlers::otf_io::OtfIO;
+use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
         bmff_io::BmffIO, c2pa_io::C2paIO, jpeg_io::JpegIO, png_io::PngIO, riff_io::RiffIO,
@@ -42,6 +43,7 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(OtfIO::new("")),
+            Box::new(WoffIO::new(""))
         ];
         let mut handler_map = HashMap::new();
 
@@ -69,6 +71,7 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(OtfIO::new("")),
+            Box::new(WoffIO::new(""))
         ];
         let mut handler_map = HashMap::new();
 
