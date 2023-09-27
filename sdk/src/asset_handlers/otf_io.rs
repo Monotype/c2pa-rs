@@ -288,7 +288,9 @@ const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: Tag = tables::head::TAG;
 /// Length of the table directory header (i.e., before the table records)
-const TABLE_DIRECTORY_HEADER_LENGTH: u32 = 12;
+const SFNT_HEADER_LENGTH: u32 = 12;
+/// Length of Table Directory Entries
+const SFNT_DIRENT_LENGTH: u32 = 16;
 
 /// Various valid version tags seen in a OTF/TTF file.
 pub enum FontVersion {
@@ -352,10 +354,10 @@ impl SfntChunkReader for OtfIO {
     ) -> core::result::Result<Vec<SfntChunkPositions>, Self::Error> {
         source_stream.rewind()?;
         let mut positions: Vec<SfntChunkPositions> = Vec::new();
-        let table_header_sz: u32 = 12;
-        let table_entry_sz: u32 = 16;
+        let table_header_sz: u32 = SFNT_HEADER_LENGTH;
+        let table_entry_sz: u32 = SFNT_DIRENT_LENGTH;
         // Create a 16-byte buffer to hold each table entry as we read through the file
-        let mut table_entry_buf: [u8; 16] = [0; 16];
+        let mut table_entry_buf: [u8; SFNT_DIRENT_LENGTH] = [0; SFNT_DIRENT_LENGTH];
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
         let sfnt_u32: u32 = source_stream.read_u32::<BigEndian>()?;
@@ -367,7 +369,7 @@ impl SfntChunkReader for OtfIO {
         // records, as those positions will be added separately
         positions.push(SfntChunkPositions {
             offset: 0,
-            length: TABLE_DIRECTORY_HEADER_LENGTH,
+            length: SFNT_HEADER_LENGTH,
             name: [0; 4],
             chunk_type: ChunkType::TableDirectory,
         });
@@ -377,7 +379,7 @@ impl SfntChunkReader for OtfIO {
         // Get the number of tables available from the next 2 bytes
         let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
         // Advance to the start of the table entries
-        source_stream.seek(SeekFrom::Start(TABLE_DIRECTORY_HEADER_LENGTH as u64))?;
+        source_stream.seek(SeekFrom::Start(SFNT_HEADER_LENGTH as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
