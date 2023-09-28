@@ -852,10 +852,11 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<CowPtr<C2PA>> {
-    let font: Font = Font::from_reader(reader);
-    ///.map_err(|y| {
-    //    let x = y;
-       // Error::FontLoadError})?;
+    let font: Font = Font::from_reader(reader)
+     .map_err(|y| {
+        let _x = y;
+        let _z = _x;
+       Error::FontLoadError})?;
     // Grab the C2PA table.
     font.tables
         .C2PA()
