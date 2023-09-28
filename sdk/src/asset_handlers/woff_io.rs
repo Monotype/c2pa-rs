@@ -18,7 +18,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
-use fonttools::{font::Font, table_store::CowPtr, tables, tables::C2PA::C2PA, types::*};
+
 use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
@@ -277,13 +277,54 @@ static SUPPORTED_TYPES: [&str; 4] = [
     "woff",
 ];
 
+// generic font stuff - true for SFNT, WOFF/2, EOT, ...
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TableTag([u8; 4]);
+
 /// Tag for the 'C2PA' table in a font.
-const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
+const C2PA_TABLE_TAG: TableTag = TableTag(["C", "2", "P", "A"]);
 /// Tag for the 'head' table in a font.
-const HEAD_TABLE_TAG: Tag = tables::head::TAG;
+const HEAD_TABLE_TAG: TableTag = TableTag(["h", "e", "a", "d"]);
+
+// font abstraction
+struct FontTable {
+    tag: TableTag,
+    checksum: u32,
+    offset: u32,
+    length: u32,
+}
+    
+
+// WOFF1-specific
+struct WoffHeader {
+    signature: u32,
+    flavor: u32,
+    length: u32,
+    numTables: u16,
+    reserved: u16,
+    totalSfntSize: u32,
+    majorVersion: u16,
+    minorVersion: u16,
+    metaOffset: u32,
+    metaLength: u32,
+    metaOrigLength: u32,
+    privOffset: u32,
+    privLength: u32
+}
+
+struct WoffTableDirEntry {
+    tag: TableTag,
+    offset: u32,
+    compLength: u32,
+    origLength: u32,
+    origChecksum: u32,
+}
+
+
+// woff stuff - need OTF versions
 /// Length of the table directory header (i.e., before the table records)
-const WOFF_HEADER_LENGTH: u32 = 44;
-const WOFF_DIRENT_LENGTH: u32 = 20;
+const WOFF_HEADER_LENGTH: u32 = 44; // should equal sizeof(WoffHeader), however we can derive/enforce that in Rust...
+const WOFF_DIRENT_LENGTH: u32 = 20; // should equal sizeof(WoffTableDirEntry), however we can derive/enforce that in Rust...
 
 /// Various valid version tags seen in a WOFF/TTF file.
 pub enum FontVersion {
@@ -852,16 +893,16 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<CowPtr<C2PA>> {
-    let font: Font = Font::from_reader(reader)
-     .map_err(|y| {
-        let _x = y;
-        let _z = _x;
-       Error::FontLoadError})?;
-    // Grab the C2PA table.
-    font.tables
-        .C2PA()
-        .map_err(|_err| Error::DeserializationError)?
-        .ok_or(Error::JumbfNotFound)
+        let font: Font = WOFF::from_reader(reader)
+        .map_err(|y| {
+            let _x = y;
+            let _z = _x;
+        Error::FontLoadError})?;
+        // Grab the C2PA table.
+        font.tables
+            .C2PA()
+            .map_err(|_err| Error::DeserializationError)?
+            .ok_or(Error::JumbfNotFound)
 }
 
 /// Main WOFF IO feature.
