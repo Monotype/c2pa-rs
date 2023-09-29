@@ -11,6 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
+    collections::HashMap,
     convert::TryFrom,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
@@ -281,45 +282,80 @@ static SUPPORTED_TYPES: [&str; 4] = [
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TableTag([u8; 4]);
 
-/// Tag for the 'C2PA' table in a font.
+/// Tag for the 'C2PA' table in a ffont.
 const C2PA_TABLE_TAG: TableTag = TableTag(["C", "2", "P", "A"]);
-/// Tag for the 'head' table in a font.
+/// Tag for the 'head' table in a ffont.
 const HEAD_TABLE_TAG: TableTag = TableTag(["h", "e", "a", "d"]);
 
-/// 32-bit font-format identifier
+/// 32-bit font-format identifier.
+/// TBD: These should either be [u8; 4], or we should figure out ser/de
+/// byte-swapping (the enum values presume big-endian order; everything in fonts
+/// is always big-endian, unless it's explicitly not.
 enum FontMagic {
     /// OpenType - 'OTTO'
     OpenType = 0x4F54544F,
     /// TrueType - FIXED 1.0
     TrueType = 0x00010000,
     /// WOFF 1.0 - 'wOFF'
-    Woff = 0x774F4646,
+    Woff     = 0x774F4646,
     /// WOFF 2.0 - 'wOF2'
-    Woff2 = 0x774F4632,
+    Woff2    = 0x774F4632,
 }
 
-// font abstraction
-struct AnyFont { // rename this to Font when we ditch fonttools
-    FontMagic, // Decides the container
+/// Generic font table
+struct FontTable_Any {
+    data: Box<[u8]>,
 }
 
-// SFNT-specific
-struct SfntHeader {
-    sfntVersion: u32,
-    numTables: u16,
-    searchRange: u16,
-    entrySelector: u16,
-    rangeShift: u16,
+/// C2PA font table
+struct FontTable_C2PA {
+    majorVersion: u16,
+    minorVersion: u16,
+    activeManifestUriOffset: u32,
+    activeManifestUriLength: u16,
+    manifestStoreOffset: u32,
+    manifestStoreLength: u32,
 }
 
-struct SfntTableDirEntry {
-    tag: TableTag,
-    checksum: u32,
-    offset: u32,
-    length: u32,
+/// head font table
+struct FontTable_head {
+    majorVersion: u16,
+    minorVersion: u16,
+    fontRevision: u32,
+    checksumAdjustment: u32,
+    magicNumber: u32,
+    flags: u16,
+    unitsPerEm: u16,
+    created: i64,
+    modified: i64,
+    xMin: i16,
+    yMin: i16,
+    xMax: i16,
+    yMax: i16,
+    macStyle: u16,
+    lowestRecPPEM: u16,
+    fontDirectionHint: i16,
+    indexToLocFormat: i16,
+    glyphDataFormat: i16,
 }
 
-// WOFF1-specific
+/// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 or 2) and
+/// EOT fonts. Potentially composable to support TrueType/OpenType Collections.
+/// 
+/// TBD: Rename this to Font when it no longer exists.
+struct FFont {
+    /// Magic number for this font's container format
+    magic:  FontMagic,                
+    /// All the Tables in this font, keyed by TableTag
+    tables: HashMap<TableTag, FontTable>, // All My Tables
+}
+
+/// TBD: All the serialization structures below are define in terms of native
+/// Rust types; should we go all-out in the other direction, and establish a
+/// layer of "font" types (FWORD, FIXED, etc.)? Mostly these will come from
+/// SFNT, and then get derived/extended by the definitions in WOFF, WOFF2 and EOT.
+
+/// WOFF 1.0 file header, from the WOFF spec.
 struct WoffHeader {
     signature: u32,
     flavor: u32,
@@ -335,7 +371,9 @@ struct WoffHeader {
     privOffset: u32,
     privLength: u32,
 }
+const WOFF_HEADER_LENGTH: u32 = 44; // should equal size_of(::<WoffHeader>), however we can derive/enforce that in Rust...
 
+/// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 struct WoffTableDirEntry {
     tag: TableTag,
     offset: u32,
@@ -343,20 +381,42 @@ struct WoffTableDirEntry {
     origLength: u32,
     origChecksum: u32,
 }
+const WOFF_DIRENT_LENGTH: u32 = 20; // should equal size_of(::<WoffTableDirEntry>), however we can derive/enforce that in Rust...
+
+// TBD: General direction (yessir general i'm major motion) is that we would
+// rename this font_io.rs and then add SFNT and WOFF2 and EOT ser/de support;
+// all these formats are Bucket-o-Tables, so the single FFont abstraction
+// should serve:
+//
+//   1. Work out how to abstract the exclusion(s) map, which must vary
+//      per-container (even though we are currently *not* spec'g to hash the 
+//      container header, we must still contend with checkSumAdjustment).
+//
+// /// SFNT file header structure, from Open Font Format / OpenType.
+// struct SfntHeader {
+//     sfntVersion: u32,
+//     numTables: u16,
+//     searchRange: u16,
+//     entrySelector: u16,
+//     rangeShift: u16,
+// }
+// 
+// /// SFNT Table Directory Entry structure, from Open Font Format / OpenType.
+// struct SfntTableDirEntry {
+//     tag: TableTag,
+//     checksum: u32,
+//     offset: u32,
+//     length: u32,
+// }
 
 
 // woff stuff - need OTF versions
 /// Length of the table directory header (i.e., before the table records)
-const WOFF_HEADER_LENGTH: u32 = 44; // should equal sizeof(WoffHeader), however we can derive/enforce that in Rust...
-const WOFF_DIRENT_LENGTH: u32 = 20; // should equal sizeof(WoffTableDirEntry), however we can derive/enforce that in Rust...
-
-/// Various valid version tags seen in a WOFF/TTF file.
-pub enum FontVersion {
-    /// WOFFHeader signature 'wOFF'
-    WOFF = 0x774F4646
-}
 
 /// Declares the type of chunks of data within a font
+
+// tbd We need to decorate the new stuff with Debug, PartEq, etc.
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChunkType {
     /// Table directory, excluding the table record array
@@ -384,7 +444,7 @@ pub struct SfntChunkPositions {
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
 pub trait SfntChunkReader {
     type Error;
-    /// Gets a collection of positions of chunks within the font.
+    /// Gets a collection of positions of chunks within the ffont.
     ///
     /// ## Arguments
     /// * `source_stream` - Source stream to read data from
@@ -545,17 +605,17 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font_file: Font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font_file: FFont = FFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     match font_file.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
-            font_file.tables.insert(C2PA::new(
+            font_file.tables.insert(FontTable_C2PA::new(
                 c2pa_table.activeManifestUri.clone(),
                 Some(manifest_store_data.to_vec()),
             ));
         }
         Ok(None) => font_file
             .tables
-            .insert(C2PA::new(None, Some(manifest_store_data.to_vec()))),
+            .insert(FontTable_C2PA::new(None, Some(manifest_store_data.to_vec()))),
         Err(_) => return Err(Error::DeserializationError),
     };
     // Write to the destination stream
@@ -579,7 +639,7 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
     })
 }
 
-/// Adds the specified reference to the font.
+/// Adds the specified reference to the ffont.
 ///
 /// ## Arguments
 ///
@@ -596,20 +656,20 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
-    match font.tables.C2PA() {
+    let mut ffont = FFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    match ffont.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
-            font.tables.insert(C2PA::new(
+            ffont.tables.insert(FontTable_C2PA::new(
                 Some(manifest_uri.to_string()),
                 c2pa_table.get_manifest_store().map(|x| x.to_vec()),
             ));
         }
         Ok(None) => font
             .tables
-            .insert(C2PA::new(Some(manifest_uri.to_string()), None)),
+            .insert(FontTable_C2PA::new(Some(manifest_uri.to_string()), None)),
         Err(_) => return Err(Error::DeserializationError),
     };
-    font.write(destination).map_err(|_| Error::FontSaveError)?;
+    ffont.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(())
 }
 
@@ -636,11 +696,11 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = Font::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut ffont = FFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
-    match font.tables.C2PA() {
+    match ffont.tables.C2PA() {
         Ok(None) => {
-            font.tables.insert(C2PA::new(None, None));
+            ffont.tables.insert(FontTable_C2PA::new(None, None));
         }
         Ok(_) => {
             // Do nothing
@@ -648,7 +708,7 @@ where
         Err(_) => return Err(Error::DeserializationError),
     }
     // Write the font to the output stream
-    font.write(output_stream)
+    ffont.write(output_stream)
         .map_err(|_| Error::FontSaveError)?;
 
     Ok(())
@@ -753,11 +813,11 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut ffont = FFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
-    font.tables.remove(C2PA_TABLE_TAG);
+    ffont.tables.remove(C2PA_TABLE_TAG);
     // And write it to the destination stream
-    font.write(destination).map_err(|_| Error::FontSaveError)?;
+    ffont.write(destination).map_err(|_| Error::FontSaveError)?;
 
     Ok(())
 }
@@ -783,11 +843,11 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
-    let mut font = Font::from_reader(source).map_err(|_| Error::FontLoadError)?;
-    let manifest_uri = match font.tables.C2PA() {
+    let mut ffont = FFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let manifest_uri = match ffont.tables.C2PA() {
         Ok(Some(c2pa_table)) => {
             let manifest_uri = c2pa_table.activeManifestUri.clone();
-            font.tables.insert(C2PA::new(
+            ffont.tables.insert(C2PA::new(
                 None,
                 c2pa_table.get_manifest_store().map(|x| x.to_vec()),
             ));
@@ -796,7 +856,7 @@ where
         Ok(None) => None,
         Err(_) => return Err(Error::DeserializationError),
     };
-    font.write(destination).map_err(|_| Error::FontSaveError)?;
+    ffont.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(manifest_uri)
 }
 
@@ -817,7 +877,7 @@ where
     T: Read + Seek + ?Sized,
 {
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
-    // now to make sure we can parse the font.
+    // now to make sure we can parse the ffont.
     reader.rewind()?;
     // We must take into account a font that may not have a C2PA table in it at
     // this point, adding any required chunks needed for C2PA to work correctly.
@@ -917,13 +977,10 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<CowPtr<C2PA>> {
-        let font: Font = WOFF::from_reader(reader)
-        .map_err(|y| {
-            let _x = y;
-            let _z = _x;
-        Error::FontLoadError})?;
+        let ffont: FFont = FFont::from_reader(reader)
+        .map_err(|y| {Error::FontLoadError})?;
         // Grab the C2PA table.
-        font.tables
+        ffont.tables
             .C2PA()
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::JumbfNotFound)
@@ -1137,7 +1194,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("ffont.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1184,7 +1241,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("ffont.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1284,7 +1341,7 @@ pub mod tests {
     #[test]
     fn get_object_locations() {
         // Load the basic WOFF test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("ffont.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1343,7 +1400,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("ffont.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1378,7 +1435,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("ffont.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1421,7 +1478,7 @@ pub mod tests {
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
             // Load the basic WOFF test fixture
-            let source = crate::utils::test::fixture_path("font.woff");
+            let source = crate::utils::test::fixture_path("ffont.woff");
 
             // Create a temporary output for the file
             let temp_dir = tempdir().unwrap();
