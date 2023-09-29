@@ -286,14 +286,38 @@ const C2PA_TABLE_TAG: TableTag = TableTag(["C", "2", "P", "A"]);
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: TableTag = TableTag(["h", "e", "a", "d"]);
 
+/// 32-bit font-format identifier
+enum FontMagic {
+    /// OpenType - 'OTTO'
+    OpenType = 0x4F54544F,
+    /// TrueType - FIXED 1.0
+    TrueType = 0x00010000,
+    /// WOFF 1.0 - 'wOFF'
+    Woff = 0x774F4646,
+    /// WOFF 2.0 - 'wOF2'
+    Woff2 = 0x774F4632,
+}
+
 // font abstraction
-struct FontTable {
+struct AnyFont { // rename this to Font when we ditch fonttools
+    FontMagic, // Decides the container
+}
+
+// SFNT-specific
+struct SfntHeader {
+    sfntVersion: u32,
+    numTables: u16,
+    searchRange: u16,
+    entrySelector: u16,
+    rangeShift: u16,
+}
+
+struct SfntTableDirEntry {
     tag: TableTag,
     checksum: u32,
     offset: u32,
     length: u32,
 }
-    
 
 // WOFF1-specific
 struct WoffHeader {
@@ -309,7 +333,7 @@ struct WoffHeader {
     metaLength: u32,
     metaOrigLength: u32,
     privOffset: u32,
-    privLength: u32
+    privLength: u32,
 }
 
 struct WoffTableDirEntry {
