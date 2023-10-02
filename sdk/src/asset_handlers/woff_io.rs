@@ -332,13 +332,14 @@ impl TryFrom<u32> for Magic {
 /// Minimal byte-flopper for moving font header structures and known table
 /// contents in and out of storage.
 trait NetworkByteOrderable {
-    fn from_network(self);
-    fn to_network(self);
+    fn from_network(&mut self);
+    fn to_network(&mut self);
 }
 
 /// 'C2PA' font table - in storage
 #[derive(Debug, Deserialize, Serialize)]
 #[repr(C, packed)]
+#[allow(non_snake_case)]
 struct TableC2PARaw {
     majorVersion: u16,
     minorVersion: u16,
@@ -349,7 +350,7 @@ struct TableC2PARaw {
 }
 
 impl NetworkByteOrderable for TableC2PARaw {
-    fn from_network(self) {
+    fn from_network(&mut self) {
         self.majorVersion = u16::from_be(self.majorVersion);
         self.minorVersion = u16::from_be(self.minorVersion);
         self.activeManifestUriOffset = u32::from_be(self.activeManifestUriOffset);
@@ -357,7 +358,7 @@ impl NetworkByteOrderable for TableC2PARaw {
         self.manifestStoreOffset = u32::from_be(self.manifestStoreOffset);
         self.manifestStoreLength = u32::from_be(self.manifestStoreLength);
     }
-    fn to_network(self) {
+    fn to_network(&mut self) {
         self.majorVersion = u16::to_be(self.majorVersion);
         self.minorVersion = u16::to_be(self.minorVersion);
         self.activeManifestUriOffset = u32::to_be(self.activeManifestUriOffset);
@@ -368,6 +369,7 @@ impl NetworkByteOrderable for TableC2PARaw {
 }
 
 /// 'C2PA' font table - in storage
+#[allow(non_snake_case)]
 pub struct TableC2PA {
     /// Major version of the C2PA table record
     pub majorVersion: u16,
@@ -512,6 +514,7 @@ impl Default for TableC2PA {
 /// 'head' font table
 #[derive(Debug, Deserialize, Serialize)]
 #[repr(C, packed)]
+#[allow(non_snake_case)]
 struct TableHead {
     majorVersion: u16,
     minorVersion: u16,
@@ -536,7 +539,7 @@ struct TableHead {
 impl NetworkByteOrderable for TableHead {
     // Strictly speaking, any members with leading underscores need not be
     // flopped, as they are never used.
-    fn from_network(self) {
+    fn from_network(&mut self) {
         self.majorVersion = u16::from_be(self.majorVersion);
         self.minorVersion = u16::from_be(self.minorVersion);
         self.fontRevision = u32::from_be(self.fontRevision);
@@ -556,7 +559,7 @@ impl NetworkByteOrderable for TableHead {
         self.indexToLocFormat = i16::from_be(self.indexToLocFormat);
         self.glyphDataFormat = i16::from_be(self.glyphDataFormat);
     }
-    fn to_network(self) {
+    fn to_network(&mut self) {
         self.majorVersion = u16::to_be(self.majorVersion);
         self.minorVersion = u16::to_be(self.minorVersion);
         self.fontRevision = u32::to_be(self.fontRevision);
@@ -586,10 +589,10 @@ struct TableUnspecified {
 
 impl NetworkByteOrderable for TableUnspecified {
     // No operation; byte arrays have just that one order order.
-    fn from_network(self) {
+    fn from_network(&mut self) {
         // no-op
     }
-    fn to_network(self) {
+    fn to_network(&mut self) {
         // no-op
     }
 }
@@ -612,10 +615,18 @@ struct Font {
     /// Magic number for this font's container format
     magic:  Magic,                
     /// All the Tables in this font, keyed by TableTag
-    tables: HashMap<TableTag, Table>, // All My Tables
+    tables: HashMap<TableTag, Table>,
 }
 
 impl Font {
+    /// New blank font
+    pub fn new(magic: Magic) -> Self {
+        Self {
+            magic: magic,
+            tables: HashMap::new(),
+        }
+    }
+
     /// Reads in a font file.
     fn Read<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
         // Must always rewind input
@@ -637,12 +648,14 @@ impl Font {
 
     /// Writes out a font file.
     fn write(&mut self, mut writer: impl std::io::Write) -> core::result::Result<(), Box<dyn std::error::Error>> {
-        Err(Error::FontSaveError)
+        Err(Error::FontSaveError)?
     }
 
     /// Reads in a WOFF 1 font file
     fn ReadWoff<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
         // We expect to be called with the stream positions just past the magic number.
+        let mut theFont: Font = Font::new(Magic::Woff);
+        theFont.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
         let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
         let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
@@ -728,7 +741,7 @@ impl Font {
                 trace!("Position for C2PA in font: {:?}", &position);
             }
         }
-        Ok(positions)
+        Ok(theFont)
 
     }
 }
@@ -758,7 +771,7 @@ struct WoffHeader {
 }
 const WOFF_HEADER_LENGTH: u32 = 44; // should equal size_of(::<WoffHeader>), however we can derive/enforce that in Rust...
 impl NetworkByteOrderable for WoffHeader {
-    fn from_network(self) {
+    fn from_network(&mut self) {
         self.signature = u32::from_be(self.signature);
         self.flavor = u32::from_be(self.flavor);
         self.length = u32::from_be(self.length);
@@ -773,7 +786,7 @@ impl NetworkByteOrderable for WoffHeader {
         self.privOffset = u32::from_be(self.privOffset);
         self.privLength = u32::from_be(self.privLength);
     }
-    fn to_network(self) {
+    fn to_network(&mut self) {
         self.signature = u32::to_be(self.signature);
         self.flavor = u32::to_be(self.flavor);
         self.length = u32::to_be(self.length);
@@ -791,7 +804,7 @@ impl NetworkByteOrderable for WoffHeader {
 }
 
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug)]
 #[repr(C, packed)]
 struct WoffTableDirEntry {
     tag: TableTag,
@@ -802,13 +815,13 @@ struct WoffTableDirEntry {
 }
 const WOFF_DIRENT_LENGTH: u32 = 20; // should equal size_of(::<WoffTableDirEntry>), however we can derive/enforce that in Rust...
 impl NetworkByteOrderable for WoffTableDirEntry {
-    fn from_network(self) {
+    fn from_network(&mut self) {
         self.offset = u32::from_be(self.offset);
         self.compLength = u32::from_be(self.compLength);
         self.origLength = u32::from_be(self.origLength);
         self.origChecksum = u32::from_be(self.origChecksum);
     }
-    fn to_network(self) {
+    fn to_network(&mut self) {
         self.offset = u32::to_be(self.offset);
         self.compLength = u32::to_be(self.compLength);
         self.origLength = u32::to_be(self.origLength);
@@ -994,18 +1007,18 @@ where
 {
     source.rewind()?;
     let mut font_file: Font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
-    match font_file.tables.C2PA() {
-        Ok(Some(c2pa_table)) => {
-            font_file.tables.insert(TableC2PA::new(
-                c2pa_table.activeManifestUri.clone(),
-                Some(manifest_store_data.to_vec()),
-            ));
-        }
-        Ok(None) => font_file
-            .tables
-            .insert(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
-        Err(_) => return Err(Error::DeserializationError),
-    };
+//match font_file.tables[&C2PA_TABLE_TAG] {
+//    Ok(Some(c2pa_table)) => {
+//        font_file.tables.insert(TableC2PA::new(
+//            c2pa_table.activeManifestUri.clone(),
+//            Some(manifest_store_data.to_vec()),
+//        ));
+//    }
+//    Ok(None) => font_file
+//        .tables
+//        .insert(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+//    Err(_) => return Err(Error::DeserializationError),
+//};
     // Write to the destination stream
     font_file
         .write(destination)
@@ -1045,18 +1058,18 @@ where
 {
     source.rewind()?;
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
-    match font.tables.C2PA() {
-        Ok(Some(c2pa_table)) => {
-            font.tables.insert(TableC2PA::new(
-                Some(manifest_uri.to_string()),
-                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
-            ));
-        }
-        Ok(None) => font
-            .tables
-            .insert(TableC2PA::new(Some(manifest_uri.to_string()), None)),
-        Err(_) => return Err(Error::DeserializationError),
-    };
+//match font.tables.C2PA() {
+//    Ok(Some(c2pa_table)) => {
+//        font.tables.insert(TableC2PA::new(
+//                Some(manifest_uri.to_string()),
+//                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
+//        ));
+//    }
+//    Ok(None) => font
+//        .tables
+//        .insert(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+//    Err(_) => return Err(Error::DeserializationError),
+//};
     font.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(())
 }
@@ -1086,15 +1099,15 @@ where
     // Read the font from the input stream
     let mut font = Font::Read(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
-    match font.tables.C2PA() {
-        Ok(None) => {
-            font.tables.insert(TableC2PA::new(None, None));
-        }
-        Ok(_) => {
-            // Do nothing
-        }
-        Err(_) => return Err(Error::DeserializationError),
-    }
+//match font.tables.C2PA() {
+//    Ok(None) => {
+//        font.tables.insert(TableC2PA::new(None, None));
+//    }
+//    Ok(_) => {
+//        // Do nothing
+//    }
+//    Err(_) => return Err(Error::DeserializationError),
+//}
     // Write the font to the output stream
     font.write(output_stream)
         .map_err(|_| Error::FontSaveError)?;
@@ -1203,7 +1216,7 @@ where
     // Load the font from the stream
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
-    font.tables.remove(C2PA_TABLE_TAG);
+    font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
     font.write(destination).map_err(|_| Error::FontSaveError)?;
 
@@ -1232,20 +1245,20 @@ where
     TDest: Write + ?Sized,
 {
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
-    let manifest_uri = match font.tables.C2PA() {
-        Ok(Some(c2pa_table)) => {
-            let manifest_uri = c2pa_table.activeManifestUri.clone();
-            font.tables.insert(TableC2PA::new(
-                None,
-                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
-            ));
-            manifest_uri
-        }
-        Ok(None) => None,
-        Err(_) => return Err(Error::DeserializationError),
-    };
+//let manifest_uri = match font.tables.C2PA() {
+//    Ok(Some(c2pa_table)) => {
+//        let manifest_uri = c2pa_table.activeManifestUri.clone();
+//        font.tables.insert(TableC2PA::new(
+//            None,
+//            c2pa_table.get_manifest_store().map(|x| x.to_vec()),
+//        ));
+//        manifest_uri
+//    }
+//    Ok(None) => None,
+//    Err(_) => return Err(Error::DeserializationError),
+//};
     font.write(destination).map_err(|_| Error::FontSaveError)?;
-    Ok(manifest_uri)
+    Ok(1); // manifest_uri)
 }
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
@@ -1364,12 +1377,11 @@ where
 /// ## Returns
 ///
 /// A result containing the `C2PA` font table data
-fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<CowPtr<C2PA>> {
+fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
         let font: Font = Font::Read(reader)
         .map_err(|y| {Error::FontLoadError})?;
         // Grab the C2PA table.
-        font.tables
-            .C2PA()
+        font.tables[C2PA_TABLE_TAG]
             .map_err(|_err| Error::DeserializationError)?
             .ok_or(Error::JumbfNotFound)
 }
