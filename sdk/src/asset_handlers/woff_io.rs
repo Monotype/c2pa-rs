@@ -292,10 +292,10 @@ impl TableTag {
     }
 }
 
-/// Tag for the 'C2PA' table in a ffont.
-const C2PA_TABLE_TAG: TableTag = TableTag { data: ["C", "2", "P", "A"] };
-/// Tag for the 'head' table in a ffont.
-const HEAD_TABLE_TAG: TableTag = TableTag { data: ["h", "e", "a", "d"] };
+/// Tag for the 'C2PA' table in a font.
+const C2PA_TABLE_TAG: TableTag = TableTag { data: [b'C', b'2', b'P', b'A'] };
+/// Tag for the 'head' table in a font.
+const HEAD_TABLE_TAG: TableTag = TableTag { data: [b'h', b'e', b'a', b'd'] };
 
 /// 32-bit font-format identifier.
 /// TBD: These should either be [u8; 4], or we should figure out ser/de
@@ -346,23 +346,6 @@ struct TableC2PARaw {
     activeManifestUriLength: u16,
     manifestStoreOffset: u32,
     manifestStoreLength: u32,
-}
-
-impl TableC2PARaw {
-    /// Creates a new C2PA record with the current default version information.
-    pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
-        let boxed_data = manifest_store.map(|d| d.into_boxed_slice());
-        Self {
-            activeManifestUri: active_manifest_uri,
-            manifestStore: boxed_data,
-            ..TableC2PA::default()
-        }
-    }
-
-    /// Get the manifest store data if available
-    pub fn get_manifest_store(&self) -> Option<&[u8]> {
-        self.manifestStore.as_deref()
-    }
 }
 
 impl NetworkByteOrderable for TableC2PARaw {
@@ -632,6 +615,124 @@ struct Font {
     tables: HashMap<TableTag, Table>, // All My Tables
 }
 
+impl Font {
+    /// Reads in a font file.
+    fn Read<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
+        // Must always rewind input
+        source_stream.rewind()?;
+        // Verify the font has a valid version in it before assuming the rest is
+        // valid (NOTE: we don't actually do anything with it, just as a safety check).
+        let font_magic_u32: u32 = source_stream.read_u32::<BigEndian>()?;
+        let font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(font_magic_u32)
+            .map_err(|_err| Error::UnsupportedFontError)?;
+        // Check the magic number
+        match font_magic {
+            Magic::Woff => Font::ReadWoff(source_stream),
+            // TBD: SFNT
+            // TBD-er: WOFF2
+            // TBD-est: EOT
+            _ => Err(Error::FontLoadError),
+        }
+    }
+
+    /// Writes out a font file.
+    fn write(&mut self, mut writer: impl std::io::Write) -> core::result::Result<(), Box<dyn std::error::Error>> {
+        Err(Error::FontSaveError)
+    }
+
+    /// Reads in a WOFF 1 font file
+    fn ReadWoff<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
+        // We expect to be called with the stream positions just past the magic number.
+        let mut positions: Vec<ChunkPositions> = Vec::new();
+        let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
+        let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
+        // Create a 20-byte buffer to hold each table entry as we read through the file
+        let mut woff_dirent_buf: [u8; WOFF_DIRENT_LENGTH as usize] = [0; WOFF_DIRENT_LENGTH as usize];
+        // Add the position of the table directory, excluding the actual table
+        // records, as those positions will be added separately
+        positions.push(ChunkPositions {
+            offset: 0,
+            length: WOFF_HEADER_LENGTH,
+            name: [0; 4],
+            chunk_type: ChunkType::TableDirectory,
+        });
+
+        // Table counter, to keep up with how many tables we have processed.
+        let mut table_counter = 0;
+        // Get the number of tables available from the next 2 bytes
+        let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
+        // Advance to the start of the table entries
+        source_stream.seek(SeekFrom::Start(WOFF_HEADER_LENGTH as u64))?;
+
+        // Create a temporary vector to hold the table offsets and lengths, which
+        // will be added after the table records have been added
+        let mut table_offset_pos = Vec::new();
+
+        // Loop through the `tableRecords` array
+        while source_stream.read_exact(&mut woff_dirent_buf).is_ok() {
+            // Grab the tag of the table record entry
+            let mut table_tag: [u8; 4] = [0; 4];
+            table_tag.copy_from_slice(&woff_dirent_buf[0..4]);
+
+            // Then grab the offset and length of the actual name table to
+            // create the other exclusion zone.
+            let offset = (&woff_dirent_buf[5..8]).read_u32::<BigEndian>()?;
+            let _comp_length = (&woff_dirent_buf[9..12]).read_u32::<BigEndian>()?;
+            let orig_length = (&woff_dirent_buf[13..16]).read_u32::<BigEndian>()?;
+
+            // At this point we will add the table record entry to the temporary
+            // buffer as just a regular table
+            table_offset_pos.push((offset, orig_length, table_tag, ChunkType::Table));
+
+            // Build up table record chunk to add to the positions
+            let mut name: [u8; 4] = [0; 4];
+            // Copy from the table tag to be owned by the chunk position record
+            name.copy_from_slice(&table_tag);
+
+            // Create a table record chunk position as a default table record type
+            // and add it to the collection of positions
+            positions.push(ChunkPositions {
+                offset: (woff_header_sz + (woff_dirent_sz * table_counter)) as u64,
+                length: woff_dirent_sz,
+                name,
+                chunk_type: ChunkType::TableRecord,
+            });
+
+            // Increment the table counter
+            table_counter += 1;
+
+            // If we have iterated over all of our tables, bail
+            if table_counter >= num_tables as u32 {
+                break;
+            }
+        }
+        // Now we can add the table offsets and lengths to the positions, appearing
+        // after the table record chunks, staying as close to the original font layout
+        // as possible
+        // NOTE: The font specification doesn't necessarily ensure the table data records
+        //       have to be in order, but that shouldn't really matter.
+        for entry in table_offset_pos {
+            let mut name = [0; 4];
+            name.copy_from_slice(entry.2.as_slice());
+            positions.push(ChunkPositions {
+                offset: entry.0 as u64,
+                length: entry.1,
+                name,
+                chunk_type: entry.3,
+            });
+        }
+
+        // Do not iterate if the log level is not set to at least trace 
+        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
+            for position in positions.iter().as_ref() {
+                trace!("Position for C2PA in font: {:?}", &position);
+            }
+        }
+        Ok(positions)
+
+    }
+}
+
 /// TBD: All the serialization structures so far have been defined using native
 /// Rust types; should we go all-out in the other direction, and establish a
 /// layer of "font" types (FWORD, FIXED, etc.)? Mostly these will come from
@@ -743,7 +844,7 @@ pub struct ChunkPositions {
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
 pub trait ChunkReader {
     type Error;
-    /// Gets a collection of positions of chunks within the ffont.
+    /// Gets a collection of positions of chunks within the font.
     ///
     /// ## Arguments
     /// * `source_stream` - Source stream to read data from
@@ -754,117 +855,6 @@ pub trait ChunkReader {
         &self,
         source_stream: &mut T,
     ) -> core::result::Result<Vec<ChunkPositions>, Self::Error>;
-}
-
-/// Reads in a font file.
-fn Read<T: Read + Seek +?Sized>(source_stream: &mut T) -> Font {
-    // Must always rewind input
-    source_stream.rewind()?;
-    // Verify the font has a valid version in it before assuming the rest is
-    // valid (NOTE: we don't actually do anything with it, just as a safety check).
-    let font_magic_u32: u32 = source_stream.read_u32::<BigEndian>()?;
-    let font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(font_magic_u32)
-        .map_err(|_err| Error::UnsupportedFontError)?;
-    // Check the magic number
-    match font_magic {
-        Magic::Woff => return ReadWoff(),
-        // TBD: SFNT
-        // TBD-er: WOFF2
-        // TBD-est: EOT
-        _ => Err(()),
-    }
-}
-
-/// Reads in a WOFF 1 font file
-fn ReadWoff<T: Read + Seek +?Sized>(source_stream: &mut T) -> Font {
-    // We expect to be called with the stream positions just past the magic number.
-    let mut positions: Vec<ChunkPositions> = Vec::new();
-    let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
-    let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
-    // Create a 20-byte buffer to hold each table entry as we read through the file
-    let mut woff_dirent_buf: [u8; WOFF_DIRENT_LENGTH as usize] = [0; WOFF_DIRENT_LENGTH as usize];
-    // Add the position of the table directory, excluding the actual table
-    // records, as those positions will be added separately
-    positions.push(ChunkPositions {
-        offset: 0,
-        length: WOFF_HEADER_LENGTH,
-        name: [0; 4],
-        chunk_type: ChunkType::TableDirectory,
-    });
-
-    // Table counter, to keep up with how many tables we have processed.
-    let mut table_counter = 0;
-    // Get the number of tables available from the next 2 bytes
-    let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
-    // Advance to the start of the table entries
-    source_stream.seek(SeekFrom::Start(WOFF_HEADER_LENGTH as u64))?;
-
-    // Create a temporary vector to hold the table offsets and lengths, which
-    // will be added after the table records have been added
-    let mut table_offset_pos = Vec::new();
-
-    // Loop through the `tableRecords` array
-    while source_stream.read_exact(&mut woff_dirent_buf).is_ok() {
-        // Grab the tag of the table record entry
-        let mut table_tag: [u8; 4] = [0; 4];
-        table_tag.copy_from_slice(&woff_dirent_buf[0..4]);
-
-        // Then grab the offset and length of the actual name table to
-        // create the other exclusion zone.
-        let offset = (&woff_dirent_buf[5..8]).read_u32::<BigEndian>()?;
-        let _comp_length = (&woff_dirent_buf[9..12]).read_u32::<BigEndian>()?;
-        let orig_length = (&woff_dirent_buf[13..16]).read_u32::<BigEndian>()?;
-
-        // At this point we will add the table record entry to the temporary
-        // buffer as just a regular table
-        table_offset_pos.push((offset, orig_length, table_tag, ChunkType::Table));
-
-        // Build up table record chunk to add to the positions
-        let mut name: [u8; 4] = [0; 4];
-        // Copy from the table tag to be owned by the chunk position record
-        name.copy_from_slice(&table_tag);
-
-        // Create a table record chunk position as a default table record type
-        // and add it to the collection of positions
-        positions.push(ChunkPositions {
-            offset: (woff_header_sz + (woff_dirent_sz * table_counter)) as u64,
-            length: woff_dirent_sz,
-            name,
-            chunk_type: ChunkType::TableRecord,
-        });
-
-        // Increment the table counter
-        table_counter += 1;
-
-        // If we have iterated over all of our tables, bail
-        if table_counter >= num_tables as u32 {
-            break;
-        }
-    }
-    // Now we can add the table offsets and lengths to the positions, appearing
-    // after the table record chunks, staying as close to the original font layout
-    // as possible
-    // NOTE: The font specification doesn't necessarily ensure the table data records
-    //       have to be in order, but that shouldn't really matter.
-    for entry in table_offset_pos {
-        let mut name = [0; 4];
-        name.copy_from_slice(entry.2.as_slice());
-        positions.push(ChunkPositions {
-            offset: entry.0 as u64,
-            length: entry.1,
-            name,
-            chunk_type: entry.3,
-        });
-    }
-
-    // Do not iterate if the log level is not set to at least trace 
-    if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-        for position in positions.iter().as_ref() {
-            trace!("Position for C2PA in font: {:?}", &position);
-        }
-    }
-    Ok(positions)
-
 }
 
 /// Reads in chunks for a WOFF 1.0 file (or any file -- the format gets handled
@@ -1094,11 +1084,11 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut ffont = FFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::Read(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
-    match ffont.tables.C2PA() {
+    match font.tables.C2PA() {
         Ok(None) => {
-            ffont.tables.insert(FontTable_C2PA::new(None, None));
+            font.tables.insert(TableC2PA::new(None, None));
         }
         Ok(_) => {
             // Do nothing
@@ -1106,7 +1096,7 @@ where
         Err(_) => return Err(Error::DeserializationError),
     }
     // Write the font to the output stream
-    ffont.write(output_stream)
+    font.write(output_stream)
         .map_err(|_| Error::FontSaveError)?;
 
     Ok(())
@@ -1211,11 +1201,11 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut ffont = FFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
-    ffont.tables.remove(C2PA_TABLE_TAG);
+    font.tables.remove(C2PA_TABLE_TAG);
     // And write it to the destination stream
-    ffont.write(destination).map_err(|_| Error::FontSaveError)?;
+    font.write(destination).map_err(|_| Error::FontSaveError)?;
 
     Ok(())
 }
@@ -1275,7 +1265,7 @@ where
     T: Read + Seek + ?Sized,
 {
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
-    // now to make sure we can parse the ffont.
+    // now to make sure we can parse the font.
     reader.rewind()?;
     // We must take into account a font that may not have a C2PA table in it at
     // this point, adding any required chunks needed for C2PA to work correctly.
@@ -1592,7 +1582,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("ffont.woff");
+        let source = fixture_path("font.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1639,7 +1629,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("ffont.woff");
+        let source = fixture_path("font.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1739,7 +1729,7 @@ pub mod tests {
     #[test]
     fn get_object_locations() {
         // Load the basic WOFF test fixture
-        let source = fixture_path("ffont.woff");
+        let source = fixture_path("font.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1798,7 +1788,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("ffont.woff");
+        let source = fixture_path("font.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1833,7 +1823,7 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF test fixture
-        let source = fixture_path("ffont.woff");
+        let source = fixture_path("font.woff");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
@@ -1876,7 +1866,7 @@ pub mod tests {
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
             // Load the basic WOFF test fixture
-            let source = crate::utils::test::fixture_path("ffont.woff");
+            let source = crate::utils::test::fixture_path("font.woff");
 
             // Create a temporary output for the file
             let temp_dir = tempdir().unwrap();
