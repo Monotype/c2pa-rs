@@ -1245,18 +1245,18 @@ where
     TDest: Write + ?Sized,
 {
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
-//let manifest_uri = match font.tables.C2PA() {
-//    Ok(Some(c2pa_table)) => {
-//        let manifest_uri = c2pa_table.activeManifestUri.clone();
-//        font.tables.insert(TableC2PA::new(
-//            None,
-//            c2pa_table.get_manifest_store().map(|x| x.to_vec()),
-//        ));
-//        manifest_uri
-//    }
-//    Ok(None) => None,
-//    Err(_) => return Err(Error::DeserializationError),
-//};
+    let manifest_uri = match font.tables[&C2PA_TABLE_TAG] {
+        Ok(Some(c2pa_table)) => {
+            let manifest_uri = c2pa_table.activeManifestUri.clone();
+            font.tables.insert(TableC2PA::new(
+                None,
+                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
+            ));
+            manifest_uri
+        }
+        Ok(None) => None,
+        Err(_) => return Err(Error::DeserializationError),
+    };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(1); // manifest_uri)
 }
@@ -1378,12 +1378,13 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-        let font: Font = Font::Read(reader)
-        .map_err(|y| {Error::FontLoadError})?;
-        // Grab the C2PA table.
-        font.tables[C2PA_TABLE_TAG]
-            .map_err(|_err| Error::DeserializationError)?
-            .ok_or(Error::JumbfNotFound)
+    let font: Font = Font::Read(reader);
+    if font.tables.contains_key(&C2PA_TABLE_TAG) {
+        Ok(font.tables[&C2PA_TABLE_TAG])
+    }
+    else {
+        Err(Error::JumbfNotFound)
+    }
 }
 
 /// Main WOFF IO feature.
