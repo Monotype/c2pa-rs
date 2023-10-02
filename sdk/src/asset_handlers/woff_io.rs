@@ -11,10 +11,13 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
-    collections::HashMap,
+    collections::{
+        HashMap,
+        hash_map::Entry::{ Occupied, Vacant }
+    },
     convert::TryFrom,
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    io::{ BufReader, Cursor, Read, Seek, SeekFrom, Write },
     path::*,
 };
 
@@ -1245,20 +1248,18 @@ where
     TDest: Write + ?Sized,
 {
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
-    let manifest_uri = match font.tables[&C2PA_TABLE_TAG] {
-        Ok(Some(c2pa_table)) => {
-            let manifest_uri = c2pa_table.activeManifestUri.clone();
-            font.tables.insert(TableC2PA::new(
-                None,
-                c2pa_table.get_manifest_store().map(|x| x.to_vec()),
-            ));
+    let manifest_uri = match font.tables.entry(C2PA_TABLE_TAG) {
+        Occupied(entry) => {
+            // TBD - Something more move-y?
+            let manifest_uri = entry.into_mut().activeManifestUri.clone();
+            entry.activeManifestUri = None;
             manifest_uri
-        }
-        Ok(None) => None,
-        Err(_) => return Err(Error::DeserializationError),
+        },
+        Vacant(entry) => None,
     };
+    // TBD - Only write if dirty?
     font.write(destination).map_err(|_| Error::FontSaveError)?;
-    Ok(1); // manifest_uri)
+    Ok(manifest_uri);
 }
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
@@ -1378,13 +1379,8 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let font: Font = Font::Read(reader);
-    if font.tables.contains_key(&C2PA_TABLE_TAG) {
-        Ok(font.tables[&C2PA_TABLE_TAG])
-    }
-    else {
-        Err(Error::JumbfNotFound)
-    }
+    let font: Font = Font::Read(reader).map_err(|_| Error::FontLoadError)?;
+    font.tables.entry(C2PA_TABLE_TAG).ok_or(Error::JumbfNotFound);
 }
 
 /// Main WOFF IO feature.
