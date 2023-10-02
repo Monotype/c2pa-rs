@@ -20,6 +20,7 @@ use std::{
 
 use lazy_static::lazy_static;
 
+#[cfg(feature = "otf")]
 use crate::asset_handlers::otf_io::OtfIO;
 use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
@@ -42,6 +43,7 @@ lazy_static! {
             Box::new(RiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
+            #[cfg(feature = "otf")]
             Box::new(OtfIO::new("")),
             Box::new(WoffIO::new(""))
         ];
@@ -70,6 +72,7 @@ lazy_static! {
             Box::new(RiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
+            #[cfg(feature = "otf")]
             Box::new(OtfIO::new("")),
             Box::new(WoffIO::new(""))
         ];

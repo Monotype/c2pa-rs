@@ -306,6 +306,7 @@ mod tests {
     use super::*;
     use crate::{jumbf_io::get_assetio_handler_from_path, utils::test::fixture_path};
 
+    #[cfg(feature = "otf")]
     #[test]
     fn test_hash_verify_otf() {
         let ap = fixture_path("font.otf");

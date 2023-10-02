@@ -1494,55 +1494,54 @@ impl Store {
                 hashes.push(dh);
             }
         }
-// aggressive change
-//        #[cfg(not(feature = "otf"))]
-//        {
-//            // generate default data hash that excludes jumbf block
-//            // find the first jumbf block (ours are always in order)
-//            // find the first block after the jumbf blocks
-//            let mut block_start: usize = 0;
-//            let mut block_end: usize = 0;
-//            let mut found_jumbf = false;
-//            for item in block_locations {
-//                // find start of jumbf
-//                if !found_jumbf && item.htype == HashBlockObjectType::Cai {
-//                    block_start = item.offset;
-//                    found_jumbf = true;
-//                }
-//
-//                // find start of block after jumbf blocks
-//                if found_jumbf && item.htype == HashBlockObjectType::Cai {
-//                    block_end = item.offset + item.length;
-//                }
-//            }
-//
-//            if found_jumbf {
-//                // add exclusion hash for bytes before and after jumbf
-//                let mut dh = DataHash::new("jumbf manifest", alg);
-//                if block_end > block_start {
-//                    dh.add_exclusion(HashRange::new(block_start, block_end - block_start));
-//                }
-//
-//                if calc_hashes {
-//                    // this check is only valid on the final sized asset
-//                    if block_end as u64 > stream_len {
-//                        return Err(Error::BadParam(
-//                            "data hash exclusions out of range".to_string(),
-//                        ));
-//                    }
-//
-//                    dh.gen_hash_from_stream(stream)?;
-//                } else {
-//                    match alg {
-//                        "sha256" => dh.set_hash([0u8; 32].to_vec()),
-//                        "sha384" => dh.set_hash([0u8; 48].to_vec()),
-//                        "sha512" => dh.set_hash([0u8; 64].to_vec()),
-//                        _ => return Err(Error::UnsupportedType),
-//                    }
-//                }
-//                hashes.push(dh);
-//            }
-//        }
+        #[cfg(not(feature = "otf"))]
+        {
+            // generate default data hash that excludes jumbf block
+            // find the first jumbf block (ours are always in order)
+            // find the first block after the jumbf blocks
+            let mut block_start: usize = 0;
+            let mut block_end: usize = 0;
+            let mut found_jumbf = false;
+            for item in block_locations {
+                // find start of jumbf
+                if !found_jumbf && item.htype == HashBlockObjectType::Cai {
+                    block_start = item.offset;
+                    found_jumbf = true;
+                }
+
+                // find start of block after jumbf blocks
+                if found_jumbf && item.htype == HashBlockObjectType::Cai {
+                    block_end = item.offset + item.length;
+                }
+            }
+
+            if found_jumbf {
+                // add exclusion hash for bytes before and after jumbf
+                let mut dh = DataHash::new("jumbf manifest", alg);
+                if block_end > block_start {
+                    dh.add_exclusion(HashRange::new(block_start, block_end - block_start));
+                }
+
+                if calc_hashes {
+                    // this check is only valid on the final sized asset
+                    if block_end as u64 > stream_len {
+                        return Err(Error::BadParam(
+                            "data hash exclusions out of range".to_string(),
+                        ));
+                    }
+
+                    dh.gen_hash_from_stream(stream)?;
+                } else {
+                    match alg {
+                        "sha256" => dh.set_hash([0u8; 32].to_vec()),
+                        "sha384" => dh.set_hash([0u8; 48].to_vec()),
+                        "sha512" => dh.set_hash([0u8; 64].to_vec()),
+                        _ => return Err(Error::UnsupportedType),
+                    }
+                }
+                hashes.push(dh);
+            }
+        }
 
         Ok(hashes)
     }

@@ -14,6 +14,7 @@
 pub mod bmff_io;
 pub mod c2pa_io;
 pub mod jpeg_io;
+#[cfg(feature = "otf")]
 pub mod otf_io;
 pub mod woff_io;
 pub mod png_io;
