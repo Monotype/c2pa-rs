@@ -1067,6 +1067,21 @@ where
 {
     source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    match font.tables.entry(C2PA_TABLE_TAG) {
+        Occupied(mut entry) => {
+            match entry.get_mut() {
+                Table::C2PA(the_c2pa_table) => {
+                    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
+                    the_c2pa_table.activeManifestUri = None;
+                    manifest_uri
+                    }
+                _ => {
+                    None
+                }
+            }
+        },
+        Vacant(_) => None,
+    };
 //match font.tables.C2PA() {
 //    Ok(Some(c2pa_table)) => {
 //        font.tables.insert(TableC2PA::new(
