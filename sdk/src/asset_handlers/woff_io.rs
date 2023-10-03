@@ -1250,16 +1250,22 @@ where
     let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
     let manifest_uri = match font.tables.entry(C2PA_TABLE_TAG) {
         Occupied(entry) => {
-            // TBD - Something more move-y?
-            let manifest_uri = entry.into_mut().activeManifestUri.clone();
-            entry.activeManifestUri = None;
-            manifest_uri
+            match entry.get_mut() {
+                Table::C2PA(theC2PATable) => {
+                    let manifest_uri = theC2PATable.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
+                    theC2PATable.activeManifestUri = None;
+                    manifest_uri
+                    }
+                _ => {
+                    None
+                }
+            }
         },
         Vacant(entry) => None,
     };
-    // TBD - Only write if dirty?
+    // TBD - Only (re-)write if actually dirty (if there _was_ a uri, but now there's not?)
     font.write(destination).map_err(|_| Error::FontSaveError)?;
-    Ok(manifest_uri);
+    Ok(manifest_uri)
 }
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
@@ -1380,7 +1386,18 @@ where
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let font: Font = Font::Read(reader).map_err(|_| Error::FontLoadError)?;
-    font.tables.entry(C2PA_TABLE_TAG).ok_or(Error::JumbfNotFound);
+    match font.tables.entry(C2PA_TABLE_TAG) {
+        Occupied(entry) => {
+            // tbd not ok - this constant match-or-throw crawls, sir.
+            match entry.get_mut() {
+                Table::C2PA(theC2PATable) => { Ok(theC2PATable) } // tbd not ok - clone??
+                _ => { Err(Error::FontLoadError) /* tbd - worse than this */ }
+            }
+        },
+        Vacant(entry) => {
+            Err(Error::JumbfNotFound)
+        }
+    }
 }
 
 /// Main WOFF IO feature.
