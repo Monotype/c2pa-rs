@@ -25,7 +25,6 @@ use std::{
 use byteorder::{BigEndian, ReadBytesExt};
 
 use log::trace;
-use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -306,13 +305,13 @@ const HEAD_TABLE_TAG: TableTag = TableTag { data: [b'h', b'e', b'a', b'd'] };
 /// is always big-endian, unless it's explicitly not.
 enum Magic {
     /// OpenType - 'OTTO'
-    OpenType = 0x4F54544F,
+    _OpenType = 0x4F54544F,
     /// TrueType - FIXED 1.0
-    TrueType = 0x00010000,
+    _TrueType = 0x00010000,
     /// WOFF 1.0 - 'wOFF'
     Woff     = 0x774F4646,
     /// WOFF 2.0 - 'wOF2'
-    Woff2    = 0x774F4632,
+    _Woff2    = 0x774F4632,
 }
 
 /// Used to attempt conversion from u32 to a Magic value.
@@ -340,7 +339,7 @@ trait NetworkByteOrderable {
 }
 
 /// 'C2PA' font table - in storage
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug)]
 #[repr(C, packed)]
 #[allow(non_snake_case)]
 struct TableC2PARaw {
@@ -372,6 +371,7 @@ impl NetworkByteOrderable for TableC2PARaw {
 }
 
 /// 'C2PA' font table - in storage
+#[derive(Clone)]
 #[allow(non_snake_case)]
 pub struct TableC2PA {
     /// Major version of the C2PA table record
@@ -515,7 +515,7 @@ impl Default for TableC2PA {
 //}
 
 /// 'head' font table
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug)]
 #[repr(C, packed)]
 #[allow(non_snake_case)]
 struct TableHead {
@@ -583,8 +583,11 @@ impl NetworkByteOrderable for TableHead {
         self.glyphDataFormat = i16::to_be(self.glyphDataFormat);
     }
 }
+
 /// Generic font table with unknown contents
-#[derive(Debug, Deserialize, Serialize)]
+//#[derive(Debug)] - error[E0507]: cannot move out of `self.data` which is behind a shared reference
+//    data: Box<[u8]>,
+//    ^^^^^^^^^^^^^^^ move occurs because `self.data` has type `Box<[u8]>`, which does not implement the `Copy` trait
 #[repr(C, packed)]
 struct TableUnspecified {
     data: Box<[u8]>,
@@ -631,7 +634,7 @@ impl Font {
     }
 
     /// Reads in a font file.
-    fn Read<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
+    fn read<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
         // Must always rewind input
         source_stream.rewind()?;
         // Verify the font has a valid version in it before assuming the rest is
@@ -641,7 +644,7 @@ impl Font {
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Check the magic number
         match font_magic {
-            Magic::Woff => Font::ReadWoff(source_stream),
+            Magic::Woff => Font::read_woff(source_stream),
             // TBD: SFNT
             // TBD-er: WOFF2
             // TBD-est: EOT
@@ -650,15 +653,15 @@ impl Font {
     }
 
     /// Writes out a font file.
-    fn write(&mut self, mut writer: impl std::io::Write) -> core::result::Result<(), Box<dyn std::error::Error>> {
+    fn write(&mut self, mut _writer: impl std::io::Write) -> core::result::Result<(), Box<dyn std::error::Error>> {
         Err(Error::FontSaveError)?
     }
 
     /// Reads in a WOFF 1 font file
-    fn ReadWoff<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
+    fn read_woff<T: Read + Seek +?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
         // We expect to be called with the stream positions just past the magic number.
-        let mut theFont: Font = Font::new(Magic::Woff);
-        theFont.magic = Magic::Woff;
+        let mut the_font: Font = Font::new(Magic::Woff);
+        the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
         let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
         let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
@@ -744,7 +747,7 @@ impl Font {
                 trace!("Position for C2PA in font: {:?}", &position);
             }
         }
-        Ok(theFont)
+        Ok(the_font)
 
     }
 }
@@ -755,8 +758,9 @@ impl Font {
 /// SFNT, and then get derived/extended by the definitions in WOFF, WOFF2 and EOT.
 
 /// WOFF 1.0 file header, from the WOFF spec.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug)]
 #[repr(C, packed)]
+#[allow(non_snake_case)]
 struct WoffHeader {
     signature: u32,
     flavor: u32,
@@ -809,6 +813,7 @@ impl NetworkByteOrderable for WoffHeader {
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Debug)]
 #[repr(C, packed)]
+#[allow(non_snake_case)]
 struct WoffTableDirEntry {
     tag: TableTag,
     offset: u32,
@@ -846,6 +851,7 @@ pub enum ChunkType {
 /// Represents regions within a font file that may be of interest when it
 /// comes to hashing data for C2PA.
 #[derive(Debug)]
+#[allow(non_snake_case)]
 pub struct ChunkPositions {
     /// Offset to the start of the chunk
     pub offset: u64,
@@ -1002,14 +1008,14 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    manifest_store_data: &[u8],
+    _manifest_store_data: &[u8],
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font_file: Font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font_file: Font = Font::read(source).map_err(|_| Error::FontLoadError)?;
 //match font_file.tables[&C2PA_TABLE_TAG] {
 //    Ok(Some(c2pa_table)) => {
 //        font_file.tables.insert(TableC2PA::new(
@@ -1053,14 +1059,14 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    manifest_uri: &str,
+    _manifest_uri: &str, //tbd
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
 //match font.tables.C2PA() {
 //    Ok(Some(c2pa_table)) => {
 //        font.tables.insert(TableC2PA::new(
@@ -1100,7 +1106,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = Font::Read(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::read(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
 //match font.tables.C2PA() {
 //    Ok(None) => {
@@ -1217,7 +1223,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1247,13 +1253,13 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
-    let mut font = Font::Read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
     let manifest_uri = match font.tables.entry(C2PA_TABLE_TAG) {
-        Occupied(entry) => {
+        Occupied(mut entry) => {
             match entry.get_mut() {
-                Table::C2PA(theC2PATable) => {
-                    let manifest_uri = theC2PATable.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
-                    theC2PATable.activeManifestUri = None;
+                Table::C2PA(the_c2pa_table) => {
+                    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
+                    the_c2pa_table.activeManifestUri = None;
                     manifest_uri
                     }
                 _ => {
@@ -1261,7 +1267,7 @@ where
                 }
             }
         },
-        Vacant(entry) => None,
+        Vacant(_) => None,
     };
     // TBD - Only (re-)write if actually dirty (if there _was_ a uri, but now there's not?)
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1385,16 +1391,16 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let font: Font = Font::Read(reader).map_err(|_| Error::FontLoadError)?;
+    let mut font: Font = Font::read(reader).map_err(|_| Error::FontLoadError)?;
     match font.tables.entry(C2PA_TABLE_TAG) {
         Occupied(entry) => {
             // tbd not ok - this constant match-or-throw crawls, sir.
-            match entry.get_mut() {
-                Table::C2PA(theC2PATable) => { Ok(theC2PATable) } // tbd not ok - clone??
+            match entry.get() {
+                Table::C2PA(the_c2pa_table) => { Ok(the_c2pa_table.clone()) }
                 _ => { Err(Error::FontLoadError) /* tbd - worse than this */ }
             }
         },
-        Vacant(entry) => {
+        Vacant(_) => {
             Err(Error::JumbfNotFound)
         }
     }
