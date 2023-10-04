@@ -300,9 +300,6 @@ const C2PA_TABLE_TAG: TableTag = TableTag { data: [b'C', b'2', b'P', b'A'] };
 const HEAD_TABLE_TAG: TableTag = TableTag { data: [b'h', b'e', b'a', b'd'] };
 
 /// 32-bit font-format identifier.
-/// TBD: These should either be [u8; 4], or we should figure out ser/de
-/// byte-swapping (the enum values presume big-endian order; everything in fonts
-/// is always big-endian, unless it's explicitly not.
 enum Magic {
     /// OpenType - 'OTTO'
     _OpenType = 0x4F54544F,
@@ -615,8 +612,6 @@ enum Table {
 
 /// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 or 2) and
 /// EOT fonts. Potentially composable to support TrueType/OpenType Collections.
-/// 
-/// TBD: Rename this to Font, once that would no longer conflict.
 struct Font {
     /// Magic number for this font's container format
     magic:  Magic,                
@@ -690,8 +685,9 @@ impl Font {
         // Loop through the `tableRecords` array
         while source_stream.read_exact(&mut woff_dirent_buf).is_ok() {
             // Grab the tag of the table record entry
-            let mut table_tag: [u8; 4] = [0; 4];
-            table_tag.copy_from_slice(&woff_dirent_buf[0..4]);
+            let mut table_tag_raw: [u8; 4] = [0; 4];
+            table_tag_raw.copy_from_slice(&woff_dirent_buf[0..4]);
+            let table_tag: TableTag = TableTag { data: table_tag_raw; }
 
             // Then grab the offset and length of the actual name table to
             // create the other exclusion zone.
@@ -706,7 +702,7 @@ impl Font {
             // Build up table record chunk to add to the positions
             let mut name: [u8; 4] = [0; 4];
             // Copy from the table tag to be owned by the chunk position record
-            name.copy_from_slice(&table_tag);
+            name.copy_from_slice(&table_tag_raw);
 
             // Create a table record chunk position as a default table record type
             // and add it to the collection of positions
@@ -716,6 +712,25 @@ impl Font {
                 name,
                 chunk_type: ChunkType::TableRecord,
             });
+
+            // Load this table
+            let mut table: Table = {
+                match table_tag {
+                    C2PA_TABLE_TAG => {
+                        Table::C2PA(TableC2PA) {}
+                    }
+                    HEAD_TABLE_TAG => {
+                        Table::Head(TableHead) {}
+                    }
+                    _ => {
+                        Table::Unspecified(TableUnspecified{data: vec![0; orig_length as usize].into_boxed_slice()})
+                        }
+                    }
+                }
+            };
+
+            // Store it in the bucket
+            the_font.tables.insert(table_tag, table);
 
             // Increment the table counter
             table_counter += 1;
@@ -748,7 +763,6 @@ impl Font {
             }
         }
         Ok(the_font)
-
     }
 }
 
@@ -1059,7 +1073,7 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    _manifest_uri: &str, //tbd
+    _manifest_uri: &str,
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
