@@ -585,8 +585,6 @@ impl NetworkByteOrderable for TableHead {
 }
 
 /// Generic font table with unknown contents.
-/// 
-/// TBD - Enhancements for lazy loading and/or streaming.
 #[repr(C, packed)] // Packed because this describes a serialization format.
 struct TableUnspecified {
     data: Vec<u8>,
@@ -786,8 +784,7 @@ impl Font {
 
 /// TBD: All the serialization structures so far have been defined using native
 /// Rust types; should we go all-out in the other direction, and establish a
-/// layer of "font" types (FWORD, FIXED, etc.)? Mostly these will come from
-/// SFNT, and then get derived/extended by the definitions in WOFF, WOFF2 and EOT.
+/// layer of "font" types (FWORD, FIXED, etc.)?
 
 /// WOFF 1.0 file header, from the WOFF spec.
 #[derive(Debug)]
@@ -1101,12 +1098,8 @@ where
 {
     source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    // 1. If the font read from the input stream has a C2PA table, retrieve it.
-    // 2. If that C2PA table has a remote manifest URI,
-    //    a. Remember it.
-    //    b. If it differs from `manifest_uri`, replace it.
-    // 3. Write the font to the output stream
-    // 4. Return the original manifest URI, if any.
+    // Install the provide activeManifestUri in this font's C2PA table, adding
+    // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, create it.
         None => {
@@ -1115,14 +1108,15 @@ where
                 Table::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
-        // If there is, replace it
+        // If there is, replace its `activeManifestUri` value with the
+        // provided one.
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
                 Table::C2PA(c2pa_table) => {
                     c2pa_table.activeManifestUri = Some(manifest_uri.to_string());
                 }
                 _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error.");
+                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
                 }
             };
         }
@@ -1301,23 +1295,34 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
+    //source.rewind()?; hmm...
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    let manifest_uri = match font.tables.entry(C2PA_TABLE_TAG) {
-        Occupied(mut entry) => {
-            match entry.get_mut() {
-                //Table::C2PA(the_c2pa_table) => {
-                //    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
-                //    the_c2pa_table.activeManifestUri = None;
-                //    manifest_uri
-                //    }
-                _ => None,
+    let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
+        // If there isn't one, how pleasant, there will be so much less to do.
+        None => None,
+        // If there is, replace its `activeManifestUri` value with the
+        // provided one.
+        Some(ostensible_c2pa_table) => {
+            match ostensible_c2pa_table {
+                Table::C2PA(c2pa_table) => {
+                    if c2pa_table.activeManifestUri.is_none() {
+                        None
+                    }
+                    else {
+                        let old_manifest_uri = c2pa_table.activeManifestUri.clone();
+                        c2pa_table.activeManifestUri = None;
+                        old_manifest_uri
+                    }
+                }
+                _ => {
+                    //todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                    None
+                }
             }
         }
-        Vacant(_) => None,
     };
-    // TBD - Only (re-)write if actually dirty (if there _was_ a uri, but now there's not?)
     font.write(destination).map_err(|_| Error::FontSaveError)?;
-    Ok(manifest_uri)
+    Ok(old_manifest_uri_maybe)
 }
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
