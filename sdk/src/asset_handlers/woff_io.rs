@@ -380,16 +380,15 @@ pub struct TableC2PA {
     /// Optional URI to an active manifest
     pub activeManifestUri: Option<String>,
     /// Optional embedded manifest store
-    manifestStore: Option<Box<[u8]>>,
+    manifestStore: Option<Vec<u8>>,
 }
 
 impl TableC2PA {
     /// Creates a new C2PA record with the current default version information.
     pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
-        let boxed_data = manifest_store.map(|d| d.into_boxed_slice());
         Self {
             activeManifestUri: active_manifest_uri,
-            manifestStore: boxed_data,
+            manifestStore: manifest_store,
             ..TableC2PA::default()
         }
     }
