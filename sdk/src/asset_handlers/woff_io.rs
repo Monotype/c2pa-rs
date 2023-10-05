@@ -1047,6 +1047,7 @@ where
 {
     source.rewind()?;
     let mut font_file: Font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    //tbd impl me now
     //match font_file.tables[&C2PA_TABLE_TAG] {
     //    Ok(Some(c2pa_table)) => {
     //        font_file.tables.insert(TableC2PA::new(
