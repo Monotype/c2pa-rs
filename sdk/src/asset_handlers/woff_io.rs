@@ -338,8 +338,8 @@ trait NetworkByteOrderable {
 
 /// 'C2PA' font table - in storage
 #[derive(Debug)]
-#[repr(C, packed)]
-#[allow(non_snake_case)]
+#[repr(C, packed)]       // As defined by the C2PA spec.
+#[allow(non_snake_case)] // As named by the C2PA spec.
 struct TableC2PARaw {
     majorVersion: u16,
     minorVersion: u16,
@@ -369,7 +369,7 @@ impl NetworkByteOrderable for TableC2PARaw {
     }
 }
 
-/// 'C2PA' font table - in storage
+/// 'C2PA' font table - after loading from storage
 #[derive(Clone)]
 #[allow(non_snake_case)]
 pub struct TableC2PA {
@@ -512,10 +512,11 @@ impl Default for TableC2PA {
 //    }
 //}
 
-/// 'head' font table
+/// 'head' font table. For now, there is no need for a 'raw' variant, since only
+/// byte-swapping is needed.
 #[derive(Debug)]
-#[repr(C, packed)]
-#[allow(non_snake_case)]
+#[repr(C, packed)]       // As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
+#[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 struct TableHead {
     majorVersion: u16,
     minorVersion: u16,
@@ -583,8 +584,10 @@ impl NetworkByteOrderable for TableHead {
     }
 }
 
-/// Generic font table with unknown contents
-#[repr(C, packed)]
+/// Generic font table with unknown contents.
+/// 
+/// TBD - Enhancements for lazy loading and/or streaming.
+#[repr(C, packed)] // Packed because this describes a serialization format.
 struct TableUnspecified {
     data: Vec<u8>,
 }
@@ -788,8 +791,8 @@ impl Font {
 
 /// WOFF 1.0 file header, from the WOFF spec.
 #[derive(Debug)]
-#[repr(C, packed)]
-#[allow(non_snake_case)]
+#[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffHeader {
     signature: u32,
     flavor: u32,
@@ -842,8 +845,8 @@ impl NetworkByteOrderable for WoffHeader {
 
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Debug)]
-#[repr(C, packed)]
-#[allow(non_snake_case)]
+#[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffTableDirEntry {
     tag: TableTag,
     offset: u32,
@@ -882,7 +885,6 @@ pub enum ChunkType {
 /// Represents regions within a font file that may be of interest when it
 /// comes to hashing data for C2PA.
 #[derive(Debug)]
-#[allow(non_snake_case)]
 pub struct ChunkPositions {
     /// Offset to the start of the chunk
     pub offset: u64,
