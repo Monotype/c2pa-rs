@@ -298,14 +298,18 @@ const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA", };
 const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head", };
 
 /// 32-bit font-format identifier.
+///
+/// Embedded OpenType and MicroType Express formats cannot be detected with a
+/// simple magic-number sniff. Conceivably, EOT could be dealt with as a
+/// variation on SFNT, but MTX needs more exotic handling.
 enum Magic {
-    /// OpenType - 'OTTO'
+    /// 'OTTO' - OpenType
     _OpenType = 0x4f54544f,
-    /// TrueType - FIXED 1.0
+    /// FIXED 1.0 - TrueType (or possibly v1.0 Embedded OpenType)
     _TrueType = 0x00010000,
-    /// WOFF 1.0 - 'wOFF'
+    /// 'wOFF' - WOFF 1.0
     Woff = 0x774f4646,
-    /// WOFF 2.0 - 'wOF2'
+    /// 'wOF2' - WOFF 2.0
     _Woff2 = 0x774f4632,
 }
 
@@ -586,6 +590,16 @@ struct TableUnspecified {
     data: Vec<u8>,
 }
 
+// TBD - Change this concept from "byte-orderable" to something more like
+// "serialize".
+//  💡 Maybe we begin by having `to_bytes` and `from_bytes` methods, which
+//     handle things like byte-swapping integers, and unpacking strings (like
+//     the `activeManifestUri`, or things in the `name` table).
+//  ⚡ Then later, we can optimize stream handling with `to_stream` and
+//     `from_stream` overrides (though, we may end up requiring some kind of
+//     "writer" state of our own, that gets passed to each table in turn; we
+//     need some mechanism for code to maintain offsets, and interact-with/obey
+//     the chunk-map
 impl NetworkByteOrderable for TableUnspecified {
     // No operation; byte arrays have just that one order order.
     fn from_network(&mut self) {
@@ -636,11 +650,9 @@ impl Font {
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Check the magic number
         match font_magic {
+            Magic::_OpenType|Magic::_TrueType => todo!("Yow! Implement read_sfnt!"),
             Magic::Woff => Font::read_woff(source_stream),
-            // TBD: SFNT
-            // TBD-er: WOFF2
-            // TBD-est: EOT
-            _ => Err(Error::FontLoadError),
+            Magic::_Woff2 => todo!("Yow! Implement read_woff2!"),
         }
     }
 
