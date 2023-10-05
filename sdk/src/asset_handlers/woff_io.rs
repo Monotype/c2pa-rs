@@ -605,7 +605,7 @@ enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
-    Head(TableHead),
+    //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
 }
@@ -687,7 +687,7 @@ impl Font {
             // Grab the tag of the table record entry
             let mut table_tag_raw: [u8; 4] = [0; 4];
             table_tag_raw.copy_from_slice(&woff_dirent_buf[0..4]);
-            let table_tag: TableTag = TableTag { data: table_tag_raw; }
+            let table_tag: TableTag = TableTag { data: table_tag_raw };
 
             // Then grab the offset and length of the actual name table to
             // create the other exclusion zone.
@@ -697,7 +697,7 @@ impl Font {
 
             // At this point we will add the table record entry to the temporary
             // buffer as just a regular table
-            table_offset_pos.push((offset, orig_length, table_tag, ChunkType::Table));
+            table_offset_pos.push((offset, orig_length, table_tag_raw, ChunkType::Table));
 
             // Build up table record chunk to add to the positions
             let mut name: [u8; 4] = [0; 4];
@@ -716,15 +716,14 @@ impl Font {
             // Load this table
             let mut table: Table = {
                 match table_tag {
-                    C2PA_TABLE_TAG => {
-                        Table::C2PA(TableC2PA) {}
-                    }
-                    HEAD_TABLE_TAG => {
-                        Table::Head(TableHead) {}
-                    }
+                    //C2PA_TABLE_TAG => {
+                    //    Table::C2PA({tbl: }) {}
+                    //}
+                    //HEAD_TABLE_TAG => {
+                    //    Table::Head(TableHead) {}
+                    //}
                     _ => {
-                        Table::Unspecified(TableUnspecified{data: vec![0; orig_length as usize].into_boxed_slice()})
-                        }
+                        Table::Unspecified(TableUnspecified {data: vec![0; orig_length as usize].into_boxed_slice()})
                     }
                 }
             };
@@ -1073,7 +1072,7 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    _manifest_uri: &str,
+    manifest_uri: &str,
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
@@ -1081,20 +1080,29 @@ where
 {
     source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    match font.tables.entry(C2PA_TABLE_TAG) {
+    // 1. If the font read from the input stream has a C2PA table, retrieve it.
+    // 2. If that C2PA table has a remote manifest URI,
+    //    a. Remember it.
+    //    b. If it differs from `manifest_uri`, replace it.
+    // 3. Write the font to the output stream
+    // 4. Return the original manifest URI, if any.
+    let mut c2pa = match font.tables.entry(C2PA_TABLE_TAG) {
+        Vacant(_) => Table::C2PA(TableC2PA {activeManifestUri: manifest_uri,
+                                             manifestStore: None,
+                                             majorVersion: 1,
+                                             minorVersion: 0}),
         Occupied(mut entry) => {
             match entry.get_mut() {
-                Table::C2PA(the_c2pa_table) => {
-                    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
-                    the_c2pa_table.activeManifestUri = None;
-                    manifest_uri
-                    }
+                //Table::C2PA(the_c2pa_table) => {
+                //    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
+                //    the_c2pa_table.activeManifestUri = None;
+                //    manifest_uri
+                //    }
                 _ => {
-                    None
+                    Ok(None)
                 }
             }
         },
-        Vacant(_) => None,
     };
 //match font.tables.C2PA() {
 //    Ok(Some(c2pa_table)) => {
@@ -1286,11 +1294,11 @@ where
     let manifest_uri = match font.tables.entry(C2PA_TABLE_TAG) {
         Occupied(mut entry) => {
             match entry.get_mut() {
-                Table::C2PA(the_c2pa_table) => {
-                    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
-                    the_c2pa_table.activeManifestUri = None;
-                    manifest_uri
-                    }
+                //Table::C2PA(the_c2pa_table) => {
+                //    let manifest_uri = the_c2pa_table.activeManifestUri.clone(); // TBD - Couldn't we "simply" move the value?
+                //    the_c2pa_table.activeManifestUri = None;
+                //    manifest_uri
+                //    }
                 _ => {
                     None
                 }
@@ -1425,7 +1433,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         Occupied(entry) => {
             // tbd not ok - this constant match-or-throw crawls, sir.
             match entry.get() {
-                Table::C2PA(the_c2pa_table) => { Ok(the_c2pa_table.clone()) }
+                //Table::C2PA(the_c2pa_table) => { Ok(the_c2pa_table.clone()) }
                 _ => { Err(Error::FontLoadError) /* tbd - worse than this */ }
             }
         },
