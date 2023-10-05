@@ -1039,32 +1039,60 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-    _manifest_store_data: &[u8],
+    manifest_store_data: &[u8],
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font_file: Font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    //tbd impl me now
-    //match font_file.tables[&C2PA_TABLE_TAG] {
-    //    Ok(Some(c2pa_table)) => {
-    //        font_file.tables.insert(TableC2PA::new(
-    //            c2pa_table.activeManifestUri.clone(),
-    //            Some(manifest_store_data.to_vec()),
-    //        ));
-    //    }
-    //    Ok(None) => font_file
-    //        .tables
-    //        .insert(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
-    //    Err(_) => return Err(Error::DeserializationError),
-    //};
-    // Write to the destination stream
-    font_file
-        .write(destination)
-        .map_err(|_| Error::FontSaveError)?;
+    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    // Install the provide activeManifestUri in this font's C2PA table, adding
+    // that table if needed.
+    match font.tables.get_mut(&C2PA_TABLE_TAG) {
+        // If there isn't one, create it.
+        None => {
+            font.tables.insert(
+                C2PA_TABLE_TAG,
+                Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+            );
+        }
+        // If there is, replace its `activeManifestUri` value with the
+        // provided one.
+        Some(ostensible_c2pa_table) => {
+            match ostensible_c2pa_table {
+                Table::C2PA(c2pa_table) => {
+                    c2pa_table.manifestStore = Some(manifest_store_data.to_vec());
+                }
+                _ => {
+                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                }
+            };
+        }
+    };
+    font.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(())
+
+//    source.rewind()?;
+//    let mut font_file: Font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+//    //tbd impl me now
+//    //match font_file.tables[&C2PA_TABLE_TAG] {
+//    //    Ok(Some(c2pa_table)) => {
+//    //        font_file.tables.insert(TableC2PA::new(
+//    //            c2pa_table.activeManifestUri.clone(),
+//    //            Some(manifest_store_data.to_vec()),
+//    //        ));
+//    //    }
+//    //    Ok(None) => font_file
+//    //        .tables
+//    //        .insert(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+//    //    Err(_) => return Err(Error::DeserializationError),
+//    //};
+//    // Write to the destination stream
+//    font_file
+//        .write(destination)
+//        .map_err(|_| Error::FontSaveError)?;
+//    Ok(())
 }
 
 /// Adds the manifest URI reference to the font at the given path.
