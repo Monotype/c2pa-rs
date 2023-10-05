@@ -12,7 +12,6 @@
 // each license.
 use std::{
     collections::{
-        hash_map::Entry::{Occupied, Vacant},
         HashMap,
     },
     convert::TryFrom,
@@ -124,7 +123,7 @@ mod font_xmp_support {
     where
         TSource: Read + Seek + ?Sized,
     {
-        match read_reference_to_stream(source)? {
+        match read_reference_from_stream(source)? {
             // For now we pretend the reference read from the stream is really XMP
             // data
             Some(xmp) => {
@@ -1072,27 +1071,6 @@ where
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
     Ok(())
-
-//    source.rewind()?;
-//    let mut font_file: Font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-//    //tbd impl me now
-//    //match font_file.tables[&C2PA_TABLE_TAG] {
-//    //    Ok(Some(c2pa_table)) => {
-//    //        font_file.tables.insert(TableC2PA::new(
-//    //            c2pa_table.activeManifestUri.clone(),
-//    //            Some(manifest_store_data.to_vec()),
-//    //        ));
-//    //    }
-//    //    Ok(None) => font_file
-//    //        .tables
-//    //        .insert(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
-//    //    Err(_) => return Err(Error::DeserializationError),
-//    //};
-//    // Write to the destination stream
-//    font_file
-//        .write(destination)
-//        .map_err(|_| Error::FontSaveError)?;
-//    Ok(())
 }
 
 /// Adds the manifest URI reference to the font at the given path.
@@ -1241,7 +1219,7 @@ fn process_file_with_streams(
 fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
     // open the font source
     let mut font_stream = open_bufreader_for_file(font_path)?;
-    read_reference_to_stream(&mut font_stream)
+    read_reference_from_stream(&mut font_stream)
 }
 
 /// Reads the C2PA manifest store reference from the stream.
@@ -1253,7 +1231,7 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 /// ## Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
-fn read_reference_to_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
+fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
 where
     TSource: Read + Seek + ?Sized,
 {
@@ -1344,8 +1322,7 @@ where
                     }
                 }
                 _ => {
-                    //todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
-                    None
+                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
                 }
             }
         }
@@ -1471,19 +1448,19 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let mut font: Font = Font::read(reader).map_err(|_| Error::FontLoadError)?;
-    match font.tables.entry(C2PA_TABLE_TAG) {
-        Occupied(entry) => {
-            // tbd not ok - this constant match-or-throw crawls, sir.
-            match entry.get() {
-                //Table::C2PA(the_c2pa_table) => { Ok(the_c2pa_table.clone()) }
+    let font: Font = Font::read(reader).map_err(|_| Error::FontLoadError)?;
+    let c2pa_table: Option<TableC2PA> = match font.tables.get(&C2PA_TABLE_TAG) {
+        None => None,
+        Some(ostensible_c2pa_table) => {
+            match ostensible_c2pa_table {
+                Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
                 _ => {
-                    Err(Error::FontLoadError) /* tbd - worse than this */
+                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
                 }
             }
         }
-        Vacant(_) => Err(Error::JumbfNotFound),
-    }
+    };
+    c2pa_table.ok_or(Error::JumbfNotFound)
 }
 
 /// Main WOFF IO feature.
@@ -1514,7 +1491,7 @@ impl CAIReader for WoffIO {
     fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
         // Fonts have no XMP data.
         // BUT, for now we will pretend it does and read from the reference
-        match read_reference_to_stream(asset_reader) {
+        match read_reference_from_stream(asset_reader) {
             Ok(reference) => reference,
             Err(_) => None,
         }
