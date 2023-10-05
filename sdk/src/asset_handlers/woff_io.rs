@@ -304,13 +304,13 @@ const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head", };
 /// variation on SFNT, but MTX needs more exotic handling.
 enum Magic {
     /// 'OTTO' - OpenType
-    _OpenType = 0x4f54544f,
+    OpenType = 0x4f54544f,
     /// FIXED 1.0 - TrueType (or possibly v1.0 Embedded OpenType)
-    _TrueType = 0x00010000,
+    TrueType = 0x00010000,
     /// 'wOFF' - WOFF 1.0
     Woff = 0x774f4646,
     /// 'wOF2' - WOFF 2.0
-    _Woff2 = 0x774f4632,
+    Woff2 = 0x774f4632,
 }
 
 /// Used to attempt conversion from u32 to a Magic value.
@@ -320,10 +320,10 @@ impl TryFrom<u32> for Magic {
     /// Tries to convert from u32 to a valid font version.
     fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
         match v {
-            //x if x == Magic::TrueType as u32 => Ok(Magic::TrueType),
-            //x if x == Magic::OpenType as u32 => Ok(Magic::OpenType),
+            x if x == Magic::TrueType as u32 => Ok(Magic::TrueType),
+            x if x == Magic::OpenType as u32 => Ok(Magic::OpenType),
             x if x == Magic::Woff as u32 => Ok(Magic::Woff),
-            //x if x == Magic::Woff2 as u32 => Ok(Magic::Woff2),
+            x if x == Magic::Woff2 as u32 => Ok(Magic::Woff2),
             _ => Err(()),
         }
     }
@@ -652,9 +652,9 @@ impl Font {
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Check the magic number
         match font_magic {
-            Magic::_OpenType|Magic::_TrueType => todo!("Yow! Implement read_sfnt!"),
+            Magic::OpenType|Magic::TrueType => todo!("Yow! Implement read_sfnt!"),
             Magic::Woff => Font::read_woff(source_stream),
-            Magic::_Woff2 => todo!("Yow! Implement read_woff2!"),
+            Magic::Woff2 => todo!("Yow! Implement read_woff2!"),
         }
     }
 
