@@ -310,6 +310,12 @@ impl TableTag {
     fn as_bytes(&self) -> &[u8] {
         &self.data
     }
+    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+        Ok(Self {
+            data: [source_stream.read_u8()?, source_stream.read_u8()?,  // Ick, YHGTBKM...
+                   source_stream.read_u8()?, source_stream.read_u8()?],
+        });
+    }
 }
 
 /// Tag for the 'C2PA' table in a font.
@@ -695,65 +701,41 @@ impl Font {
         the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
 
-        // Read in the WOFFHeader & record its chunk
-        let woff_hdr = WoffHeader::new(source_stream)?;
+        // Push a position-chunk for the header itself.
+        //
+        // TBD - This is wett & wordy.
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name: [0; 4], // TBD - Magic names for TableDir and/or XML
+            name:   [0; 4], // TBD - Magic names for TableDir and/or XML
             chunk_type: ChunkType::TableDirectory,
         });
 
-        // Create a 20-byte buffer to hold each table entry as we read through the file
-        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()]
-          = [0; size_of::<WoffTableDirEntry>()];
-
-        // Table counter, to keep up with how many tables we have processed.
-        let mut table_counter = 0;
         // Advance to the start of the table entries
+        // TBD - Stream handling - the next line is not stream-relative.
+        // TBD - In fact, we should debug_assert that this would be a no-op.
         source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
-        let mut table_offset_pos = Vec::new();
+        let mut table_posns_deferred: Vec<ChunkPositions> = Vec::new(); // Actually we just leave the fur on...
 
         // Loop through the `tableRecords` array
-        while source_stream.read_exact(&mut woff_dirent_buf).is_ok() {
-            // Grab the tag of the table record entry
-            let mut table_tag_raw: [u8; 4] = [0; 4];
-            table_tag_raw.copy_from_slice(&woff_dirent_buf[0..4]);
-            let table_tag: TableTag = TableTag {
-                data: table_tag_raw,
-            };
-
-            // Then grab the offset and length of the actual name table to
-            // create the other exclusion zone.
-            // whew
-            let offset = (&woff_dirent_buf[4..8]).read_u32::<BigEndian>()?;
-            let _comp_length = (&woff_dirent_buf[8..12]).read_u32::<BigEndian>()?;
-            let orig_length = (&woff_dirent_buf[12..16]).read_u32::<BigEndian>()?;
-
+        let mut table_counter = 0;
+        while let wtde = WoffTableDirEntry::new(source_stream)? {
+            // Let's hamvestigate this clamjammler
+            //
             // At this point we will add the table record entry to the temporary
             // buffer as just a regular table
-            table_offset_pos.push((offset, orig_length, table_tag_raw, ChunkType::Table));
+            table_posns_deferred.push(ChunkPositions {
+                offset: wtde.offset,
+                length: wtde.origLength,
+                name:   wtde.tag,
+                chunk_type: ChunkType::Table});
 
-            // Build up table record chunk to add to the positions
-            let mut name: [u8; 4] = [0; 4];
-            // Copy from the table tag to be owned by the chunk position record
-            name.copy_from_slice(&table_tag_raw);
-
-            // Create a table record chunk position as a default table record type
-            // and add it to the collection of positions
-            positions.push(ChunkPositions {
-                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter)) as u64,
-                length: size_of::<WoffTableDirEntry>() as u32,
-                name,
-                chunk_type: ChunkType::TableRecord,
-            });
-
-            // Load this table
+                // Load this table
             let table: Table = {
-                match table_tag {
+                match wtde.tag {
                     //C2PA_TABLE_TAG => {
                     //    Table::C2PA({tbl: }) {}
                     //}
@@ -761,13 +743,13 @@ impl Font {
                     //    Table::Head(TableHead) {}
                     //}
                     _ => Table::Unspecified(TableUnspecified {
-                        data: vec![0; orig_length as usize],
+                        data: vec![0; wtde.origLength as usize],
                     }),
                 }
             };
 
             // Store it in the bucket
-            the_font.tables.insert(table_tag, table);
+            the_font.tables.insert(wtde.tag, table);
 
             // Increment the table counter
             table_counter += 1;
@@ -792,6 +774,13 @@ impl Font {
                 chunk_type: entry.3,
             });
         }
+        // TBD - Magic names for TableDir and/or XML
+        //
+        // 1. Measure the rest of the stream
+        // 2. Mallocate a bytebox, read the stuff in.
+        // 3. Tag it as "ZZZ Zachariah Zebulon's Zigguraut Zestifiers" so it always goes last. ("TBD - Magic names for TableDir and/or XML.")
+        //
+        // 4. Add a posn for the the XML stuff to the posns-vec
 
         // Do not iterate if the log level is not set to at least trace
         if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
@@ -808,6 +797,9 @@ impl Font {
 /// layer of "font" types (FWORD, FIXED, etc.)?
 
 /// WOFF 1.0 file header, from the WOFF spec.
+/// 
+/// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
+/// always sorts first, for operational reasons?
 #[derive(Debug)]
 #[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
@@ -906,6 +898,18 @@ impl NetworkByteOrderable for WoffTableDirEntry {
         self.compLength = u32::to_be(self.compLength);
         self.origLength = u32::to_be(self.origLength);
         self.origChecksum = u32::to_be(self.origChecksum);
+    }
+}
+
+impl WoffTableDirEntry {
+    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+        Ok(Self {
+            tag: TableTag::new(source_stream)?,
+            offset: source_stream.read_u32::<BigEndian>()?,
+            compLength: source_stream.read_u32::<BigEndian>()?,
+            origLength: source_stream.read_u32::<BigEndian>()?,
+            origChecksum: source_stream.read_u32::<BigEndian>()?,
+        });
     }
 }
 
