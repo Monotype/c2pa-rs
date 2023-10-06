@@ -314,7 +314,7 @@ impl TableTag {
         Ok(Self {
             data: [source_stream.read_u8()?, source_stream.read_u8()?,  // Ick, YHGTBKM...
                    source_stream.read_u8()?, source_stream.read_u8()?],
-        });
+        })
     }
 }
 
@@ -696,14 +696,16 @@ impl Font {
     fn read_woff<T: Read + Seek + ?Sized>(
         source_stream: &mut T,
     ) -> core::result::Result<Font, Error> {
+
+
+        // Read in the WOFFHeader & record its chunk.
         // We expect to be called with the stream positions just past the magic number.
+        //
         let mut the_font: Font = Font::new(Magic::Woff);
         the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
-
-        // Push a position-chunk for the header itself.
-        //
-        // TBD - This is wett & wordy.
+        let woff_hdr = WoffHeader::new(source_stream)?;
+        // TBD - This posn-pushing stuff is wett & wordy.
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
@@ -712,25 +714,29 @@ impl Font {
         });
 
         // Advance to the start of the table entries
+        // Not needed - we just read it
         // TBD - Stream handling - the next line is not stream-relative.
         // TBD - In fact, we should debug_assert that this would be a no-op.
-        source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
+        //source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
-        let mut table_posns_deferred: Vec<ChunkPositions> = Vec::new(); // Actually we just leave the fur on...
+        let mut deferred_table_posns: Vec<ChunkPositions> = Vec::new(); // Actually we just leave the fur on...
 
         // Loop through the `tableRecords` array
         let mut table_counter = 0;
-        while let wtde = WoffTableDirEntry::new(source_stream)? {
+        while table_counter < woff_hdr.numTables as usize
+            && let wtde_attempt = WoffTableDirEntry::new(source_stream)
+            && wtde_attempt.is_ok()
+            && let wtde = wtde_attempt.unwrap() {
             // Let's hamvestigate this clamjammler
             //
             // At this point we will add the table record entry to the temporary
             // buffer as just a regular table
-            table_posns_deferred.push(ChunkPositions {
-                offset: wtde.offset,
+            deferred_table_posns.push(ChunkPositions {
+                offset: wtde.offset as u64,
                 length: wtde.origLength,
-                name:   wtde.tag,
+                name:   wtde.tag.data,
                 chunk_type: ChunkType::Table});
 
                 // Load this table
@@ -753,26 +759,15 @@ impl Font {
 
             // Increment the table counter
             table_counter += 1;
-
-            // If we have iterated over all of our tables, bail
-            if table_counter >= woff_hdr.numTables as usize {
-                break;
-            }
         }
         // Now we can add the table offsets and lengths to the positions, appearing
         // after the table record chunks, staying as close to the original font layout
         // as possible
         // NOTE: The font specification doesn't necessarily ensure the table data records
         //       have to be in order, but that shouldn't really matter.
-        for entry in table_offset_pos {
-            let mut name = [0; 4];
-            name.copy_from_slice(entry.2.as_slice());
-            positions.push(ChunkPositions {
-                offset: entry.0 as u64,
-                length: entry.1,
-                name,
-                chunk_type: entry.3,
-            });
+        for def_posn in deferred_table_posns {
+            // TBD - Something svelter than a for-loop?
+            positions.push(def_posn);
         }
         // TBD - Magic names for TableDir and/or XML
         //
@@ -909,7 +904,7 @@ impl WoffTableDirEntry {
             compLength: source_stream.read_u32::<BigEndian>()?,
             origLength: source_stream.read_u32::<BigEndian>()?,
             origChecksum: source_stream.read_u32::<BigEndian>()?,
-        });
+        })
     }
 }
 
