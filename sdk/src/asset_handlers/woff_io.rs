@@ -695,14 +695,12 @@ impl Font {
         the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
 
-        // Read in the WOFFHeader
-        let woff_hdr = WoffHeader::new(source_stream);
-
-        // Add the position of the WOFF 1.0 Header.
+        // Read in the WOFFHeader & record its chunk
+        let woff_hdr = WoffHeader::new(source_stream)?;
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name: [0; 4],
+            name: [0; 4], // TBD - Magic names for TableDir and/or XML
             chunk_type: ChunkType::TableDirectory,
         });
 
@@ -712,8 +710,6 @@ impl Font {
 
         // Table counter, to keep up with how many tables we have processed.
         let mut table_counter = 0;
-        // Get the number of tables available from the next 2 bytes
-        let num_tables = source_stream.read_u16::<BigEndian>()? as usize;
         // Advance to the start of the table entries
         source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
@@ -777,7 +773,7 @@ impl Font {
             table_counter += 1;
 
             // If we have iterated over all of our tables, bail
-            if table_counter >= num_tables {
+            if table_counter >= woff_hdr.numTables as usize {
                 break;
             }
         }
@@ -833,9 +829,24 @@ struct WoffHeader {
 
 impl WoffHeader {
 
-    pub fn new<T: Read>(source_stream: &mut T>) -> core::result::Result<WoffHeader, Error> {
-        
+    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+        Ok(Self {
+            signature: Magic::Woff as u32,
+            flavor: source_stream.read_u32::<BigEndian>()?,
+            length: source_stream.read_u32::<BigEndian>()?,
+            numTables: source_stream.read_u16::<BigEndian>()?,
+            reserved: source_stream.read_u16::<BigEndian>()?,
+            totalSfntSize: source_stream.read_u32::<BigEndian>()?,
+            majorVersion: source_stream.read_u16::<BigEndian>()?,
+            minorVersion: source_stream.read_u16::<BigEndian>()?,
+            metaOffset: source_stream.read_u32::<BigEndian>()?,
+            metaLength: source_stream.read_u32::<BigEndian>()?,
+            metaOrigLength: source_stream.read_u32::<BigEndian>()?,
+            privOffset: source_stream.read_u32::<BigEndian>()?,
+            privLength: source_stream.read_u32::<BigEndian>()?,
+        })
     }
+}
 
 impl NetworkByteOrderable for WoffHeader {
     fn from_network(&mut self) {
@@ -2076,3 +2087,4 @@ pub mod tests {
         }
     }
 }
+
