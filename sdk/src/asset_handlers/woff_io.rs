@@ -17,6 +17,7 @@ use std::{
     convert::TryFrom,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    mem::{size_of},
     path::*,
 };
 
@@ -34,6 +35,26 @@ use crate::{
     },
     error::{Error, Result},
 };
+
+/// Debug hook for watching Result<T, Error> values fly past.
+/// 
+/// Debug the code
+///    let my_thing = mysteriously_failing_function(args);
+/// by writing
+///    let my_thing = debug_cough(mysteriously_failing_function(args));
+/// 
+#[allow(dead_code)]
+fn debug_cough<T>(result: Result<T>) -> Result<T> {
+    match result {
+        Err(ref e) => {
+            trace!("cough: {:?}", e);
+        },
+        Ok(_) => {
+            trace!("cough: Ok");
+        }
+    }
+    result
+}
 
 /// This module is a temporary implementation of a very basic support for XMP in
 /// fonts. Ideally the reading/writing of the following should be independent of
@@ -370,6 +391,8 @@ impl NetworkByteOrderable for TableC2PARaw {
 
 /// 'C2PA' font table - after loading from storage
 #[derive(Clone)]
+// TBD - discard snake case
+// TBD - discard public
 #[allow(non_snake_case)]
 pub struct TableC2PA {
     /// Major version of the C2PA table record
@@ -671,26 +694,28 @@ impl Font {
         let mut the_font: Font = Font::new(Magic::Woff);
         the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
-        let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
-        let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
-        // Create a 20-byte buffer to hold each table entry as we read through the file
-        let mut woff_dirent_buf: [u8; WOFF_DIRENT_LENGTH as usize] =
-            [0; WOFF_DIRENT_LENGTH as usize];
-        // Add the position of the table directory, excluding the actual table
-        // records, as those positions will be added separately
+
+        // Read in the WOFFHeader
+        let woff_hdr = WoffHeader::new(source_stream);
+
+        // Add the position of the WOFF 1.0 Header.
         positions.push(ChunkPositions {
             offset: 0,
-            length: WOFF_HEADER_LENGTH,
+            length: size_of::<WoffHeader>() as u32,
             name: [0; 4],
             chunk_type: ChunkType::TableDirectory,
         });
 
+        // Create a 20-byte buffer to hold each table entry as we read through the file
+        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()]
+          = [0; size_of::<WoffTableDirEntry>()];
+
         // Table counter, to keep up with how many tables we have processed.
         let mut table_counter = 0;
         // Get the number of tables available from the next 2 bytes
-        let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
+        let num_tables = source_stream.read_u16::<BigEndian>()? as usize;
         // Advance to the start of the table entries
-        source_stream.seek(SeekFrom::Start(WOFF_HEADER_LENGTH as u64))?;
+        source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
@@ -707,9 +732,10 @@ impl Font {
 
             // Then grab the offset and length of the actual name table to
             // create the other exclusion zone.
-            let offset = (&woff_dirent_buf[5..8]).read_u32::<BigEndian>()?;
-            let _comp_length = (&woff_dirent_buf[9..12]).read_u32::<BigEndian>()?;
-            let orig_length = (&woff_dirent_buf[13..16]).read_u32::<BigEndian>()?;
+            // whew
+            let offset = (&woff_dirent_buf[4..8]).read_u32::<BigEndian>()?;
+            let _comp_length = (&woff_dirent_buf[8..12]).read_u32::<BigEndian>()?;
+            let orig_length = (&woff_dirent_buf[12..16]).read_u32::<BigEndian>()?;
 
             // At this point we will add the table record entry to the temporary
             // buffer as just a regular table
@@ -723,8 +749,8 @@ impl Font {
             // Create a table record chunk position as a default table record type
             // and add it to the collection of positions
             positions.push(ChunkPositions {
-                offset: (woff_header_sz + (woff_dirent_sz * table_counter)) as u64,
-                length: woff_dirent_sz,
+                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter)) as u64,
+                length: size_of::<WoffTableDirEntry>() as u32,
                 name,
                 chunk_type: ChunkType::TableRecord,
             });
@@ -751,7 +777,7 @@ impl Font {
             table_counter += 1;
 
             // If we have iterated over all of our tables, bail
-            if table_counter >= num_tables as u32 {
+            if table_counter >= num_tables {
                 break;
             }
         }
@@ -804,7 +830,13 @@ struct WoffHeader {
     privOffset: u32,
     privLength: u32,
 }
-const WOFF_HEADER_LENGTH: u32 = 44; // should equal size_of(::<WoffHeader>), however we can derive/enforce that in Rust...
+
+impl WoffHeader {
+
+    pub fn new<T: Read>(source_stream: &mut T>) -> core::result::Result<WoffHeader, Error> {
+        
+    }
+
 impl NetworkByteOrderable for WoffHeader {
     fn from_network(&mut self) {
         self.signature = u32::from_be(self.signature);
@@ -850,7 +882,6 @@ struct WoffTableDirEntry {
     origLength: u32,
     origChecksum: u32,
 }
-const WOFF_DIRENT_LENGTH: u32 = 20; // should equal size_of(::<WoffTableDirEntry>), however we can derive/enforce that in Rust...
 impl NetworkByteOrderable for WoffTableDirEntry {
     fn from_network(&mut self) {
         self.offset = u32::from_be(self.offset);
@@ -921,11 +952,9 @@ impl ChunkReader for WoffIO {
         source_stream.rewind()?;
         let mut positions: Vec<ChunkPositions> = Vec::new();
         // WOFFHeader
-        let woff_header_sz: u32 = WOFF_HEADER_LENGTH;
-        let woff_dirent_sz: u32 = WOFF_DIRENT_LENGTH;
         // Create a 20-byte buffer to hold each table entry as we read through the file
-        let mut woff_dirent_buf: [u8; WOFF_DIRENT_LENGTH as usize] =
-            [0; WOFF_DIRENT_LENGTH as usize];
+        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()] =
+            [0; size_of::<WoffTableDirEntry>()];
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
         let font_magic_u32: u32 = source_stream.read_u32::<BigEndian>()?;
@@ -935,7 +964,7 @@ impl ChunkReader for WoffIO {
         // records, as those positions will be added separately
         positions.push(ChunkPositions {
             offset: 0,
-            length: WOFF_HEADER_LENGTH,
+            length: size_of::<WoffHeader>() as u32,
             name: [0; 4],
             chunk_type: ChunkType::TableDirectory,
         });
@@ -943,9 +972,9 @@ impl ChunkReader for WoffIO {
         // Table counter, to keep up with how many tables we have processed.
         let mut table_counter = 0;
         // Get the number of tables available from the next 2 bytes
-        let num_tables: u16 = source_stream.read_u16::<BigEndian>()?;
+        let num_tables = source_stream.read_u16::<BigEndian>()? as usize;
         // Advance to the start of the table entries
-        source_stream.seek(SeekFrom::Start(WOFF_HEADER_LENGTH as u64))?;
+        source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
@@ -975,8 +1004,8 @@ impl ChunkReader for WoffIO {
             // Create a table record chunk position as a default table record type
             // and add it to the collection of positions
             positions.push(ChunkPositions {
-                offset: (woff_header_sz + (woff_dirent_sz * table_counter)) as u64,
-                length: woff_dirent_sz,
+                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter)) as u64,
+                length: size_of::<WoffTableDirEntry>() as u32,
                 name,
                 chunk_type: ChunkType::TableRecord,
             });
@@ -985,7 +1014,7 @@ impl ChunkReader for WoffIO {
             table_counter += 1;
 
             // If we have iterated over all of our tables, bail
-            if table_counter >= num_tables as u32 {
+            if table_counter >= num_tables {
                 break;
             }
         }
