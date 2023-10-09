@@ -725,10 +725,9 @@ impl Font {
 
         // Loop through the `tableRecords` array
         let mut table_counter = 0;
-        while table_counter < woff_hdr.numTables as usize
-            && let wtde_attempt = WoffTableDirEntry::new(source_stream)
-            && wtde_attempt.is_ok()
-            && let wtde = wtde_attempt.unwrap() {
+        while table_counter < woff_hdr.numTables as usize {
+            // Try to parse the next dir entry
+            let wtde = WoffTableDirEntry::new(source_stream)?;
             // Let's hamvestigate this clamjammler
             //
             // At this point we will add the table record entry to the temporary
@@ -760,9 +759,9 @@ impl Font {
             // Increment the table counter
             table_counter += 1;
         }
-        // Now we can add the table offsets and lengths to the positions, appearing
-        // after the table record chunks, staying as close to the original font layout
-        // as possible
+        // Now we can add the table offsets and lengths to the positions,
+        // appearing after the table record chunks, staying as close to the
+        // original font layout as possible.
         // NOTE: The font specification doesn't necessarily ensure the table data records
         //       have to be in order, but that shouldn't really matter.
         for def_posn in deferred_table_posns {
