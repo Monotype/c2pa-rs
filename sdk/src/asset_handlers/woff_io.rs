@@ -318,6 +318,10 @@ impl TableTag {
     }
 }
 
+/// Ad-hoc "tag" names for the file-header (SFNT magic, WOFF header, etc.) and
+/// the table directory.
+const _FILEHDR_TABLE_TAG: TableTag = TableTag { data: *b"\0\0\0\0", };
+const TABLEDIR_TABLE_TAG: TableTag = TableTag { data: *b"\t\t\t\t", };
 /// Tag for the 'C2PA' table in a font.
 const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA", };
 /// Tag for the 'head' table in a font.
@@ -418,10 +422,16 @@ impl TableC2PA {
         }
     }
 
+    /// TBD - Construct TableC2PA from a source_stream and T
+    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
+        Err(Error::FontLoadError)?
+    }
+
     /// Get the manifest store data if available
     pub fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
+
 }
 
 impl Default for TableC2PA {
@@ -480,7 +490,7 @@ impl Default for TableC2PA {
 //        Ok(C2PA {
 //            majorVersion: internal_record.majorVersion,
 //            minorVersion: internal_record.minorVersion,
-//            activeManifestUri: active_manifest_uri,
+//            active_manifest_uri: active_manifest_uri,
 //            manifestStore: manifest_store,
 //        })
 //    }
@@ -500,7 +510,7 @@ impl Default for TableC2PA {
 //        let mut active_manifest_length: u16 = 0_u16;
 //        // But if we have a valid active manifest URI, we will use the real
 //        // values
-//        if let Some(val) = self.activeManifestUri.as_ref() {
+//        if let Some(val) = self.active_manifest_uri.as_ref() {
 //            active_manifest_offset = offset;
 //            active_manifest_length = val.len() as u16;
 //            // Add the data to the data pool
@@ -563,6 +573,13 @@ struct TableHead {
     glyphDataFormat: i16,
 }
 
+impl TableHead {
+    /// TBD - Construct TableC2PA from a source_stream and T
+    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
+        Err(Error::FontLoadError)?
+    }
+}
+
 impl NetworkByteOrderable for TableHead {
     // Strictly speaking, any members with leading underscores need not be
     // flopped, as they are never used.
@@ -615,11 +632,18 @@ struct TableUnspecified {
     data: Vec<u8>,
 }
 
+impl TableUnspecified {
+    /// TBD - Construct TableC2PA from a source_stream and T
+    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
+        Err(Error::FontLoadError)?
+    }
+}
+
 // TBD - Change this concept from "byte-orderable" to something more like
 // "serialize".
 //  💡 Maybe we begin by having `to_bytes` and `from_bytes` methods, which
 //     handle things like byte-swapping integers, and unpacking strings (like
-//     the `activeManifestUri`, or things in the `name` table).
+//     the `active_manifest_uri`, or things in the `name` table).
 //  ⚡ Then later, we can optimize stream handling with `to_stream` and
 //     `from_stream` overrides (though, we may end up requiring some kind of
 //     "writer" state of our own, that gets passed to each table in turn; we
@@ -686,6 +710,10 @@ impl Font {
         &mut self,
         mut _writer: impl std::io::Write,
     ) -> core::result::Result<(), Box<dyn std::error::Error>> {
+        // Write the header
+        // Write the directory
+        // Write the tables
+        // The first
         Err(Error::FontSaveError)?
     }
 
@@ -971,7 +999,7 @@ impl ChunkReader for WoffIO {
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name: [0; 4],
+            name: TABLEDIR_TABLE_TAG.data,
             chunk_type: ChunkType::TableDirectory,
         });
 
@@ -1081,7 +1109,7 @@ where
 {
     source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    // Install the provide activeManifestUri in this font's C2PA table, adding
+    // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, create it.
@@ -1091,7 +1119,7 @@ where
                 Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
-        // If there is, replace its `activeManifestUri` value with the
+        // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
@@ -1140,7 +1168,7 @@ where
 {
     source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
-    // Install the provide activeManifestUri in this font's C2PA table, adding
+    // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, create it.
@@ -1150,7 +1178,7 @@ where
                 Table::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
-        // If there is, replace its `activeManifestUri` value with the
+        // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
@@ -1335,7 +1363,7 @@ where
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
-        // If there is, replace its `activeManifestUri` value with the
+        // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
