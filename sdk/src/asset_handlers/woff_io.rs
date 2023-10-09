@@ -397,43 +397,40 @@ impl NetworkByteOrderable for TableC2PARaw {
 
 /// 'C2PA' font table - after loading from storage
 #[derive(Clone)]
-// TBD - discard snake case
-// TBD - discard public
-#[allow(non_snake_case)]
-pub struct TableC2PA {
+struct TableC2PA {
     /// Major version of the C2PA table record
-    pub majorVersion: u16,
+    _major_version: u16,
     /// Minor version of the C2PA table record
-    pub minorVersion: u16,
+    _minor_version: u16,
     /// Optional URI to an active manifest
-    pub activeManifestUri: Option<String>,
+    active_manifest_uri: Option<String>,
     /// Optional embedded manifest store
-    manifestStore: Option<Vec<u8>>,
+    manifest_store: Option<Vec<u8>>,
 }
 
 impl TableC2PA {
     /// Creates a new C2PA record with the current default version information.
     pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
         Self {
-            activeManifestUri: active_manifest_uri,
-            manifestStore: manifest_store,
+            active_manifest_uri: active_manifest_uri,
+            manifest_store: manifest_store,
             ..TableC2PA::default()
         }
     }
 
     /// Get the manifest store data if available
     pub fn get_manifest_store(&self) -> Option<&[u8]> {
-        self.manifestStore.as_deref()
+        self.manifest_store.as_deref()
     }
 }
 
 impl Default for TableC2PA {
     fn default() -> Self {
         Self {
-            majorVersion: 0,
-            minorVersion: 1,
-            activeManifestUri: Default::default(),
-            manifestStore: Default::default(),
+            _major_version: 0,
+            _minor_version: 1,
+            active_manifest_uri: Default::default(),
+            manifest_store: Default::default(),
         }
     }
 }
@@ -1099,7 +1096,7 @@ where
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
                 Table::C2PA(c2pa_table) => {
-                    c2pa_table.manifestStore = Some(manifest_store_data.to_vec());
+                    c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
                 }
                 _ => {
                     todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
@@ -1158,7 +1155,7 @@ where
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
                 Table::C2PA(c2pa_table) => {
-                    c2pa_table.activeManifestUri = Some(manifest_uri.to_string());
+                    c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
                 }
                 _ => {
                     todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
@@ -1195,19 +1192,12 @@ where
     // Read the font from the input stream
     let mut font = Font::read(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
-    //match font.tables.C2PA() {
-    //    Ok(None) => {
-    //        font.tables.insert(TableC2PA::new(None, None));
-    //    }
-    //    Ok(_) => {
-    //        // Do nothing
-    //    }
-    //    Err(_) => return Err(Error::DeserializationError),
-    //}
+    if font.tables.get(&C2PA_TABLE_TAG).is_none() {
+        font.tables.insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
+    }
     // Write the font to the output stream
     font.write(output_stream)
         .map_err(|_| Error::FontSaveError)?;
-
     Ok(())
 }
 
@@ -1274,7 +1264,7 @@ where
     TSource: Read + Seek + ?Sized,
 {
     match read_c2pa_from_stream(source) {
-        Ok(c2pa_data) => Ok(c2pa_data.activeManifestUri.to_owned()),
+        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri.to_owned()),
         Err(Error::JumbfNotFound) => Ok(None),
         Err(_) => Err(Error::DeserializationError),
     }
@@ -1350,12 +1340,12 @@ where
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
                 Table::C2PA(c2pa_table) => {
-                    if c2pa_table.activeManifestUri.is_none() {
+                    if c2pa_table.active_manifest_uri.is_none() {
                         None
                     }
                     else {
-                        let old_manifest_uri = c2pa_table.activeManifestUri.clone();
-                        c2pa_table.activeManifestUri = None;
+                        let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
+                        c2pa_table.active_manifest_uri = None;
                         old_manifest_uri
                     }
                 }
@@ -1900,7 +1890,7 @@ pub mod tests {
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let c2pa_data = read_c2pa_from_stream(&mut font_stream).unwrap();
         // Verify the active manifest uri
-        assert_eq!(Some("file://a".to_string()), c2pa_data.activeManifestUri);
+        assert_eq!(Some("file://a".to_string()), c2pa_data.active_manifest_uri);
         // Verify the embedded C2PA data as well
         assert_eq!(
             Some(vec![0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, 0x74, 0x61].as_ref()),
