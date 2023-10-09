@@ -680,30 +680,11 @@ impl Font {
         //
         let mut the_font: Font = Font::new(Magic::Woff);
         the_font.magic = Magic::Woff;
-        let mut positions: Vec<ChunkPositions> = Vec::new();
         let woff_hdr = WoffHeader::new(source_stream)?;
 
         // Push a pseudo-table to store the header
         let woff_hdr_pseudo_table = Table::WoffHeader(woff_hdr);
         the_font.tables.insert(WOFF_HEADER_TAG, woff_hdr_pseudo_table);
-
-        // TBD - This posn-pushing stuff is wett & wordy.
-        positions.push(ChunkPositions {
-            offset: 0,
-            length: size_of::<WoffHeader>() as u32,
-            name:   WOFF_HEADER_TAG.data,
-            chunk_type: ChunkType::Other,
-        });
-
-        // Advance to the start of the table entries
-        // Not needed - we just read it
-        // TBD - Stream handling - the next line is not stream-relative.
-        // TBD - In fact, we should debug_assert that this would be a no-op.
-        //source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
-
-        // Create a temporary vector to hold the table offsets and lengths, which
-        // will be added after the table records have been added
-        let mut deferred_table_posns: Vec<ChunkPositions> = Vec::new(); // Actually we just leave the fur on...
 
         // Loop through the `tableRecords` array
         let mut table_counter = 0;
@@ -736,25 +717,8 @@ impl Font {
             // Increment the table counter
             table_counter += 1;
 
-            // Remember to add the table described by this to the chunk-posn
-            // list, after we've finished iterating through this directory.
-            deferred_table_posns.push(ChunkPositions {
-                offset: wtde.offset as u64,
-                length: wtde.compLength,
-                name:   wtde.tag.data,
-                chunk_type: ChunkType::Table});
-
             // Head back to the table directory for the next iteration
             source_stream.seek(SeekFrom::Start(next_table_dir_entry_offset))?;
-        }
-        // Now we can add the table offsets and lengths to the positions,
-        // appearing after the table record chunks, staying as close to the
-        // original font layout as possible.
-        // NOTE: The font specification doesn't necessarily ensure the table data records
-        //       have to be in order, but that shouldn't really matter.
-        for def_posn in deferred_table_posns {
-            // TBD - Something svelter than a for-loop?
-            positions.push(def_posn);
         }
 
         // If XML metadata is present, store it as a table.
@@ -766,11 +730,6 @@ impl Font {
                 WOFF_METADATA_TAG,
                 Table::Unspecified(TableUnspecified { data: meta_data }),
             );
-            positions.push(ChunkPositions {
-                offset: woff_hdr.metaOffset as u64,
-                length: woff_hdr.metaLength,
-                name:   WOFF_METADATA_TAG.data,
-                chunk_type: ChunkType::Other});
         }
 
         // If private data is present, store it as a table.
@@ -782,18 +741,6 @@ impl Font {
                 WOFF_PRIVATE_DATA_TAG,
                 Table::Unspecified(TableUnspecified { data: private_data }),
             );
-            positions.push(ChunkPositions {
-                offset: woff_hdr.privOffset as u64,
-                length: woff_hdr.privLength,
-                name:   WOFF_PRIVATE_DATA_TAG.data,
-                chunk_type: ChunkType::Other});
-        }
-
-        // Do not iterate if the log level is not set to at least trace
-        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-            for position in positions.iter().as_ref() {
-                trace!("Position for C2PA in font: {:?}", &position);
-            }
         }
         Ok(the_font)
     }
@@ -916,8 +863,8 @@ pub enum ChunkType {
     Table,
     /// Table record entry in the table directory
     TableRecord,
-    /// Non-table data, such as WOFF XML/private
-    Other,
+    /// Non-table data: file headers, WOFF metadata, WOFF private, ...
+    _Other,
 }
 
 /// Represents regions within a font file that may be of interest when it
@@ -1426,7 +1373,7 @@ where
             // adjustment.
             //
             // ("Other" data gets treated the same as an uninteresting table.)
-            ChunkType::Table|ChunkType::Other => {
+            ChunkType::Table|ChunkType::_Other => {
                 let mut table_positions = Vec::<HashObjectPositions>::new();
                 // We must split out the head table to ignore the checksum
                 // adjustment, because it changes after the C2PA table is
