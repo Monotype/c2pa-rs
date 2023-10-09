@@ -322,7 +322,7 @@ impl TableTag {
 /// but which it is frequently convenient to treat as if they were. We re-use
 /// the font-file magic strings, because they are extremely unlikely to appear
 /// as table tags.
-const _WOFF_HEADER_TAG: TableTag = TableTag { data: *b"wOFF", };
+const WOFF_HEADER_TAG: TableTag = TableTag { data: *b"wOFF", };
 const WOFF_METADATA_TAG: TableTag = TableTag { data: *b"wXML", };
 const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag { data: *b"wPRV", };
 /// Pseudo-tag for the table directory.
@@ -364,13 +364,6 @@ impl TryFrom<u32> for Magic {
     }
 }
 
-/// Minimal byte-flopper for moving font header structures and known table
-/// contents in and out of storage.
-trait NetworkByteOrderable {
-    fn from_network(&mut self);
-    fn to_network(&mut self);
-}
-
 /// 'C2PA' font table - in storage
 #[derive(Debug)]
 #[repr(C, packed)]       // As defined by the C2PA spec.
@@ -382,26 +375,6 @@ struct TableC2PARaw {
     activeManifestUriLength: u16,
     manifestStoreOffset: u32,
     manifestStoreLength: u32,
-}
-
-impl NetworkByteOrderable for TableC2PARaw {
-    fn from_network(&mut self) {
-        self.majorVersion = u16::from_be(self.majorVersion);
-        self.minorVersion = u16::from_be(self.minorVersion);
-        self.activeManifestUriOffset = u32::from_be(self.activeManifestUriOffset);
-        self.activeManifestUriLength = u16::from_be(self.activeManifestUriLength);
-        self.manifestStoreOffset = u32::from_be(self.manifestStoreOffset);
-        self.manifestStoreLength = u32::from_be(self.manifestStoreLength);
-    }
-
-    fn to_network(&mut self) {
-        self.majorVersion = u16::to_be(self.majorVersion);
-        self.minorVersion = u16::to_be(self.minorVersion);
-        self.activeManifestUriOffset = u32::to_be(self.activeManifestUriOffset);
-        self.activeManifestUriLength = u16::to_be(self.activeManifestUriLength);
-        self.manifestStoreOffset = u32::to_be(self.manifestStoreOffset);
-        self.manifestStoreLength = u32::to_be(self.manifestStoreLength);
-    }
 }
 
 /// 'C2PA' font table - after loading from storage
@@ -585,52 +558,6 @@ impl TableHead {
     }
 }
 
-impl NetworkByteOrderable for TableHead {
-    // Strictly speaking, any members with leading underscores need not be
-    // flopped, as they are never used.
-    fn from_network(&mut self) {
-        self.majorVersion = u16::from_be(self.majorVersion);
-        self.minorVersion = u16::from_be(self.minorVersion);
-        self.fontRevision = u32::from_be(self.fontRevision);
-        self.checksumAdjustment = u32::from_be(self.checksumAdjustment);
-        self.magicNumber = u32::from_be(self.magicNumber);
-        self.flags = u16::from_be(self.flags);
-        self.unitsPerEm = u16::from_be(self.unitsPerEm);
-        self.created = i64::from_be(self.created);
-        self.modified = i64::from_be(self.modified);
-        self.xMin = i16::from_be(self.xMin);
-        self.yMin = i16::from_be(self.yMin);
-        self.xMax = i16::from_be(self.xMax);
-        self.yMax = i16::from_be(self.yMax);
-        self.macStyle = u16::from_be(self.macStyle);
-        self.lowestRecPPEM = u16::from_be(self.lowestRecPPEM);
-        self.fontDirectionHint = i16::from_be(self.fontDirectionHint);
-        self.indexToLocFormat = i16::from_be(self.indexToLocFormat);
-        self.glyphDataFormat = i16::from_be(self.glyphDataFormat);
-    }
-
-    fn to_network(&mut self) {
-        self.majorVersion = u16::to_be(self.majorVersion);
-        self.minorVersion = u16::to_be(self.minorVersion);
-        self.fontRevision = u32::to_be(self.fontRevision);
-        self.checksumAdjustment = u32::to_be(self.checksumAdjustment);
-        self.magicNumber = u32::to_be(self.magicNumber);
-        self.flags = u16::to_be(self.flags);
-        self.unitsPerEm = u16::to_be(self.unitsPerEm);
-        self.created = i64::to_be(self.created);
-        self.modified = i64::to_be(self.modified);
-        self.xMin = i16::to_be(self.xMin);
-        self.yMin = i16::to_be(self.yMin);
-        self.xMax = i16::to_be(self.xMax);
-        self.yMax = i16::to_be(self.yMax);
-        self.macStyle = u16::to_be(self.macStyle);
-        self.lowestRecPPEM = u16::to_be(self.lowestRecPPEM);
-        self.fontDirectionHint = i16::to_be(self.fontDirectionHint);
-        self.indexToLocFormat = i16::to_be(self.indexToLocFormat);
-        self.glyphDataFormat = i16::to_be(self.glyphDataFormat);
-    }
-}
-
 /// Generic font table with unknown contents.
 #[repr(C, packed)] // Packed because this describes a serialization format.
 struct TableUnspecified {
@@ -641,27 +568,6 @@ impl TableUnspecified {
     /// TBD - Construct TableC2PA from a source_stream and T
     pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
         Err(Error::FontLoadError)?
-    }
-}
-
-// TBD - Change this concept from "byte-orderable" to something more like
-// "serialize".
-//  💡 Maybe we begin by having `to_bytes` and `from_bytes` methods, which
-//     handle things like byte-swapping integers, and unpacking strings (like
-//     the `active_manifest_uri`, or things in the `name` table).
-//  ⚡ Then later, we can optimize stream handling with `to_stream` and
-//     `from_stream` overrides (though, we may end up requiring some kind of
-//     "writer" state of our own, that gets passed to each table in turn; we
-//     need some mechanism for code to maintain offsets, and interact-with/obey
-//     the chunk-map
-impl NetworkByteOrderable for TableUnspecified {
-    // No operation; byte arrays have just that one order order.
-    fn from_network(&mut self) {
-        // no-op
-    }
-
-    fn to_network(&mut self) {
-        // no-op
     }
 }
 
@@ -739,7 +645,7 @@ impl Font {
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name:   [0; 4], // TBD - Magic names for TableDir and/or XML
+            name:   WOFF_HEADER_TAG.data,
             chunk_type: ChunkType::TableDirectory,
         });
 
@@ -755,19 +661,15 @@ impl Font {
 
         // Loop through the `tableRecords` array
         let mut table_counter = 0;
+        
         while table_counter < woff_hdr.numTables as usize {
             // Try to parse the next dir entry
             let wtde = WoffTableDirEntry::new(source_stream)?;
-            // Remember to add the table described by this to the chunk-posn
-            // list, after we've finished iterating through this directory.
-            deferred_table_posns.push(ChunkPositions {
-                offset: wtde.offset as u64,
-                length: wtde.origLength,
-                name:   wtde.tag.data,
-                chunk_type: ChunkType::Table});
+            let next_table_dir_entry_offset = source_stream.stream_position()?;
 
             // Load this table
-            let mut table_data: Vec<u8> = vec![0; wtde.origLength as usize];
+            let mut table_data: Vec<u8> = vec![0; wtde.compLength as usize];
+            source_stream.seek(SeekFrom::Start(wtde.offset as u64))?;
             source_stream.read_exact(&mut table_data)?;
 
             let table: Table = {
@@ -787,6 +689,17 @@ impl Font {
 
             // Increment the table counter
             table_counter += 1;
+
+            // Remember to add the table described by this to the chunk-posn
+            // list, after we've finished iterating through this directory.
+            deferred_table_posns.push(ChunkPositions {
+                offset: wtde.offset as u64,
+                length: wtde.compLength,
+                name:   wtde.tag.data,
+                chunk_type: ChunkType::Table});
+
+            // Head back to the table directory for the next iteration
+            source_stream.seek(SeekFrom::Start(next_table_dir_entry_offset))?;
         }
         // Now we can add the table offsets and lengths to the positions,
         // appearing after the table record chunks, staying as close to the
@@ -896,7 +809,7 @@ impl WoffHeader {
         destination.write_u32::<BigEndian>(self.length)?;
 
 
-        
+
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.reserved)?;
         destination.write_u32::<BigEndian>(self.totalSfntSize)?;
@@ -931,40 +844,6 @@ impl Default for WoffHeader {
     }
 }
 
-impl NetworkByteOrderable for WoffHeader {
-    fn from_network(&mut self) {
-        self.signature = u32::from_be(self.signature);
-        self.flavor = u32::from_be(self.flavor);
-        self.length = u32::from_be(self.length);
-        self.numTables = u16::from_be(self.numTables);
-        self.reserved = u16::from_be(self.reserved);
-        self.totalSfntSize = u32::from_be(self.totalSfntSize);
-        self.majorVersion = u16::from_be(self.majorVersion);
-        self.minorVersion = u16::from_be(self.minorVersion);
-        self.metaOffset = u32::from_be(self.metaOffset);
-        self.metaLength = u32::from_be(self.metaLength);
-        self.metaOrigLength = u32::from_be(self.metaOrigLength);
-        self.privOffset = u32::from_be(self.privOffset);
-        self.privLength = u32::from_be(self.privLength);
-    }
-
-    fn to_network(&mut self) {
-        self.signature = u32::to_be(self.signature);
-        self.flavor = u32::to_be(self.flavor);
-        self.length = u32::to_be(self.length);
-        self.numTables = u16::to_be(self.numTables);
-        self.reserved = u16::to_be(self.reserved);
-        self.totalSfntSize = u32::to_be(self.totalSfntSize);
-        self.majorVersion = u16::to_be(self.majorVersion);
-        self.minorVersion = u16::to_be(self.minorVersion);
-        self.metaOffset = u32::to_be(self.metaOffset);
-        self.metaLength = u32::to_be(self.metaLength);
-        self.metaOrigLength = u32::to_be(self.metaOrigLength);
-        self.privOffset = u32::to_be(self.privOffset);
-        self.privLength = u32::to_be(self.privLength);
-    }
-}
-
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Debug)]
 #[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
@@ -976,22 +855,6 @@ struct WoffTableDirEntry {
     origLength: u32,
     origChecksum: u32,
 }
-impl NetworkByteOrderable for WoffTableDirEntry {
-    fn from_network(&mut self) {
-        self.offset = u32::from_be(self.offset);
-        self.compLength = u32::from_be(self.compLength);
-        self.origLength = u32::from_be(self.origLength);
-        self.origChecksum = u32::from_be(self.origChecksum);
-    }
-
-    fn to_network(&mut self) {
-        self.offset = u32::to_be(self.offset);
-        self.compLength = u32::to_be(self.compLength);
-        self.origLength = u32::to_be(self.origLength);
-        self.origChecksum = u32::to_be(self.origChecksum);
-    }
-}
-
 impl WoffTableDirEntry {
     pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
         Ok(Self {
