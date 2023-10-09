@@ -376,14 +376,25 @@ struct TableC2PARaw {
     manifestStoreOffset: u32,
     manifestStoreLength: u32,
 }
+impl TableC2PARaw {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+        destination.write_u16::<BigEndian>(self.majorVersion)?;
+        destination.write_u16::<BigEndian>(self.minorVersion)?;
+        destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
+        destination.write_u16::<BigEndian>(self.activeManifestUriLength as u16)?;
+        destination.write_u32::<BigEndian>(self.manifestStoreOffset)?;
+        destination.write_u32::<BigEndian>(self.manifestStoreLength)?;
+        Ok(())
+    }
+}
 
 /// 'C2PA' font table - after loading from storage
 #[derive(Clone, Debug)]
 struct TableC2PA {
     /// Major version of the C2PA table record
-    _major_version: u16,
+    major_version: u16,
     /// Minor version of the C2PA table record
-    _minor_version: u16,
+    minor_version: u16,
     /// Optional URI to an active manifest
     active_manifest_uri: Option<String>,
     /// Optional embedded manifest store
@@ -411,7 +422,36 @@ impl TableC2PA {
     }
 
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        //tbd - pull in serialize code destination.write_all(&self.data)?;
+        // Set up the structured data
+        let mut raw_table = TableC2PARaw {
+            majorVersion: self.major_version,
+            minorVersion: self.minor_version,
+            activeManifestUriOffset: 0,
+            activeManifestUriLength: 0,
+            manifestStoreOffset: 0,
+            manifestStoreLength: 0,
+        };
+        // If a remote URI is present, prepare to store it.
+        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            raw_table.activeManifestUriOffset = size_of::<TableC2PARaw>() as u32;
+            raw_table.activeManifestUriLength = uri_string.len() as u16;
+        }
+        // If a local store is present, prepare to store it.
+        if let Some(manifest_store) = self.manifest_store.as_ref() {
+            raw_table.manifestStoreOffset = size_of::<TableC2PARaw>() as u32 + raw_table.activeManifestUriOffset + raw_table.activeManifestUriLength as u32;
+            raw_table.manifestStoreLength = manifest_store.len() as u32;
+        }
+        // Write the table data
+        raw_table.write(destination)?;
+        // Write the remote manifest URI, if present.
+        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            destination.write_all(uri_string.as_bytes());
+        }
+        // Write out the local manifest store, if present.
+        if let Some(manifest_store) = self.manifest_store.as_ref() {
+            destination.write_all(manifest_store);
+        }
+        // Done
         Ok(())
     }
 
@@ -465,64 +505,13 @@ impl TableC2PA {
 //        })
 //    }
 //}
-//
-//impl Serialize for C2PA {
-//    fn to_bytes(&self, data: &mut Vec<u8>) -> Result<(), SerializationError> {
-//        // The main offset to the data includes the major/minor versions,
-//        // the offset/length of the active manifest uri, and the
-//        // the offset/length of the C2PA manifest store data.
-//        let offset: u32 = 18;
-//        // Create a data pool for the C2PA data
-//        let mut c2pa_data_pool: Vec<u8> = Vec::new();
-//
-//        // The active manifest is optional, so default to 0 for offset/length
-//        let mut active_manifest_offset: u32 = 0_u32;
-//        let mut active_manifest_length: u16 = 0_u16;
-//        // But if we have a valid active manifest URI, we will use the real
-//        // values
-//        if let Some(val) = self.active_manifest_uri.as_ref() {
-//            active_manifest_offset = offset;
-//            active_manifest_length = val.len() as u16;
-//            // Add the data to the data pool
-//            c2pa_data_pool.extend(val.as_bytes());
-//        }
-//
-//        // An embedded manifest store is optional, so default to 0 for
-//        // offset/length
-//        let mut manifest_store_offset: u32 = 0_u32;
-//        let mut manifest_store_length: u32 = 0_u32;
-//        // Again, if we do have data for an embedded manifest store, we will use
-//        // the real values.
-//        if let Some(val) = self.manifestStore.as_ref() {
-//            manifest_store_offset = offset + active_manifest_length as u32;
-//            manifest_store_length = val.len() as u32;
-//            // Adding the data to the data pool to write at the end of the table
-//            // entry
-//            c2pa_data_pool.extend(val.iter());
-//        }
-//
-//        // At this point, we have everything we need to build the C2PA header
-//        // record
-//        let c2pa_internal_record = C2PARecordInternal {
-//            majorVersion: self.majorVersion,
-//            minorVersion: self.minorVersion,
-//            activeManifestUriOffset: active_manifest_offset,
-//            activeManifestUriLength: active_manifest_length,
-//            manifestStoreOffset: manifest_store_offset,
-//            manifestStoreLength: manifest_store_length,
-//        };
-//        // All that is left is to write the header and data to the buffer
-//        c2pa_internal_record.to_bytes(data)?;
-//        c2pa_data_pool.to_bytes(data)
-//    }
-//}
 }
 
 impl Default for TableC2PA {
     fn default() -> Self {
         Self {
-            _major_version: 0,
-            _minor_version: 1,
+            major_version: 0,
+            minor_version: 1,
             active_manifest_uri: Default::default(),
             manifest_store: Default::default(),
         }
