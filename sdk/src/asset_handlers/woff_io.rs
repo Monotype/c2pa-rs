@@ -318,11 +318,16 @@ impl TableTag {
     }
 }
 
-/// Ad-hoc "tag" names for the file-header (SFNT magic, WOFF header, etc.) and
-/// the table directory.
-const _FILEHDR_TABLE_TAG: TableTag = TableTag { data: *b"\0\0\0\0", };
-const TABLEDIR_TABLE_TAG: TableTag = TableTag { data: *b"\t\t\t\t", };
-/// Tag for the 'C2PA' table in a font.
+/// Ad-hoc "tag" names for font-file entities which are not really tables,
+/// but which it is frequently convenient to treat as if they were. We re-use
+/// the font-file magic strings, because they are extremely unlikely to appear
+/// as table tags.
+const _WOFF_HEADER_TAG: TableTag = TableTag { data: *b"wOFF", };
+const WOFF_METADATA_TAG: TableTag = TableTag { data: *b"wXML", };
+const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag { data: *b"wPRV", };
+/// Pseudo-tag for the table directory.
+const TABLE_DIRECTORY_TAG: TableTag = TableTag { data: *b"\t\t\t\t", };
+/// Tag for the 'C2PA' table.
 const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA", };
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head", };
@@ -721,8 +726,6 @@ impl Font {
     fn read_woff<T: Read + Seek + ?Sized>(
         source_stream: &mut T,
     ) -> core::result::Result<Font, Error> {
-
-
         // Read in the WOFFHeader & record its chunk.
         // We expect to be called with the stream positions just past the magic number.
         //
@@ -753,17 +756,18 @@ impl Font {
         while table_counter < woff_hdr.numTables as usize {
             // Try to parse the next dir entry
             let wtde = WoffTableDirEntry::new(source_stream)?;
-            // Let's hamvestigate this clamjammler
-            //
-            // At this point we will add the table record entry to the temporary
-            // buffer as just a regular table
+            // Remember to add the table described by this to the chunk-posn
+            // list, after we've finished iterating through this directory.
             deferred_table_posns.push(ChunkPositions {
                 offset: wtde.offset as u64,
                 length: wtde.origLength,
                 name:   wtde.tag.data,
                 chunk_type: ChunkType::Table});
 
-                // Load this table
+            // Load this table
+            let mut table_data: Vec<u8> = vec![0; wtde.origLength as usize];
+            source_stream.read_exact(&mut table_data)?;
+
             let table: Table = {
                 match wtde.tag {
                     //C2PA_TABLE_TAG => {
@@ -772,9 +776,7 @@ impl Font {
                     //HEAD_TABLE_TAG => {
                     //    Table::Head(TableHead) {}
                     //}
-                    _ => Table::Unspecified(TableUnspecified {
-                        data: vec![0; wtde.origLength as usize],
-                    }),
+                    _ => Table::Unspecified(TableUnspecified { data: table_data }),
                 }
             };
 
@@ -793,13 +795,38 @@ impl Font {
             // TBD - Something svelter than a for-loop?
             positions.push(def_posn);
         }
-        // TBD - Magic names for TableDir and/or XML
-        //
-        // 1. Measure the rest of the stream
-        // 2. Mallocate a bytebox, read the stuff in.
-        // 3. Tag it as "ZZZ Zachariah Zebulon's Zigguraut Zestifiers" so it always goes last. ("TBD - Magic names for TableDir and/or XML.")
-        //
-        // 4. Add a posn for the the XML stuff to the posns-vec
+
+        // If XML metadata is present, store it as a table.
+        if woff_hdr.metaOffset != 0 {
+            source_stream.seek(SeekFrom::Start(woff_hdr.metaOffset as u64))?;
+            let mut meta_data: Vec<u8> = vec![0; woff_hdr.metaLength as usize];
+            source_stream.read_exact(&mut meta_data)?;
+            the_font.tables.insert(
+                WOFF_METADATA_TAG,
+                Table::Unspecified(TableUnspecified { data: meta_data }),
+            );
+            positions.push(ChunkPositions {
+                offset: woff_hdr.metaOffset as u64,
+                length: woff_hdr.metaLength,
+                name:   WOFF_METADATA_TAG.data,
+                chunk_type: ChunkType::Other});
+        }
+
+        // If private data is present, store it as a table.
+        if woff_hdr.privOffset != 0 {
+            source_stream.seek(SeekFrom::Start(woff_hdr.privOffset as u64))?;
+            let mut private_data: Vec<u8> = vec![0; woff_hdr.privLength as usize];
+            source_stream.read_exact(&mut private_data)?;
+            the_font.tables.insert(
+                WOFF_PRIVATE_DATA_TAG,
+                Table::Unspecified(TableUnspecified { data: private_data }),
+            );
+            positions.push(ChunkPositions {
+                offset: woff_hdr.privOffset as u64,
+                length: woff_hdr.privLength,
+                name:   WOFF_PRIVATE_DATA_TAG.data,
+                chunk_type: ChunkType::Other});
+        }
 
         // Do not iterate if the log level is not set to at least trace
         if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
@@ -941,6 +968,8 @@ pub enum ChunkType {
     Table,
     /// Table record entry in the table directory
     TableRecord,
+    /// Non-table data, such as WOFF XML/private
+    Other,
 }
 
 /// Represents regions within a font file that may be of interest when it
@@ -999,7 +1028,7 @@ impl ChunkReader for WoffIO {
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name: TABLEDIR_TABLE_TAG.data,
+            name: TABLE_DIRECTORY_TAG.data,
             chunk_type: ChunkType::TableDirectory,
         });
 
@@ -1446,8 +1475,10 @@ where
             }
             // Similarly for the actual table data, we need to specialize C2PA
             // and in this case the `head` table as well, to ignore the checksum
-            // adjustment
-            ChunkType::Table => {
+            // adjustment.
+            //
+            // ("Other" data gets treated the same as an uninteresting table.)
+            ChunkType::Table|ChunkType::Other => {
                 let mut table_positions = Vec::<HashObjectPositions>::new();
                 // We must split out the head table to ignore the checksum
                 // adjustment, because it changes after the C2PA table is
