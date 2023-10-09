@@ -445,11 +445,11 @@ impl TableC2PA {
         raw_table.write(destination)?;
         // Write the remote manifest URI, if present.
         if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            destination.write_all(uri_string.as_bytes());
+            destination.write_all(uri_string.as_bytes())?;
         }
         // Write out the local manifest store, if present.
         if let Some(manifest_store) = self.manifest_store.as_ref() {
-            destination.write_all(manifest_store);
+            destination.write_all(manifest_store)?;
         }
         // Done
         Ok(())
@@ -553,7 +553,6 @@ impl TableHead {
 
 /// Generic font table with unknown contents.
 #[derive(Debug)]
-#[repr(C, packed)] // Packed because this describes a serialization format.
 struct TableUnspecified {
     data: Vec<u8>,
 }
@@ -564,8 +563,7 @@ impl TableUnspecified {
         Err(Error::FontLoadError)?
     }
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        destination.write_all(&self.data)?;
-        Ok(())
+        Ok(destination.write_all(&self.data[..])?)
     }
 }
 
@@ -652,7 +650,6 @@ impl Font {
                 }
             }
         }
-
         // Write out all the tables in list order
         for tag in ordered_tags {
             match self.tables.get_mut(&tag) {
@@ -662,21 +659,14 @@ impl Font {
                 None => Err(Error::FontSaveError)?,
             }
         }
-
         // Write the metadata, if any
-        match self.tables.get_mut(&WOFF_METADATA_TAG) {
-            Some(Table::Unspecified(table)) => table.write(destination),
-            Some(_) => Err(Error::FontSaveError),
-            None => Ok(()),
-        };
-        
+        if let Some(Table::Unspecified(metadata)) = self.tables.get_mut(&WOFF_METADATA_TAG) {
+            metadata.write(destination)?
+        }
         // Write the private data, if any
-        match self.tables.get_mut(&WOFF_PRIVATE_DATA_TAG) {
-            Some(Table::Unspecified(table)) => table.write(destination),
-            Some(_) => Err(Error::FontSaveError),
-            None => Ok(()),
-        };
-
+        if let Some(Table::Unspecified(private_data)) = self.tables.get_mut(&WOFF_PRIVATE_DATA_TAG) {
+            private_data.write(destination)?
+        }
         // If we made it here, it all worked.
         Ok(())
     }
