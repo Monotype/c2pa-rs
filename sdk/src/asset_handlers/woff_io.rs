@@ -378,7 +378,7 @@ struct TableC2PARaw {
 }
 
 /// 'C2PA' font table - after loading from storage
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TableC2PA {
     /// Major version of the C2PA table record
     _major_version: u16,
@@ -410,18 +410,10 @@ impl TableC2PA {
         self.manifest_store.as_deref()
     }
 
-}
-
-impl Default for TableC2PA {
-    fn default() -> Self {
-        Self {
-            _major_version: 0,
-            _minor_version: 1,
-            active_manifest_uri: Default::default(),
-            manifest_store: Default::default(),
-        }
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+        //tbd - pull in serialize code destination.write_all(&self.data)?;
+        Ok(())
     }
-}
 
 //impl Deserialize for TableC2PA {
 //    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
@@ -524,6 +516,18 @@ impl Default for TableC2PA {
 //        c2pa_data_pool.to_bytes(data)
 //    }
 //}
+}
+
+impl Default for TableC2PA {
+    fn default() -> Self {
+        Self {
+            _major_version: 0,
+            _minor_version: 1,
+            active_manifest_uri: Default::default(),
+            manifest_store: Default::default(),
+        }
+    }
+}
 
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
@@ -559,6 +563,7 @@ impl TableHead {
 }
 
 /// Generic font table with unknown contents.
+#[derive(Debug)]
 #[repr(C, packed)] // Packed because this describes a serialization format.
 struct TableUnspecified {
     data: Vec<u8>,
@@ -569,9 +574,14 @@ impl TableUnspecified {
     pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
         Err(Error::FontLoadError)?
     }
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+        destination.write_all(&self.data)?;
+        Ok(())
+    }
 }
 
 /// Possible tables
+#[derive(Debug)]
 enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
@@ -579,6 +589,8 @@ enum Table {
     //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
+    /// WOFFHeader - not really a table
+    WoffHeader(WoffHeader),
 }
 
 /// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 or 2) and
@@ -617,17 +629,67 @@ impl Font {
     }
 
     /// Writes out a font file.
-    fn write<TDest: Write + ?Sized>(
-        &mut self,
-        destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+        // Find the header - we must have one
+        let woff_hdr = match self.tables.get_mut(&WOFF_HEADER_TAG) {
+            Some(Table::WoffHeader(woff_hdr)) => {
+                // We have a WOFF header, so we can write it out
+                woff_hdr
+            },
+            _ => {
+                // We don't have a WOFF header, so we can't write it out
+                Err(Error::FontSaveError)?
+            }
+        };
+        // TBD - Rewind destination?
+        //destination.rewind()?;
         // Write the header
-        let mut woff_hdr = WoffHeader::default();
-        woff_hdr.signature = Magic::Woff as u32;
         woff_hdr.write(destination)?;
-        // Write the directory
-        // Write the tables
-        // The first
-        Err(Error::FontSaveError)?
+
+        // Build up ordered list of tables
+        let mut ordered_tags: Vec<TableTag> = Vec::new();
+        for tag in self.tables.keys() {
+            match tag {
+                &WOFF_HEADER_TAG|&WOFF_METADATA_TAG|&WOFF_PRIVATE_DATA_TAG|
+                &TABLE_DIRECTORY_TAG => {
+                    // Fake table, skip it.
+                    continue;
+                }
+                _ => {
+                    match ordered_tags.binary_search(&tag) {
+                        Ok(_) => Err(Error::FontSaveError)?,
+                        Err(pos) => ordered_tags.insert(pos, tag.clone()),
+                    }
+                }
+            }
+        }
+
+        // Write out all the tables in list order
+        for tag in ordered_tags {
+            match self.tables.get_mut(&tag) {
+                Some(Table::Unspecified(table)) => table.write(destination)?,
+                Some(Table::C2PA(c2pa_table)) => c2pa_table.write(destination)?,
+                Some(Table::WoffHeader(_)) => Err(Error::FontSaveError)?, // canthappen
+                None => Err(Error::FontSaveError)?,
+            }
+        }
+
+        // Write the metadata, if any
+        match self.tables.get_mut(&WOFF_METADATA_TAG) {
+            Some(Table::Unspecified(table)) => table.write(destination),
+            Some(_) => Err(Error::FontSaveError),
+            None => Ok(()),
+        };
+        
+        // Write the private data, if any
+        match self.tables.get_mut(&WOFF_PRIVATE_DATA_TAG) {
+            Some(Table::Unspecified(table)) => table.write(destination),
+            Some(_) => Err(Error::FontSaveError),
+            None => Ok(()),
+        };
+
+        // If we made it here, it all worked.
+        Ok(())
     }
 
     /// Reads in a WOFF 1 font file
@@ -641,12 +703,17 @@ impl Font {
         the_font.magic = Magic::Woff;
         let mut positions: Vec<ChunkPositions> = Vec::new();
         let woff_hdr = WoffHeader::new(source_stream)?;
+
+        // Push a pseudo-table to store the header
+        let woff_hdr_pseudo_table = Table::WoffHeader(woff_hdr);
+        the_font.tables.insert(WOFF_HEADER_TAG, woff_hdr_pseudo_table);
+
         // TBD - This posn-pushing stuff is wett & wordy.
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
             name:   WOFF_HEADER_TAG.data,
-            chunk_type: ChunkType::TableDirectory,
+            chunk_type: ChunkType::Other,
         });
 
         // Advance to the start of the table entries
@@ -761,7 +828,7 @@ impl Font {
 /// 
 /// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
 /// always sorts first, for operational reasons?
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffHeader {
@@ -781,7 +848,6 @@ struct WoffHeader {
 }
 
 impl WoffHeader {
-
     // TBD should this be `new_from_stream`?
     pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
         Ok(Self {
@@ -801,15 +867,10 @@ impl WoffHeader {
         })
     }
 
-    fn write<TDest: Write + ?Sized>(
-        &mut self,
-        destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.signature)?;
         destination.write_u32::<BigEndian>(self.flavor)?;
         destination.write_u32::<BigEndian>(self.length)?;
-
-
-
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.reserved)?;
         destination.write_u32::<BigEndian>(self.totalSfntSize)?;
