@@ -21,7 +21,7 @@ use std::{
     path::*,
 };
 
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
@@ -711,11 +711,13 @@ impl Font {
     }
 
     /// Writes out a font file.
-    fn write(
+    fn write<TDest: Write + ?Sized>(
         &mut self,
-        mut _writer: impl std::io::Write,
-    ) -> core::result::Result<(), Box<dyn std::error::Error>> {
+        destination: &mut TDest) -> Result<()> {
         // Write the header
+        let mut woff_hdr = WoffHeader::default();
+        woff_hdr.signature = Magic::Woff as u32;
+        woff_hdr.write(destination)?;
         // Write the directory
         // Write the tables
         // The first
@@ -867,6 +869,7 @@ struct WoffHeader {
 
 impl WoffHeader {
 
+    // TBD should this be `new_from_stream`?
     pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
         Ok(Self {
             signature: Magic::Woff as u32,
@@ -883,6 +886,48 @@ impl WoffHeader {
             privOffset: source_stream.read_u32::<BigEndian>()?,
             privLength: source_stream.read_u32::<BigEndian>()?,
         })
+    }
+
+    fn write<TDest: Write + ?Sized>(
+        &mut self,
+        destination: &mut TDest) -> Result<()> {
+        destination.write_u32::<BigEndian>(self.signature)?;
+        destination.write_u32::<BigEndian>(self.flavor)?;
+        destination.write_u32::<BigEndian>(self.length)?;
+
+
+        
+        destination.write_u16::<BigEndian>(self.numTables)?;
+        destination.write_u16::<BigEndian>(self.reserved)?;
+        destination.write_u32::<BigEndian>(self.totalSfntSize)?;
+        destination.write_u16::<BigEndian>(self.majorVersion)?;
+        destination.write_u16::<BigEndian>(self.minorVersion)?;
+        destination.write_u32::<BigEndian>(self.metaOffset)?;
+        destination.write_u32::<BigEndian>(self.metaLength)?;
+        destination.write_u32::<BigEndian>(self.metaOrigLength)?;
+        destination.write_u32::<BigEndian>(self.privOffset)?;
+        destination.write_u32::<BigEndian>(self.privLength)?;
+        Ok(())
+    }
+
+}
+impl Default for WoffHeader {
+    fn default() -> Self {
+        Self {
+            signature: Magic::Woff as u32,
+            flavor: 0,
+            length: 0,
+            numTables: 0,
+            reserved: 0,
+            totalSfntSize: 44,
+            majorVersion: 1,
+            minorVersion: 0,
+            metaOffset: 0,
+            metaLength: 0,
+            metaOrigLength: 0,
+            privOffset: 0,
+            privLength: 0,
+        }
     }
 }
 
