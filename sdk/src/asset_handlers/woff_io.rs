@@ -47,11 +47,11 @@ use crate::{
 fn debug_cough<T>(result: Result<T>) -> Result<T> {
     match result {
         Err(ref e) => {
-            trace!("cough: {:?}", e);
+            trace!("cough: ERROR! {:?}", e);
         },
         Ok(_) => {
-            trace!("cough: Ok");
-        }
+            trace!("cough: ok");
+        },
     }
     result
 }
@@ -1300,13 +1300,13 @@ where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
-    //source.rewind()?; hmm...
+    source.rewind()?;
     let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
-        // If there is, replace its `active_manifest_uri` value with the
-        // provided one.
+        // If there is, and it has Some `active_manifest_uri`, then mutate that
+        // to None, and return the former value.
         Some(ostensible_c2pa_table) => {
             match ostensible_c2pa_table {
                 Table::C2PA(c2pa_table) => {
@@ -1314,6 +1314,7 @@ where
                         None
                     }
                     else {
+                        // TBD this cannot really be the idiomatic way, can it?
                         let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
                         c2pa_table.active_manifest_uri = None;
                         old_manifest_uri
