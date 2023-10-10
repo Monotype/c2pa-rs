@@ -300,8 +300,10 @@ static SUPPORTED_TYPES: [&str; 4] = [
     "woff",
 ];
 
-// generic font stuff - true for SFNT, WOFF/2, EOT, ...
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// Four-character tag which names a font table.
+///
+/// TBD - Debug needs help,
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct TableTag {
     data: [u8; 4],
 }
@@ -315,6 +317,18 @@ impl TableTag {
             data: [source_stream.read_u8()?, source_stream.read_u8()?,  // Ick, YHGTBKM...
                    source_stream.read_u8()?, source_stream.read_u8()?],
         })
+    }
+}
+
+impl std::fmt::Display for TableTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}{}{}", self.data[0], self.data[1], self.data[2], self.data[3])
+    }
+}
+
+impl std::fmt::Debug for TableTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}{}{}", self.data[0], self.data[1], self.data[2], self.data[3])
     }
 }
 
