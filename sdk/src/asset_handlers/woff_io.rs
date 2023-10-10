@@ -12,7 +12,7 @@
 // each license.
 use std::{
     collections::{
-        HashMap,
+        BTreeMap,
     },
     convert::TryFrom,
     fs::File,
@@ -332,19 +332,35 @@ impl std::fmt::Debug for TableTag {
     }
 }
 
-/// Ad-hoc "tag" names for font-file entities which are not really tables,
-/// but which it is frequently convenient to treat as if they were. We re-use
-/// the font-file magic strings, because they are extremely unlikely to appear
-/// as table tags.
-const WOFF_HEADER_TAG: TableTag = TableTag { data: *b"wOFF", };
-const WOFF_METADATA_TAG: TableTag = TableTag { data: *b"wXML", };
-const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag { data: *b"wPRV", };
-/// Pseudo-tag for the table directory.
-const TABLE_DIRECTORY_TAG: TableTag = TableTag { data: *b"\t\t\t\t", };
+/// Actual tag names for real font tables in which we take an interest.
+///
 /// Tag for the 'C2PA' table.
 const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA", };
 /// Tag for the 'head' table in a font.
 const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head", };
+
+/// Ad-hoc "tag" names for font-file entities which are not true tables, but
+/// which we'd like to treat as tables.
+///
+/// These fake tag names:
+/// 
+/// 1. **Must** be extremely unlikely to ever appear as real tables in any input
+///    font, since they will conflict. Therefore, they should probably contain
+///    unprintable ASCII values like 0x00, 0x7F, since most fonts specify that
+///    tables should have 4-character ASCII names, padded with spaces if needed.
+/// 
+/// 2. **May** need to be chosen to sort into the correct physical order when
+///    enumerated with all other tables and non-tables in the font. Whether this
+///    matters depends on the implementation details.
+
+/// WOFF 1.0 WOFFHeader
+const WOFF_HEADER_TAG: TableTag = TableTag { data: *b"\x00\x00\x00w", };   // Then SFNT header could be "000s", and all the "header" chunks will BTreeMap to start-of-file.
+/// WOFF 1.0 / 2.0 trailing XML metadata
+const WOFF_METADATA_TAG: TableTag = TableTag { data: *b"\x7F\x7F\x7FM", }; // Needs to sort to (almost the) end.
+/// WOFF 1.0 / 2.0 trailing private data
+const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag { data: *b"\x7F\x7F\x7FP", }; // Needs to sort to (almost the) end.
+/// Pseudo-tag for the table directory.
+const TABLE_DIRECTORY_TAG: TableTag = TableTag { data: *b"\x00\x00\x01D", }; // Sorts to just-after HEADER tag.
 
 /// 32-bit font-format identifier.
 ///
@@ -594,13 +610,26 @@ enum Table {
     WoffHeader(WoffHeader),
 }
 
-/// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 or 2) and
-/// EOT fonts. Potentially composable to support TrueType/OpenType Collections.
+/// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 and, with
+/// enhancements, perhaps 2) and EOT fonts. Potentially composable to support
+/// TrueType/OpenType Collections.
 struct Font {
     /// Magic number for this font's container format
     magic: Magic, //
-    /// All the Tables in this font, keyed by TableTag
-    tables: HashMap<TableTag, Table>,
+    /// All the Tables in this font, keyed by TableTag.
+    // TBD - WOFF2 - For this format, the Table Directory entries are not
+    // sorted by tag; rather, their order determines the physical order of the
+    // tables themselves. Therefore, a BTreeMap keyed by tag is not appropriate;
+    // we need to generalize the concept of table order across font container
+    // types. Design considerations include:
+    // - Any motivation to _not_ ensure that SFNTs/WOFF1s are sorted correctly;
+    //   if our goal is simply to describe the provenance _of an already-existing asset_,
+    //   then perhaps we need to permit incorrectly-ordered SFNTs/WOFF1s? In that
+    //   case, then perhaps the selection of BTreeMap versus Vec is done at
+    //   construction time, ensuring the desired behavior?
+    // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
+    // - Other matters?
+    tables: BTreeMap<TableTag, Table>,
 }
 
 impl Font {
@@ -608,7 +637,7 @@ impl Font {
     pub fn new(magic: Magic) -> Self {
         Self {
             magic: magic,
-            tables: HashMap::new(),
+            tables: BTreeMap::new(),
         }
     }
 
@@ -642,18 +671,24 @@ impl Font {
                 Err(Error::FontSaveError)?
             }
         };
-        // TBD - Rewind destination?
+
+        //TBD - is a rewind appropriate here?
         //destination.rewind()?;
+
         // Write the header
         woff_hdr.write(destination)?;
 
-        // Build up ordered list of tables
+        // Write the table directory. This needs work; we need some way to
+        // preserve the physical order implied by the offsets/sizes
+        // of the font as we read it in.
         //
-        // TBD - All of this tag-ordering would just evaporate into mist if
-        // `tables` were a (n implicity-ordered) BTreeMap instead of just a
-        // HashMap.
-        let mut ordered_tags: Vec<TableTag> = Vec::new();
-        for tag in self.tables.keys() {
+        // Options:
+        // - Explicitly store the Table Directory as a pseudo-table of some kind
+        // - Add the offset information to our font table structure. For example,
+        //   the Table enum could change from being a struct-enum to a tuple
+        //   enum which includes the offset and the table-struct.
+        // - Other ideas?
+        for (tag, table) in &mut self.tables {
             match tag {
                 &WOFF_HEADER_TAG|&WOFF_METADATA_TAG|&WOFF_PRIVATE_DATA_TAG|
                 &TABLE_DIRECTORY_TAG => {
@@ -661,22 +696,17 @@ impl Font {
                     continue;
                 }
                 _ => {
-                    match ordered_tags.binary_search(&tag) {
-                        Ok(_) => Err(Error::FontSaveError)?,
-                        Err(pos) => ordered_tags.insert(pos, tag.clone()),
+                    // Note that attempting a straightforward "table.write(destination)"
+                    // causes 
+                    match table {
+                        Table::Unspecified(table) => table.write(destination)?,
+                        Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
+                        Table::WoffHeader(_) => Err(Error::FontSaveError)?, // canthappen. We could avoid having this code path by splitting TableUnspecified off into FakeTableUnspecified, and ignoring the fakes...
                     }
                 }
             }
         }
-        // Write out all the tables in list order
-        for tag in ordered_tags {
-            match self.tables.get_mut(&tag) {
-                Some(Table::Unspecified(table)) => table.write(destination)?,
-                Some(Table::C2PA(c2pa_table)) => c2pa_table.write(destination)?,
-                Some(Table::WoffHeader(_)) => Err(Error::FontSaveError)?, // canthappen
-                None => Err(Error::FontSaveError)?,
-            }
-        }
+
         // Write the metadata, if any
         if let Some(Table::Unspecified(metadata)) = self.tables.get_mut(&WOFF_METADATA_TAG) {
             metadata.write(destination)?
