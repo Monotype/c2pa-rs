@@ -411,7 +411,7 @@ impl TableC2PA {
         }
     }
 
-    /// TBD - Construct TableC2PA from a source_stream and T
+    /// TBD - Use "new" for on-the-fly construction of a basic/blank object; use TryFrom for getting things from a stream (and also to it? Or is a '.write()' method the Rustly way?)
     pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
         Err(Error::FontLoadError)?
     }
@@ -634,6 +634,10 @@ impl Font {
         woff_hdr.write(destination)?;
 
         // Build up ordered list of tables
+        //
+        // TBD - All of this tag-ordering would just evaporate into mist if
+        // `tables` were a (n implicity-ordered) BTreeMap instead of just a
+        // HashMap.
         let mut ordered_tags: Vec<TableTag> = Vec::new();
         for tag in self.tables.keys() {
             match tag {

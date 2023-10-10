@@ -1441,7 +1441,7 @@ impl Store {
         // quite a bit to allow for a similar structure, so this code is
         // considered temporary. It is put within a feature flag to allow for
         // easy removal.
-        #[cfg(feature = "file_io")]
+        #[cfg(feature = "otf")]
         {
             // Setup to assume fragmented CAI blocks
             let mut exclusions = Vec::<(usize, usize)>::new();

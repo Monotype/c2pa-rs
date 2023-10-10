@@ -22,6 +22,7 @@ use lazy_static::lazy_static;
 
 #[cfg(feature = "otf")]
 use crate::asset_handlers::otf_io::OtfIO;
+#[cfg(feature = "woff")]
 use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
