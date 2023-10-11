@@ -46,7 +46,8 @@ lazy_static! {
             Box::new(TiffIO::new("")),
             #[cfg(feature = "otf")]
             Box::new(OtfIO::new("")),
-            Box::new(WoffIO::new(""))
+            #[cfg(feature = "woff")]
+            Box::new(WoffIO::new("")),
         ];
         let mut handler_map = HashMap::new();
 
@@ -75,7 +76,8 @@ lazy_static! {
             Box::new(TiffIO::new("")),
             #[cfg(feature = "otf")]
             Box::new(OtfIO::new("")),
-            Box::new(WoffIO::new(""))
+            #[cfg(feature = "woff")]
+            Box::new(WoffIO::new("")),
         ];
         let mut handler_map = HashMap::new();
 
