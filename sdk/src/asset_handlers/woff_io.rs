@@ -301,8 +301,6 @@ static SUPPORTED_TYPES: [&str; 4] = [
 ];
 
 /// Four-character tag which names a font table.
-///
-/// TBD - Debug needs help,
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct TableTag {
     data: [u8; 4],
@@ -403,6 +401,7 @@ struct TableC2PARaw {
     minorVersion: u16,
     activeManifestUriOffset: u32,
     activeManifestUriLength: u16,
+    // TBD - need reserved u16,
     manifestStoreOffset: u32,
     manifestStoreLength: u32,
 }
@@ -432,7 +431,7 @@ struct TableC2PA {
 }
 
 impl TableC2PA {
-    /// Creates a new C2PA record with the current default version information.
+    /// Creates a new C2PA table with the given values.
     pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
         Self {
             active_manifest_uri,
@@ -441,9 +440,61 @@ impl TableC2PA {
         }
     }
 
-    /// TBD - Use "new" for on-the-fly construction of a basic/blank object; use TryFrom for getting things from a stream (and also to it? Or is a '.write()' method the Rustly way?)
-    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
+    /// Creates a new C2PA table from the given stream.
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<TableC2PA, Error> {
         Err(Error::FontLoadError)?
+        // Old implementation, for reference...
+        //
+        //impl Deserialize for TableC2PA {
+        //    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
+        //        let mut active_manifest_uri: Option<String> = None;
+        //        let mut manifest_store: Option<Box<[u8]>> = None;
+        //        // Save the pointer of the current reader context, before we read the
+        //        // internal record for obtaining the offset from the beginning of the
+        //        // table to the data as to specification.
+        //        c.push();
+        //
+        //        // Read the components of the C2PA header
+        //        let internal_record: C2PARecordInternal = c.de()?;
+        //
+        //        if internal_record.activeManifestUriOffset > 0 {
+        //            // Offset to the active manifest URI
+        //            c.ptr = c.top_of_table() + internal_record.activeManifestUriOffset as usize;
+        //            // Reading in the active URI as bytes
+        //            let uri_as_bytes: Vec<u8> =
+        //                c.de_counted(internal_record.activeManifestUriLength as usize)?;
+        //            // And converting to a string read as UTF-8 encoding
+        //            active_manifest_uri = Some(
+        //                str::from_utf8(&uri_as_bytes)
+        //                    .map_err(|_| {
+        //                        DeserializationError("Failed to read UTF-8 string from bytes".to_string())
+        //                    })?
+        //                    .to_string(),
+        //            );
+        //        }
+        //
+        //        if internal_record.manifestStoreOffset > 0 {
+        //            // Reset the offset to the C2PA manifest store
+        //            c.ptr = c.top_of_table() + internal_record.manifestStoreOffset as usize;
+        //            // Read the store as bytes
+        //            let store_as_bytes: Option<Vec<u8>> =
+        //                Some(c.de_counted(internal_record.manifestStoreLength as usize)?);
+        //            // And then convert to a string as UTF-8 bytes
+        //            manifest_store = store_as_bytes.map(|d| d.into_boxed_slice());
+        //        }
+        //
+        //        // Restore the state of the reader
+        //        c.pop();
+        //
+        //        // Return our record
+        //        Ok(C2PA {
+        //            majorVersion: internal_record.majorVersion,
+        //            minorVersion: internal_record.minorVersion,
+        //            active_manifest_uri: active_manifest_uri,
+        //            manifestStore: manifest_store,
+        //        })
+        //    }
+        //}
     }
 
     /// Get the manifest store data if available
@@ -451,6 +502,7 @@ impl TableC2PA {
         self.manifest_store.as_deref()
     }
 
+    /// Serialize this C2PA table to the given writer.
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let mut raw_table = TableC2PARaw {
@@ -484,57 +536,6 @@ impl TableC2PA {
         // Done
         Ok(())
     }
-
-//impl Deserialize for TableC2PA {
-//    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
-//        let mut active_manifest_uri: Option<String> = None;
-//        let mut manifest_store: Option<Box<[u8]>> = None;
-//        // Save the pointer of the current reader context, before we read the
-//        // internal record for obtaining the offset from the beginning of the
-//        // table to the data as to specification.
-//        c.push();
-//
-//        // Read the components of the C2PA header
-//        let internal_record: C2PARecordInternal = c.de()?;
-//
-//        if internal_record.activeManifestUriOffset > 0 {
-//            // Offset to the active manifest URI
-//            c.ptr = c.top_of_table() + internal_record.activeManifestUriOffset as usize;
-//            // Reading in the active URI as bytes
-//            let uri_as_bytes: Vec<u8> =
-//                c.de_counted(internal_record.activeManifestUriLength as usize)?;
-//            // And converting to a string read as UTF-8 encoding
-//            active_manifest_uri = Some(
-//                str::from_utf8(&uri_as_bytes)
-//                    .map_err(|_| {
-//                        DeserializationError("Failed to read UTF-8 string from bytes".to_string())
-//                    })?
-//                    .to_string(),
-//            );
-//        }
-//
-//        if internal_record.manifestStoreOffset > 0 {
-//            // Reset the offset to the C2PA manifest store
-//            c.ptr = c.top_of_table() + internal_record.manifestStoreOffset as usize;
-//            // Read the store as bytes
-//            let store_as_bytes: Option<Vec<u8>> =
-//                Some(c.de_counted(internal_record.manifestStoreLength as usize)?);
-//            // And then convert to a string as UTF-8 bytes
-//            manifest_store = store_as_bytes.map(|d| d.into_boxed_slice());
-//        }
-//
-//        // Restore the state of the reader
-//        c.pop();
-//
-//        // Return our record
-//        Ok(C2PA {
-//            majorVersion: internal_record.majorVersion,
-//            minorVersion: internal_record.minorVersion,
-//            active_manifest_uri: active_manifest_uri,
-//            manifestStore: manifest_store,
-//        })
-//    }
-//}
 }
 
 impl Default for TableC2PA {
@@ -575,9 +576,51 @@ struct TableHead {
 }
 
 impl TableHead {
-    /// TBD - Construct TableC2PA from a source_stream and T
-    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
-        Err(Error::FontLoadError)?
+    /// Creates a `head` table from the given stream.
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(source_stream: &mut T) -> core::result::Result<TableHead, Error> {
+        Ok(Self { 
+            majorVersion: source_stream.read_u16::<BigEndian>()?,
+            minorVersion: source_stream.read_u16::<BigEndian>()?,
+            fontRevision: source_stream.read_u32::<BigEndian>()?,
+            checksumAdjustment: source_stream.read_u32::<BigEndian>()?,
+            magicNumber: source_stream.read_u32::<BigEndian>()?,
+            flags: source_stream.read_u16::<BigEndian>()?,
+            unitsPerEm: source_stream.read_u16::<BigEndian>()?,
+            created: source_stream.read_i64::<BigEndian>()?,
+            modified: source_stream.read_i64::<BigEndian>()?,
+            xMin: source_stream.read_i16::<BigEndian>()?,
+            yMin: source_stream.read_i16::<BigEndian>()?,
+            xMax: source_stream.read_i16::<BigEndian>()?,
+            yMax: source_stream.read_i16::<BigEndian>()?,
+            macStyle: source_stream.read_u16::<BigEndian>()?,
+            lowestRecPPEM: source_stream.read_u16::<BigEndian>()?,
+            fontDirectionHint: source_stream.read_i16::<BigEndian>()?,
+            indexToLocFormat: source_stream.read_i16::<BigEndian>()?,
+            glyphDataFormat: source_stream.read_i16::<BigEndian>()?,
+            })
+    }
+    /// 
+    fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+        destination.write_u16::<BigEndian>(self.majorVersion)?;
+        destination.write_u16::<BigEndian>(self.minorVersion)?;
+        destination.write_u32::<BigEndian>(self.fontRevision)?;
+        destination.write_u32::<BigEndian>(self.checksumAdjustment)?;
+        destination.write_u32::<BigEndian>(self.magicNumber)?;
+        destination.write_u16::<BigEndian>(self.flags)?;
+        destination.write_u16::<BigEndian>(self.unitsPerEm)?;
+        destination.write_i64::<BigEndian>(self.created)?;
+        destination.write_i64::<BigEndian>(self.modified)?;
+        destination.write_u16::<BigEndian>(self.unitsPerEm)?;
+        destination.write_i16::<BigEndian>(self.xMin)?;
+        destination.write_i16::<BigEndian>(self.yMin)?;
+        destination.write_i16::<BigEndian>(self.xMax)?;
+        destination.write_i16::<BigEndian>(self.yMax)?;
+        destination.write_u16::<BigEndian>(self.macStyle)?;
+        destination.write_u16::<BigEndian>(self.lowestRecPPEM)?;
+        destination.write_i16::<BigEndian>(self.fontDirectionHint)?;
+        destination.write_i16::<BigEndian>(self.indexToLocFormat)?;
+        destination.write_i16::<BigEndian>(self.glyphDataFormat)?;
+        Ok(())
     }
 }
 
@@ -587,11 +630,13 @@ struct TableUnspecified {
     data: Vec<u8>,
 }
 
+/// Any font table.
 impl TableUnspecified {
-    /// TBD - Construct TableC2PA from a source_stream and T
-    pub fn _read<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<Font, Error> {
+    /// Creates an unspecified table from the given stream.
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<TableUnspecified, Error> {
         Err(Error::FontLoadError)?
     }
+    /// Wrnite
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         Ok(destination.write_all(&self.data[..])?)
     }
