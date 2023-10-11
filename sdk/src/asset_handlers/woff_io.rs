@@ -380,16 +380,16 @@ enum Magic {
 
 /// Used to attempt conversion from u32 to a Magic value.
 impl TryFrom<u32> for Magic {
-    type Error = ();
+    type Error = crate::error::Error;
 
     /// Tries to convert from u32 to a valid font version.
     fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
         match v {
-            x if x == Magic::TrueType as u32 => Ok(Magic::TrueType),
-            x if x == Magic::OpenType as u32 => Ok(Magic::OpenType),
-            x if x == Magic::Woff as u32 => Ok(Magic::Woff),
-            x if x == Magic::Woff2 as u32 => Ok(Magic::Woff2),
-            _ => Err(()),
+            tt if tt == Magic::TrueType as u32 => Ok(Magic::TrueType),
+            ot if ot == Magic::OpenType as u32 => Ok(Magic::OpenType),
+            w1 if w1 == Magic::Woff as u32 => Ok(Magic::Woff),
+            w2 if w2 == Magic::Woff2 as u32 => Ok(Magic::Woff2),
+            _unknown => Err(Error::FontLoadError),
         }
     }
 }
@@ -411,7 +411,7 @@ impl TableC2PARaw {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
-        destination.write_u16::<BigEndian>(self.activeManifestUriLength as u16)?;
+        destination.write_u16::<BigEndian>(self.activeManifestUriLength)?;
         destination.write_u32::<BigEndian>(self.manifestStoreOffset)?;
         destination.write_u32::<BigEndian>(self.manifestStoreLength)?;
         Ok(())
@@ -435,8 +435,8 @@ impl TableC2PA {
     /// Creates a new C2PA record with the current default version information.
     pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
         Self {
-            active_manifest_uri: active_manifest_uri,
-            manifest_store: manifest_store,
+            active_manifest_uri,
+            manifest_store,
             ..TableC2PA::default()
         }
     }
@@ -615,7 +615,7 @@ enum Table {
 /// TrueType/OpenType Collections.
 struct Font {
     /// Magic number for this font's container format
-    magic: Magic, //
+    magic: Magic,
     /// All the Tables in this font, keyed by TableTag.
     // TBD - WOFF2 - For this format, the Table Directory entries are not
     // sorted by tag; rather, their order determines the physical order of the
@@ -636,7 +636,7 @@ impl Font {
     /// New blank font
     pub fn new(magic: Magic) -> Self {
         Self {
-            magic: magic,
+            magic,
             tables: BTreeMap::new(),
         }
     }
