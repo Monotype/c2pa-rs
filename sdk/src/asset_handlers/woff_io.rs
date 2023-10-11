@@ -309,14 +309,14 @@ struct TableTag {
 }
 
 impl TableTag {
-    fn as_bytes(&self) -> &[u8] {
-        &self.data
+    pub fn new(source_data: [u8; 4]) -> Self {
+        Self {
+            data: source_data,
+        }
     }
-    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
-        Ok(Self {
-            data: [source_stream.read_u8()?, source_stream.read_u8()?,  // Ick, YHGTBKM...
-                   source_stream.read_u8()?, source_stream.read_u8()?],
-        })
+    pub fn from_reader<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+        Ok(Self::new([source_stream.read_u8()?, source_stream.read_u8()?,
+                      source_stream.read_u8()?, source_stream.read_u8()?]))
     }
 }
 
@@ -613,6 +613,9 @@ enum Table {
 /// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 and, with
 /// enhancements, perhaps 2) and EOT fonts. Potentially composable to support
 /// TrueType/OpenType Collections.
+/// 
+/// TBD - Font should be a trait, not a struct, and should then be implemented
+/// by struct Woff, struct Sfnt, struct Woff2, etc.
 struct Font {
     /// Magic number for this font's container format
     magic: Magic,
@@ -893,7 +896,7 @@ struct WoffTableDirEntry {
 impl WoffTableDirEntry {
     pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: TableTag::new(source_stream)?,
+            tag: TableTag::from_reader(source_stream)?,
             offset: source_stream.read_u32::<BigEndian>()?,
             compLength: source_stream.read_u32::<BigEndian>()?,
             origLength: source_stream.read_u32::<BigEndian>()?,
@@ -1403,7 +1406,7 @@ where
             // For the table record entries, we will specialize the C2PA table
             // record and all others will be added as is
             ChunkType::TableRecord => {
-                if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
+                if chunk_position.name == C2PA_TABLE_TAG.data {
                     vec![HashObjectPositions {
                         offset: chunk_position.offset as usize,
                         length: chunk_position.length as usize,
@@ -1427,7 +1430,7 @@ where
                 // We must split out the head table to ignore the checksum
                 // adjustment, because it changes after the C2PA table is
                 // written to the font
-                if &chunk_position.name == HEAD_TABLE_TAG.as_bytes() {
+                if chunk_position.name == HEAD_TABLE_TAG.data {
                     let head_offset = &chunk_position.offset;
                     let head_length = &chunk_position.length;
                     // Include the major/minor/revision version numbers
@@ -1448,7 +1451,7 @@ where
                         length: (head_length - 12) as usize,
                         htype: HashBlockObjectType::Other,
                     });
-                } else if &chunk_position.name == C2PA_TABLE_TAG.as_bytes() {
+                } else if chunk_position.name == C2PA_TABLE_TAG.data {
                     table_positions.push(HashObjectPositions {
                         offset: chunk_position.offset as usize,
                         length: chunk_position.length as usize,
