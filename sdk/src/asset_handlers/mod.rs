@@ -24,8 +24,6 @@ pub mod tiff_io;
 #[cfg(feature = "woff")]
 pub mod woff_io;
 
-#[cfg(feature = "otf")]
-pub mod otf_io;
 #[cfg(feature = "pdf")]
 pub(crate) mod pdf;
 #[cfg(feature = "pdf")]
