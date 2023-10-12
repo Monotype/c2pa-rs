@@ -24,6 +24,8 @@ use lazy_static::lazy_static;
 use crate::asset_handlers::otf_io::OtfIO;
 #[cfg(feature = "pdf")]
 use crate::asset_handlers::pdf_io::PdfIO;
+#[cfg(feature = "woff")]
+use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
         bmff_io::BmffIO, c2pa_io::C2paIO, jpeg_io::JpegIO, mp3_io::Mp3IO, png_io::PngIO,
@@ -32,8 +34,6 @@ use crate::{
     asset_io::{AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashObjectPositions},
     error::{Error, Result},
 };
-#[cfg(feature = "woff")]
-use crate::asset_handlers::woff_io::WoffIO;
 
 // initialize asset handlers
 lazy_static! {

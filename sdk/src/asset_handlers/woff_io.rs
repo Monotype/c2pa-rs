@@ -11,13 +11,11 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
-    collections::{
-        BTreeMap,
-    },
+    collections::BTreeMap,
     convert::TryFrom,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
-    mem::{size_of},
+    mem::size_of,
     path::*,
 };
 
@@ -37,21 +35,20 @@ use crate::{
 };
 
 /// Debug hook for watching Result<T, Error> values fly past.
-/// 
+///
 /// Debug the code
 ///    let my_thing = mysteriously_failing_function(args);
 /// by writing
 ///    let my_thing = debug_cough(mysteriously_failing_function(args));
-/// 
 #[allow(dead_code)]
 fn debug_cough<T>(result: Result<T>) -> Result<T> {
     match result {
         Err(ref e) => {
             trace!("cough: ERROR! {:?}", e);
-        },
+        }
         Ok(_) => {
             trace!("cough: ok");
-        },
+        }
     }
     result
 }
@@ -308,57 +305,76 @@ struct TableTag {
 
 impl TableTag {
     pub fn new(source_data: [u8; 4]) -> Self {
-        Self {
-            data: source_data,
-        }
+        Self { data: source_data }
     }
+
     pub fn from_reader<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
-        Ok(Self::new([source_stream.read_u8()?, source_stream.read_u8()?,
-                      source_stream.read_u8()?, source_stream.read_u8()?]))
+        Ok(Self::new([
+            source_stream.read_u8()?,
+            source_stream.read_u8()?,
+            source_stream.read_u8()?,
+            source_stream.read_u8()?,
+        ]))
     }
 }
 
 impl std::fmt::Display for TableTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}{}{}", self.data[0], self.data[1], self.data[2], self.data[3])
+        write!(
+            f,
+            "{}{}{}{}",
+            self.data[0], self.data[1], self.data[2], self.data[3]
+        )
     }
 }
 
 impl std::fmt::Debug for TableTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}{}{}", self.data[0], self.data[1], self.data[2], self.data[3])
+        write!(
+            f,
+            "{}{}{}{}",
+            self.data[0], self.data[1], self.data[2], self.data[3]
+        )
     }
 }
 
 /// Actual tag names for real font tables in which we take an interest.
 ///
 /// Tag for the 'C2PA' table.
-const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA", };
+const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA" };
 /// Tag for the 'head' table in a font.
-const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head", };
+const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head" };
 
 /// Ad-hoc "tag" names for font-file entities which are not true tables, but
 /// which we'd like to treat as tables.
 ///
 /// These fake tag names:
-/// 
+///
 /// 1. **Must** be extremely unlikely to ever appear as real tables in any input
 ///    font, since they will conflict. Therefore, they should probably contain
 ///    unprintable ASCII values like 0x00, 0x7F, since most fonts specify that
 ///    tables should have 4-character ASCII names, padded with spaces if needed.
-/// 
+///
 /// 2. **May** need to be chosen to sort into the correct physical order when
 ///    enumerated with all other tables and non-tables in the font. Whether this
 ///    matters depends on the implementation details.
 
 /// WOFF 1.0 WOFFHeader
-const WOFF_HEADER_TAG: TableTag = TableTag { data: *b"\x00\x00\x00w", };   // Then SFNT header could be "000s", and all the "header" chunks will BTreeMap to start-of-file.
+const WOFF_HEADER_TAG: TableTag = TableTag {
+    data: *b"\x00\x00\x00w",
+}; // Then SFNT header could be "000s", and all the "header" chunks will BTreeMap to start-of-file.
 /// WOFF 1.0 / 2.0 trailing XML metadata
-const WOFF_METADATA_TAG: TableTag = TableTag { data: *b"\x7F\x7F\x7FM", }; // Needs to sort to (almost the) end.
+const WOFF_METADATA_TAG: TableTag = TableTag {
+    data: *b"\x7F\x7F\x7FM",
+}; // Needs to sort to (almost the) end.
 /// WOFF 1.0 / 2.0 trailing private data
-const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag { data: *b"\x7F\x7F\x7FP", }; // Needs to sort to (almost the) end.
+const WOFF_PRIVATE_DATA_TAG: TableTag = TableTag {
+    data: *b"\x7F\x7F\x7FP",
+}; // Needs to sort to (almost the) end.
 /// Pseudo-tag for the table directory.
-const TABLE_DIRECTORY_TAG: TableTag = TableTag { data: *b"\x00\x00\x01D", }; // Sorts to just-after HEADER tag.
+const TABLE_DIRECTORY_TAG: TableTag = TableTag {
+    data: *b"\x00\x00\x01D",
+}; // Sorts to just-after HEADER tag.
 
 /// 32-bit font-format identifier.
 ///
@@ -394,7 +410,7 @@ impl TryFrom<u32> for Magic {
 
 /// 'C2PA' font table - in storage
 #[derive(Debug)]
-#[repr(C, packed)]       // As defined by the C2PA spec.
+#[repr(C, packed)] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 struct TableC2PARaw {
     majorVersion: u16,
@@ -441,7 +457,9 @@ impl TableC2PA {
     }
 
     /// Creates a new C2PA table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<TableC2PA, Error> {
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
+        _source_stream: &mut T,
+    ) -> core::result::Result<TableC2PA, Error> {
         Err(Error::FontLoadError)?
         // Old implementation, for reference...
         //
@@ -520,7 +538,9 @@ impl TableC2PA {
         }
         // If a local store is present, prepare to store it.
         if let Some(manifest_store) = self.manifest_store.as_ref() {
-            raw_table.manifestStoreOffset = size_of::<TableC2PARaw>() as u32 + raw_table.activeManifestUriOffset + raw_table.activeManifestUriLength as u32;
+            raw_table.manifestStoreOffset = size_of::<TableC2PARaw>() as u32
+                + raw_table.activeManifestUriOffset
+                + raw_table.activeManifestUriLength as u32;
             raw_table.manifestStoreLength = manifest_store.len() as u32;
         }
         // Write the table data
@@ -552,7 +572,8 @@ impl Default for TableC2PA {
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
 #[derive(Debug)]
-#[repr(C, packed)]       // As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
+#[repr(C, packed)]
+// As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 struct TableHead {
     majorVersion: u16,
@@ -577,8 +598,10 @@ struct TableHead {
 
 impl TableHead {
     /// Creates a `head` table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(source_stream: &mut T) -> core::result::Result<TableHead, Error> {
-        Ok(Self { 
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
+        source_stream: &mut T,
+    ) -> core::result::Result<TableHead, Error> {
+        Ok(Self {
             majorVersion: source_stream.read_u16::<BigEndian>()?,
             minorVersion: source_stream.read_u16::<BigEndian>()?,
             fontRevision: source_stream.read_u32::<BigEndian>()?,
@@ -597,9 +620,10 @@ impl TableHead {
             fontDirectionHint: source_stream.read_i16::<BigEndian>()?,
             indexToLocFormat: source_stream.read_i16::<BigEndian>()?,
             glyphDataFormat: source_stream.read_i16::<BigEndian>()?,
-            })
+        })
     }
-    /// 
+
+    ///
     fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -633,9 +657,12 @@ struct TableUnspecified {
 /// Any font table.
 impl TableUnspecified {
     /// Creates an unspecified table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(_source_stream: &mut T) -> core::result::Result<TableUnspecified, Error> {
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
+        _source_stream: &mut T,
+    ) -> core::result::Result<TableUnspecified, Error> {
         Err(Error::FontLoadError)?
     }
+
     /// Wrnite
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         Ok(destination.write_all(&self.data[..])?)
@@ -658,7 +685,7 @@ enum Table {
 /// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 and, with
 /// enhancements, perhaps 2) and EOT fonts. Potentially composable to support
 /// TrueType/OpenType Collections.
-/// 
+///
 /// TBD - Font should be a trait, not a struct, and should then be implemented
 /// by struct Woff, struct Sfnt, struct Woff2, etc.
 struct Font {
@@ -700,7 +727,7 @@ impl Font {
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Check the magic number
         match font_magic {
-            Magic::OpenType|Magic::TrueType => todo!("Yow! Implement read_sfnt!"),
+            Magic::OpenType | Magic::TrueType => todo!("Yow! Implement read_sfnt!"),
             Magic::Woff => Font::read_woff(source_stream),
             Magic::Woff2 => todo!("Yow! Implement read_woff2!"),
         }
@@ -713,7 +740,7 @@ impl Font {
             Some(Table::WoffHeader(woff_hdr)) => {
                 // We have a WOFF header, so we can write it out
                 woff_hdr
-            },
+            }
             _ => {
                 // We don't have a WOFF header, so we can't write it out
                 Err(Error::FontSaveError)?
@@ -738,18 +765,20 @@ impl Font {
         // - Other ideas?
         for (tag, table) in &mut self.tables {
             match tag {
-                &WOFF_HEADER_TAG|&WOFF_METADATA_TAG|&WOFF_PRIVATE_DATA_TAG|
-                &TABLE_DIRECTORY_TAG => {
+                &WOFF_HEADER_TAG
+                | &WOFF_METADATA_TAG
+                | &WOFF_PRIVATE_DATA_TAG
+                | &TABLE_DIRECTORY_TAG => {
                     // Fake table, skip it.
                     continue;
                 }
                 _ => {
                     // Note that attempting a straightforward "table.write(destination)"
-                    // causes 
+                    // causes
                     match table {
                         Table::Unspecified(table) => table.write(destination)?,
                         Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                        Table::WoffHeader(_) => Err(Error::FontSaveError)?, // canthappen. We could avoid having this code path by splitting TableUnspecified off into FakeTableUnspecified, and ignoring the fakes...
+                        Table::WoffHeader(_) => Err(Error::FontSaveError)?, /* canthappen. We could avoid having this code path by splitting TableUnspecified off into FakeTableUnspecified, and ignoring the fakes... */
                     }
                 }
             }
@@ -760,7 +789,8 @@ impl Font {
             metadata.write(destination)?
         }
         // Write the private data, if any
-        if let Some(Table::Unspecified(private_data)) = self.tables.get_mut(&WOFF_PRIVATE_DATA_TAG) {
+        if let Some(Table::Unspecified(private_data)) = self.tables.get_mut(&WOFF_PRIVATE_DATA_TAG)
+        {
             private_data.write(destination)?
         }
         // If we made it here, it all worked.
@@ -780,11 +810,13 @@ impl Font {
 
         // Push a pseudo-table to store the header
         let woff_hdr_pseudo_table = Table::WoffHeader(woff_hdr);
-        the_font.tables.insert(WOFF_HEADER_TAG, woff_hdr_pseudo_table);
+        the_font
+            .tables
+            .insert(WOFF_HEADER_TAG, woff_hdr_pseudo_table);
 
         // Loop through the `tableRecords` array
         let mut table_counter = 0;
-        
+
         while table_counter < woff_hdr.numTables as usize {
             // Try to parse the next dir entry
             let wtde = WoffTableDirEntry::new(source_stream)?;
@@ -847,11 +879,11 @@ impl Font {
 /// layer of "font" types (FWORD, FIXED, etc.)?
 
 /// WOFF 1.0 file header, from the WOFF spec.
-/// 
+///
 /// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
 /// always sorts first, for operational reasons?
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed)] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffHeader {
     signature: u32,
@@ -905,7 +937,6 @@ impl WoffHeader {
         destination.write_u32::<BigEndian>(self.privLength)?;
         Ok(())
     }
-
 }
 impl Default for WoffHeader {
     fn default() -> Self {
@@ -929,7 +960,7 @@ impl Default for WoffHeader {
 
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Debug)]
-#[repr(C, packed)]       // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed)] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffTableDirEntry {
     tag: TableTag,
@@ -1058,7 +1089,8 @@ impl ChunkReader for WoffIO {
             // Create a table record chunk position as a default table record type
             // and add it to the collection of positions
             positions.push(ChunkPositions {
-                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter)) as u64,
+                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter))
+                    as u64,
                 length: size_of::<WoffTableDirEntry>() as u32,
                 name,
                 chunk_type: ChunkType::TableRecord,
@@ -1241,7 +1273,8 @@ where
     let mut font = Font::read(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
-        font.tables.insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
+        font.tables
+            .insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
     }
     // Write the font to the output stream
     font.write(output_stream)
@@ -1390,8 +1423,7 @@ where
                 Table::C2PA(c2pa_table) => {
                     if c2pa_table.active_manifest_uri.is_none() {
                         None
-                    }
-                    else {
+                    } else {
                         // TBD this cannot really be the idiomatic way, can it?
                         let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
                         c2pa_table.active_manifest_uri = None;
@@ -1470,7 +1502,7 @@ where
             // adjustment.
             //
             // ("Other" data gets treated the same as an uninteresting table.)
-            ChunkType::Table|ChunkType::_Other => {
+            ChunkType::Table | ChunkType::_Other => {
                 let mut table_positions = Vec::<HashObjectPositions>::new();
                 // We must split out the head table to ignore the checksum
                 // adjustment, because it changes after the C2PA table is
@@ -1530,14 +1562,12 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
     let font: Font = Font::read(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match font.tables.get(&C2PA_TABLE_TAG) {
         None => None,
-        Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
-                _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
-                }
+        Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
+            Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
+            _ => {
+                todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
             }
-        }
+        },
     };
     c2pa_table.ok_or(Error::JumbfNotFound)
 }
@@ -1736,4 +1766,3 @@ pub mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 }
-
