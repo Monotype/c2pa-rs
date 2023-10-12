@@ -787,8 +787,7 @@ impl Font {
         // Read in the WOFFHeader & record its chunk.
         // We expect to be called with the stream positioned just past the
         // magic number.
-        let mut the_font: Font = Font::new(Magic::Woff);
-        the_font.magic = Magic::Woff;
+        let mut the_font = Font::new(Magic::Woff);
         let woff_hdr = WoffHeader::new_from_reader(reader)?;
 
         // Push a pseudo-table to store the header
