@@ -34,25 +34,6 @@ use crate::{
     error::{Error, Result},
 };
 
-/// Debug hook for watching Result<T, Error> values fly past.
-///
-/// Debug the code
-///    let my_thing = mysteriously_failing_function(args);
-/// by writing
-///    let my_thing = debug_cough(mysteriously_failing_function(args));
-#[allow(dead_code)]
-fn debug_cough<T>(result: Result<T>) -> Result<T> {
-    match result {
-        Err(ref e) => {
-            trace!("cough: ERROR! {:?}", e);
-        }
-        Ok(_) => {
-            trace!("cough: ok");
-        }
-    }
-    result
-}
-
 /// This module is a temporary implementation of a very basic support for XMP in
 /// fonts. Ideally the reading/writing of the following should be independent of
 /// XMP support:
@@ -304,16 +285,18 @@ struct TableTag {
 }
 
 impl TableTag {
+    /// Construct a new TableTag with the given value.
     pub fn new(source_data: [u8; 4]) -> Self {
         Self { data: source_data }
     }
 
-    pub fn from_reader<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+    /// Read a new TableTag from the given source.
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self::new([
-            source_stream.read_u8()?,
-            source_stream.read_u8()?,
-            source_stream.read_u8()?,
-            source_stream.read_u8()?,
+            reader.read_u8()?,
+            reader.read_u8()?,
+            reader.read_u8()?,
+            reader.read_u8()?,
         ]))
     }
 }
@@ -403,7 +386,7 @@ impl TryFrom<u32> for Magic {
             ot if ot == Magic::OpenType as u32 => Ok(Magic::OpenType),
             w1 if w1 == Magic::Woff as u32 => Ok(Magic::Woff),
             w2 if w2 == Magic::Woff2 as u32 => Ok(Magic::Woff2),
-            _unknown => Err(Error::FontLoadError),
+            _unknown => Err(Error::FontUnknownMagic),
         }
     }
 }
@@ -458,7 +441,7 @@ impl TableC2PA {
 
     /// Creates a new C2PA table from the given stream.
     pub fn _new_from_reader<T: Read + Seek + ?Sized>(
-        _source_stream: &mut T,
+        _reader: &mut T,
     ) -> core::result::Result<TableC2PA, Error> {
         Err(Error::FontLoadError)?
         // Old implementation, for reference...
@@ -599,27 +582,27 @@ struct TableHead {
 impl TableHead {
     /// Creates a `head` table from the given stream.
     pub fn _new_from_reader<T: Read + Seek + ?Sized>(
-        source_stream: &mut T,
+        reader: &mut T,
     ) -> core::result::Result<TableHead, Error> {
         Ok(Self {
-            majorVersion: source_stream.read_u16::<BigEndian>()?,
-            minorVersion: source_stream.read_u16::<BigEndian>()?,
-            fontRevision: source_stream.read_u32::<BigEndian>()?,
-            checksumAdjustment: source_stream.read_u32::<BigEndian>()?,
-            magicNumber: source_stream.read_u32::<BigEndian>()?,
-            flags: source_stream.read_u16::<BigEndian>()?,
-            unitsPerEm: source_stream.read_u16::<BigEndian>()?,
-            created: source_stream.read_i64::<BigEndian>()?,
-            modified: source_stream.read_i64::<BigEndian>()?,
-            xMin: source_stream.read_i16::<BigEndian>()?,
-            yMin: source_stream.read_i16::<BigEndian>()?,
-            xMax: source_stream.read_i16::<BigEndian>()?,
-            yMax: source_stream.read_i16::<BigEndian>()?,
-            macStyle: source_stream.read_u16::<BigEndian>()?,
-            lowestRecPPEM: source_stream.read_u16::<BigEndian>()?,
-            fontDirectionHint: source_stream.read_i16::<BigEndian>()?,
-            indexToLocFormat: source_stream.read_i16::<BigEndian>()?,
-            glyphDataFormat: source_stream.read_i16::<BigEndian>()?,
+            majorVersion: reader.read_u16::<BigEndian>()?,
+            minorVersion: reader.read_u16::<BigEndian>()?,
+            fontRevision: reader.read_u32::<BigEndian>()?,
+            checksumAdjustment: reader.read_u32::<BigEndian>()?,
+            magicNumber: reader.read_u32::<BigEndian>()?,
+            flags: reader.read_u16::<BigEndian>()?,
+            unitsPerEm: reader.read_u16::<BigEndian>()?,
+            created: reader.read_i64::<BigEndian>()?,
+            modified: reader.read_i64::<BigEndian>()?,
+            xMin: reader.read_i16::<BigEndian>()?,
+            yMin: reader.read_i16::<BigEndian>()?,
+            xMax: reader.read_i16::<BigEndian>()?,
+            yMax: reader.read_i16::<BigEndian>()?,
+            macStyle: reader.read_u16::<BigEndian>()?,
+            lowestRecPPEM: reader.read_u16::<BigEndian>()?,
+            fontDirectionHint: reader.read_i16::<BigEndian>()?,
+            indexToLocFormat: reader.read_i16::<BigEndian>()?,
+            glyphDataFormat: reader.read_i16::<BigEndian>()?,
         })
     }
 
@@ -658,7 +641,7 @@ struct TableUnspecified {
 impl TableUnspecified {
     /// Creates an unspecified table from the given stream.
     pub fn _new_from_reader<T: Read + Seek + ?Sized>(
-        _source_stream: &mut T,
+        _reader: &mut T,
     ) -> core::result::Result<TableUnspecified, Error> {
         Err(Error::FontLoadError)?
     }
@@ -717,18 +700,20 @@ impl Font {
     }
 
     /// Reads in a font file.
-    fn read<T: Read + Seek + ?Sized>(source_stream: &mut T) -> core::result::Result<Font, Error> {
+    fn new_from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Font, Error> {
         // Must always rewind input
-        source_stream.rewind()?;
+        reader.rewind()?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
-        let font_magic_u32: u32 = source_stream.read_u32::<BigEndian>()?;
+        let font_magic_u32: u32 = reader.read_u32::<BigEndian>()?;
         let font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(font_magic_u32)
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Check the magic number
         match font_magic {
             Magic::OpenType | Magic::TrueType => todo!("Yow! Implement read_sfnt!"),
-            Magic::Woff => Font::read_woff(source_stream),
+            Magic::Woff => Font::read_woff(reader),
             Magic::Woff2 => todo!("Yow! Implement read_woff2!"),
         }
     }
@@ -798,15 +783,13 @@ impl Font {
     }
 
     /// Reads in a WOFF 1 font file
-    fn read_woff<T: Read + Seek + ?Sized>(
-        source_stream: &mut T,
-    ) -> core::result::Result<Font, Error> {
+    fn read_woff<T: Read + Seek + ?Sized>(reader: &mut T) -> core::result::Result<Font, Error> {
         // Read in the WOFFHeader & record its chunk.
-        // We expect to be called with the stream positions just past the magic number.
-        //
-        let mut the_font: Font = Font::new(Magic::Woff);
+        // We expect to be called with the stream positioned just past the
+        // magic number.
+        let mut the_font: Font::new(Magic::Woff);
         the_font.magic = Magic::Woff;
-        let woff_hdr = WoffHeader::new(source_stream)?;
+        let woff_hdr = WoffHeader::new_from_reader(reader)?;
 
         // Push a pseudo-table to store the header
         let woff_hdr_pseudo_table = Table::WoffHeader(woff_hdr);
@@ -819,13 +802,13 @@ impl Font {
 
         while table_counter < woff_hdr.numTables as usize {
             // Try to parse the next dir entry
-            let wtde = WoffTableDirEntry::new(source_stream)?;
-            let next_table_dir_entry_offset = source_stream.stream_position()?;
+            let wtde = WoffTableDirEntry::new_from_reader(reader)?;
+            let next_table_dir_entry_offset = reader.stream_position()?;
 
             // Load this table
             let mut table_data: Vec<u8> = vec![0; wtde.compLength as usize];
-            source_stream.seek(SeekFrom::Start(wtde.offset as u64))?;
-            source_stream.read_exact(&mut table_data)?;
+            reader.seek(SeekFrom::Start(wtde.offset as u64))?;
+            reader.read_exact(&mut table_data)?;
 
             let table: Table = {
                 match wtde.tag {
@@ -846,14 +829,14 @@ impl Font {
             table_counter += 1;
 
             // Head back to the table directory for the next iteration
-            source_stream.seek(SeekFrom::Start(next_table_dir_entry_offset))?;
+            reader.seek(SeekFrom::Start(next_table_dir_entry_offset))?;
         }
 
         // If XML metadata is present, store it as a table.
         if woff_hdr.metaOffset != 0 {
-            source_stream.seek(SeekFrom::Start(woff_hdr.metaOffset as u64))?;
+            reader.seek(SeekFrom::Start(woff_hdr.metaOffset as u64))?;
             let mut meta_data: Vec<u8> = vec![0; woff_hdr.metaLength as usize];
-            source_stream.read_exact(&mut meta_data)?;
+            reader.read_exact(&mut meta_data)?;
             the_font.tables.insert(
                 WOFF_METADATA_TAG,
                 Table::Unspecified(TableUnspecified { data: meta_data }),
@@ -862,9 +845,9 @@ impl Font {
 
         // If private data is present, store it as a table.
         if woff_hdr.privOffset != 0 {
-            source_stream.seek(SeekFrom::Start(woff_hdr.privOffset as u64))?;
+            reader.seek(SeekFrom::Start(woff_hdr.privOffset as u64))?;
             let mut private_data: Vec<u8> = vec![0; woff_hdr.privLength as usize];
-            source_stream.read_exact(&mut private_data)?;
+            reader.read_exact(&mut private_data)?;
             the_font.tables.insert(
                 WOFF_PRIVATE_DATA_TAG,
                 Table::Unspecified(TableUnspecified { data: private_data }),
@@ -903,21 +886,21 @@ struct WoffHeader {
 
 impl WoffHeader {
     // TBD should this be `new_from_stream`?
-    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             signature: Magic::Woff as u32,
-            flavor: source_stream.read_u32::<BigEndian>()?,
-            length: source_stream.read_u32::<BigEndian>()?,
-            numTables: source_stream.read_u16::<BigEndian>()?,
-            reserved: source_stream.read_u16::<BigEndian>()?,
-            totalSfntSize: source_stream.read_u32::<BigEndian>()?,
-            majorVersion: source_stream.read_u16::<BigEndian>()?,
-            minorVersion: source_stream.read_u16::<BigEndian>()?,
-            metaOffset: source_stream.read_u32::<BigEndian>()?,
-            metaLength: source_stream.read_u32::<BigEndian>()?,
-            metaOrigLength: source_stream.read_u32::<BigEndian>()?,
-            privOffset: source_stream.read_u32::<BigEndian>()?,
-            privLength: source_stream.read_u32::<BigEndian>()?,
+            flavor: reader.read_u32::<BigEndian>()?,
+            length: reader.read_u32::<BigEndian>()?,
+            numTables: reader.read_u16::<BigEndian>()?,
+            reserved: reader.read_u16::<BigEndian>()?,
+            totalSfntSize: reader.read_u32::<BigEndian>()?,
+            majorVersion: reader.read_u16::<BigEndian>()?,
+            minorVersion: reader.read_u16::<BigEndian>()?,
+            metaOffset: reader.read_u32::<BigEndian>()?,
+            metaLength: reader.read_u32::<BigEndian>()?,
+            metaOrigLength: reader.read_u32::<BigEndian>()?,
+            privOffset: reader.read_u32::<BigEndian>()?,
+            privLength: reader.read_u32::<BigEndian>()?,
         })
     }
 
@@ -970,13 +953,13 @@ struct WoffTableDirEntry {
     origChecksum: u32,
 }
 impl WoffTableDirEntry {
-    pub fn new<T: Read + Seek + ?Sized>(source_stream: &mut T) -> Result<Self> {
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: TableTag::from_reader(source_stream)?,
-            offset: source_stream.read_u32::<BigEndian>()?,
-            compLength: source_stream.read_u32::<BigEndian>()?,
-            origLength: source_stream.read_u32::<BigEndian>()?,
-            origChecksum: source_stream.read_u32::<BigEndian>()?,
+            tag: TableTag::new_from_reader(reader)?,
+            offset: reader.read_u32::<BigEndian>()?,
+            compLength: reader.read_u32::<BigEndian>()?,
+            origLength: reader.read_u32::<BigEndian>()?,
+            origChecksum: reader.read_u32::<BigEndian>()?,
         })
     }
 }
@@ -1014,13 +997,13 @@ pub trait ChunkReader {
     /// Gets a collection of positions of chunks within the font.
     ///
     /// ## Arguments
-    /// * `source_stream` - Source stream to read data from
+    /// * `reader` - Source stream to read data from
     ///
     /// ## Returns
     /// A collection of positions/offsets and length to omit from hashing.
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
-        source_stream: &mut T,
+        reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPositions>, Self::Error>;
 }
 
@@ -1032,9 +1015,9 @@ impl ChunkReader for WoffIO {
 
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
-        source_stream: &mut T,
+        reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPositions>, Self::Error> {
-        source_stream.rewind()?;
+        reader.rewind()?;
         let mut positions: Vec<ChunkPositions> = Vec::new();
         // WOFFHeader
         // Create a 20-byte buffer to hold each table entry as we read through the file
@@ -1042,7 +1025,7 @@ impl ChunkReader for WoffIO {
             [0; size_of::<WoffTableDirEntry>()];
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
-        let font_magic_u32: u32 = source_stream.read_u32::<BigEndian>()?;
+        let font_magic_u32: u32 = reader.read_u32::<BigEndian>()?;
         let _font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(font_magic_u32)
             .map_err(|_err| Error::UnsupportedFontError)?;
         // Add the position of the table directory, excluding the actual table
@@ -1057,16 +1040,16 @@ impl ChunkReader for WoffIO {
         // Table counter, to keep up with how many tables we have processed.
         let mut table_counter = 0;
         // Get the number of tables available from the next 2 bytes
-        let num_tables = source_stream.read_u16::<BigEndian>()? as usize;
+        let num_tables = reader.read_u16::<BigEndian>()? as usize;
         // Advance to the start of the table entries
-        source_stream.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
+        reader.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Create a temporary vector to hold the table offsets and lengths, which
         // will be added after the table records have been added
         let mut table_offset_pos = Vec::new();
 
         // Loop through the `tableRecords` array
-        while source_stream.read_exact(&mut woff_dirent_buf).is_ok() {
+        while reader.read_exact(&mut woff_dirent_buf).is_ok() {
             // Grab the tag of the table record entry
             let mut table_tag: [u8; 4] = [0; 4];
             table_tag.copy_from_slice(&woff_dirent_buf[0..4]);
@@ -1160,7 +1143,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1219,7 +1202,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1270,7 +1253,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = Font::read(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::new_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         font.tables
@@ -1381,7 +1364,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1412,7 +1395,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::read(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1559,7 +1542,7 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let font: Font = Font::read(reader).map_err(|_| Error::FontLoadError)?;
+    let font: Font = Font::new_from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match font.tables.get(&C2PA_TABLE_TAG) {
         None => None,
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
@@ -1734,7 +1717,7 @@ impl RemoteRefEmbed for WoffIO {
 
     fn embed_reference_to_stream(
         &self,
-        source_stream: &mut dyn CAIRead,
+        reader: &mut dyn CAIRead,
         output_stream: &mut dyn CAIReadWrite,
         embed_ref: RemoteRefEmbedType,
     ) -> Result<()> {
@@ -1743,14 +1726,14 @@ impl RemoteRefEmbed for WoffIO {
                 #[cfg(feature = "xmp_write")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_stream(
-                        source_stream,
+                        reader,
                         output_stream,
                         &manifest_uri,
                     )
                 }
                 #[cfg(not(feature = "xmp_write"))]
                 {
-                    add_reference_to_stream(source_stream, output_stream, &manifest_uri)
+                    add_reference_to_stream(reader, output_stream, &manifest_uri)
                 }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
