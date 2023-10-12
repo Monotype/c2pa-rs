@@ -521,8 +521,8 @@ impl TableC2PA {
         }
         // If a local store is present, prepare to store it.
         if let Some(manifest_store) = self.manifest_store.as_ref() {
-            raw_table.manifestStoreOffset = raw_table.activeManifestUriOffset
-                + raw_table.activeManifestUriLength as u32;
+            raw_table.manifestStoreOffset =
+                raw_table.activeManifestUriOffset + raw_table.activeManifestUriLength as u32;
             raw_table.manifestStoreLength = manifest_store.len() as u32;
         }
         // Write the table data
