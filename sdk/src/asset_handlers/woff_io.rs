@@ -672,7 +672,7 @@ enum Table {
 /// by struct Woff, struct Sfnt, struct Woff2, etc.
 struct Font {
     /// Magic number for this font's container format
-    magic: Magic,
+    _magic: Magic,
     /// All the Tables in this font, keyed by TableTag.
     // TBD - WOFF2 - For this format, the Table Directory entries are not
     // sorted by tag; rather, their order determines the physical order of the
@@ -693,7 +693,7 @@ impl Font {
     /// New blank font
     pub fn new(magic: Magic) -> Self {
         Self {
-            magic,
+            _magic: magic,
             tables: BTreeMap::new(),
         }
     }
