@@ -443,13 +443,12 @@ impl TableC2PA {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
-        size: usize
+        size: usize,
     ) -> core::result::Result<TableC2PA, Error> {
         reader.seek(SeekFrom::Start(offset))?;
         if size < size_of::<TableC2PARaw>() {
             Err(Error::FontLoadError)?
-        }
-        else {
+        } else {
             // Old implementation, for reference...
             //
             //impl Deserialize for TableC2PA {
@@ -592,13 +591,12 @@ impl TableHead {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
-        size: usize
+        size: usize,
     ) -> core::result::Result<TableHead, Error> {
         reader.seek(SeekFrom::Start(offset))?;
         if size != size_of::<TableHead>() {
             Err(Error::FontLoadError)?
-        }
-        else {
+        } else {
             Ok(Self {
                 majorVersion: reader.read_u16::<BigEndian>()?,
                 minorVersion: reader.read_u16::<BigEndian>()?,
@@ -617,7 +615,7 @@ impl TableHead {
                 lowestRecPPEM: reader.read_u16::<BigEndian>()?,
                 fontDirectionHint: reader.read_i16::<BigEndian>()?,
                 indexToLocFormat: reader.read_i16::<BigEndian>()?,
-                glyphDataFormat: reader.read_i16::<BigEndian>()?
+                glyphDataFormat: reader.read_i16::<BigEndian>()?,
             })
         }
     }
@@ -655,17 +653,18 @@ struct TableUnspecified {
 
 /// Any font table.
 impl TableUnspecified {
-
     /// Creates an unspecified table from the given stream.
     pub fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
-        size: usize
+        size: usize,
     ) -> core::result::Result<TableUnspecified, Error> {
         let mut raw_table_data: Vec<u8> = vec![0; size];
         reader.seek(SeekFrom::Start(offset))?;
         reader.read_exact(&mut raw_table_data)?;
-        Ok(Self { data: raw_table_data })
+        Ok(Self {
+            data: raw_table_data,
+        })
     }
 
     /// Write
@@ -841,7 +840,7 @@ impl Font {
                     _ => {
                         Table::Unspecified(TableUnspecified::new_from_reader(reader, offset, size)?)
                     }
-               }
+                }
             };
 
             // But someday, key off the tag & create specialized instances for
