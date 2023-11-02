@@ -588,7 +588,7 @@ struct TableHead {
 
 impl TableHead {
     /// Creates a `head` table from the given stream.
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(
+    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -621,7 +621,7 @@ impl TableHead {
     }
 
     /// Serialize this head table to the given writer.
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.fontRevision)?;
@@ -679,7 +679,7 @@ enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
-    Head(TableHead),
+    //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
     /// WOFFHeader - not really a table
@@ -783,7 +783,7 @@ impl Font {
                     // causes
                     match table {
                         Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                        Table::Head(head_table) => head_table.write(destination)?,
+                        //Table::Head(head_table) => head_table.write(destination)?,
                         Table::Unspecified(un_table) => un_table.write(destination)?,
                         Table::WoffHeader(_) => Err(Error::FontSaveError)?, /* canthappen. We could avoid having this code path by splitting TableUnspecified off into FakeTableUnspecified, and ignoring the fakes... */
                     }
@@ -828,6 +828,8 @@ impl Font {
             let offset: u64 = wtde.offset as u64;
             let size: usize = wtde.compLength as usize;
 
+            // No 
+
             // Create a table instance for it
             let table: Table = {
                 match wtde.tag {
@@ -835,18 +837,15 @@ impl Font {
                         Table::C2PA(TableC2PA::new_from_reader(reader, offset, size)?)
                     }
                     HEAD_TABLE_TAG => {
-                        Table::Head(TableHead::new_from_reader(reader, offset, size)?)
+                        // TBD - Need to handle compression support
+                        // Table::Head(TableHead::new_from_reader(reader, offset, size)?)
+                        Table::Unspecified(TableUnspecified::new_from_reader(reader, offset, size)?)
                     }
                     _ => {
                         Table::Unspecified(TableUnspecified::new_from_reader(reader, offset, size)?)
                     }
                 }
             };
-
-            // But someday, key off the tag & create specialized instances for
-            // certain tables, like so:
-            //
-            //     let table: T
 
             // Store it in the bucket
             the_font.tables.insert(wtde.tag, table);
@@ -860,25 +859,22 @@ impl Font {
 
         // If XML metadata is present, store it as a table.
         if woff_hdr.metaOffset != 0 {
-            reader.seek(SeekFrom::Start(woff_hdr.metaOffset as u64))?;
-            let mut meta_data: Vec<u8> = vec![0; woff_hdr.metaLength as usize];
-            reader.read_exact(&mut meta_data)?;
             the_font.tables.insert(
                 WOFF_METADATA_TAG,
-                Table::Unspecified(TableUnspecified { data: meta_data }),
+                Table::Unspecified(TableUnspecified::new_from_reader(reader,
+                    woff_hdr.privOffset as u64, woff_hdr.privLength as usize)?)
             );
         }
 
         // If private data is present, store it as a table.
         if woff_hdr.privOffset != 0 {
-            reader.seek(SeekFrom::Start(woff_hdr.privOffset as u64))?;
-            let mut private_data: Vec<u8> = vec![0; woff_hdr.privLength as usize];
-            reader.read_exact(&mut private_data)?;
             the_font.tables.insert(
                 WOFF_PRIVATE_DATA_TAG,
-                Table::Unspecified(TableUnspecified { data: private_data }),
+                Table::Unspecified(TableUnspecified::new_from_reader(reader,
+                    woff_hdr.privOffset as u64, woff_hdr.privLength as usize)?)
             );
         }
+
         Ok(the_font)
     }
 }
