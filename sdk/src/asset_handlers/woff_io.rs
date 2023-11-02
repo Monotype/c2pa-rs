@@ -828,8 +828,6 @@ impl Font {
             let offset: u64 = wtde.offset as u64;
             let size: usize = wtde.compLength as usize;
 
-            // No 
-
             // Create a table instance for it
             let table: Table = {
                 match wtde.tag {
@@ -861,8 +859,11 @@ impl Font {
         if woff_hdr.metaOffset != 0 {
             the_font.tables.insert(
                 WOFF_METADATA_TAG,
-                Table::Unspecified(TableUnspecified::new_from_reader(reader,
-                    woff_hdr.privOffset as u64, woff_hdr.privLength as usize)?)
+                Table::Unspecified(TableUnspecified::new_from_reader(
+                    reader,
+                    woff_hdr.privOffset as u64,
+                    woff_hdr.privLength as usize,
+                )?),
             );
         }
 
@@ -870,8 +871,11 @@ impl Font {
         if woff_hdr.privOffset != 0 {
             the_font.tables.insert(
                 WOFF_PRIVATE_DATA_TAG,
-                Table::Unspecified(TableUnspecified::new_from_reader(reader,
-                    woff_hdr.privOffset as u64, woff_hdr.privLength as usize)?)
+                Table::Unspecified(TableUnspecified::new_from_reader(
+                    reader,
+                    woff_hdr.privOffset as u64,
+                    woff_hdr.privLength as usize,
+                )?),
             );
         }
 
