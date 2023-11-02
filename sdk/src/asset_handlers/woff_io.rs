@@ -440,62 +440,70 @@ impl TableC2PA {
     }
 
     /// Creates a new C2PA table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
-        _reader: &mut T,
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+        offset: u64,
+        size: usize
     ) -> core::result::Result<TableC2PA, Error> {
-        Err(Error::FontLoadError)?
-        // Old implementation, for reference...
-        //
-        //impl Deserialize for TableC2PA {
-        //    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
-        //        let mut active_manifest_uri: Option<String> = None;
-        //        let mut manifest_store: Option<Box<[u8]>> = None;
-        //        // Save the pointer of the current reader context, before we read the
-        //        // internal record for obtaining the offset from the beginning of the
-        //        // table to the data as to specification.
-        //        c.push();
-        //
-        //        // Read the components of the C2PA header
-        //        let internal_record: C2PARecordInternal = c.de()?;
-        //
-        //        if internal_record.activeManifestUriOffset > 0 {
-        //            // Offset to the active manifest URI
-        //            c.ptr = c.top_of_table() + internal_record.activeManifestUriOffset as usize;
-        //            // Reading in the active URI as bytes
-        //            let uri_as_bytes: Vec<u8> =
-        //                c.de_counted(internal_record.activeManifestUriLength as usize)?;
-        //            // And converting to a string read as UTF-8 encoding
-        //            active_manifest_uri = Some(
-        //                str::from_utf8(&uri_as_bytes)
-        //                    .map_err(|_| {
-        //                        DeserializationError("Failed to read UTF-8 string from bytes".to_string())
-        //                    })?
-        //                    .to_string(),
-        //            );
-        //        }
-        //
-        //        if internal_record.manifestStoreOffset > 0 {
-        //            // Reset the offset to the C2PA manifest store
-        //            c.ptr = c.top_of_table() + internal_record.manifestStoreOffset as usize;
-        //            // Read the store as bytes
-        //            let store_as_bytes: Option<Vec<u8>> =
-        //                Some(c.de_counted(internal_record.manifestStoreLength as usize)?);
-        //            // And then convert to a string as UTF-8 bytes
-        //            manifest_store = store_as_bytes.map(|d| d.into_boxed_slice());
-        //        }
-        //
-        //        // Restore the state of the reader
-        //        c.pop();
-        //
-        //        // Return our record
-        //        Ok(C2PA {
-        //            majorVersion: internal_record.majorVersion,
-        //            minorVersion: internal_record.minorVersion,
-        //            active_manifest_uri: active_manifest_uri,
-        //            manifestStore: manifest_store,
-        //        })
-        //    }
-        //}
+        reader.seek(SeekFrom::Start(offset))?;
+        if size < size_of::<TableC2PARaw>() {
+            Err(Error::FontLoadError)?
+        }
+        else {
+            // Old implementation, for reference...
+            //
+            //impl Deserialize for TableC2PA {
+            //    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
+            //        let mut active_manifest_uri: Option<String> = None;
+            //        let mut manifest_store: Option<Box<[u8]>> = None;
+            //        // Save the pointer of the current reader context, before we read the
+            //        // internal record for obtaining the offset from the beginning of the
+            //        // table to the data as to specification.
+            //        c.push();
+            //
+            //        // Read the components of the C2PA header
+            //        let internal_record: C2PARecordInternal = c.de()?;
+            //
+            //        if internal_record.activeManifestUriOffset > 0 {
+            //            // Offset to the active manifest URI
+            //            c.ptr = c.top_of_table() + internal_record.activeManifestUriOffset as usize;
+            //            // Reading in the active URI as bytes
+            //            let uri_as_bytes: Vec<u8> =
+            //                c.de_counted(internal_record.activeManifestUriLength as usize)?;
+            //            // And converting to a string read as UTF-8 encoding
+            //            active_manifest_uri = Some(
+            //                str::from_utf8(&uri_as_bytes)
+            //                    .map_err(|_| {
+            //                        DeserializationError("Failed to read UTF-8 string from bytes".to_string())
+            //                    })?
+            //                    .to_string(),
+            //            );
+            //        }
+            //
+            //        if internal_record.manifestStoreOffset > 0 {
+            //            // Reset the offset to the C2PA manifest store
+            //            c.ptr = c.top_of_table() + internal_record.manifestStoreOffset as usize;
+            //            // Read the store as bytes
+            //            let store_as_bytes: Option<Vec<u8>> =
+            //                Some(c.de_counted(internal_record.manifestStoreLength as usize)?);
+            //            // And then convert to a string as UTF-8 bytes
+            //            manifest_store = store_as_bytes.map(|d| d.into_boxed_slice());
+            //        }
+            //
+            //        // Restore the state of the reader
+            //        c.pop();
+            //
+            //        // Return our record
+            //        Ok(C2PA {
+            //            majorVersion: internal_record.majorVersion,
+            //            minorVersion: internal_record.minorVersion,
+            //            active_manifest_uri: active_manifest_uri,
+            //            manifestStore: manifest_store,
+            //        })
+            //    }
+            //}
+            Err(Error::FontLoadError)?
+        }
     }
 
     /// Get the manifest store data if available
@@ -581,33 +589,41 @@ struct TableHead {
 
 impl TableHead {
     /// Creates a `head` table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
+        offset: u64,
+        size: usize
     ) -> core::result::Result<TableHead, Error> {
-        Ok(Self {
-            majorVersion: reader.read_u16::<BigEndian>()?,
-            minorVersion: reader.read_u16::<BigEndian>()?,
-            fontRevision: reader.read_u32::<BigEndian>()?,
-            checksumAdjustment: reader.read_u32::<BigEndian>()?,
-            magicNumber: reader.read_u32::<BigEndian>()?,
-            flags: reader.read_u16::<BigEndian>()?,
-            unitsPerEm: reader.read_u16::<BigEndian>()?,
-            created: reader.read_i64::<BigEndian>()?,
-            modified: reader.read_i64::<BigEndian>()?,
-            xMin: reader.read_i16::<BigEndian>()?,
-            yMin: reader.read_i16::<BigEndian>()?,
-            xMax: reader.read_i16::<BigEndian>()?,
-            yMax: reader.read_i16::<BigEndian>()?,
-            macStyle: reader.read_u16::<BigEndian>()?,
-            lowestRecPPEM: reader.read_u16::<BigEndian>()?,
-            fontDirectionHint: reader.read_i16::<BigEndian>()?,
-            indexToLocFormat: reader.read_i16::<BigEndian>()?,
-            glyphDataFormat: reader.read_i16::<BigEndian>()?,
-        })
+        reader.seek(SeekFrom::Start(offset))?;
+        if size != size_of::<TableHead>() {
+            Err(Error::FontLoadError)?
+        }
+        else {
+            Ok(Self {
+                majorVersion: reader.read_u16::<BigEndian>()?,
+                minorVersion: reader.read_u16::<BigEndian>()?,
+                fontRevision: reader.read_u32::<BigEndian>()?,
+                checksumAdjustment: reader.read_u32::<BigEndian>()?,
+                magicNumber: reader.read_u32::<BigEndian>()?,
+                flags: reader.read_u16::<BigEndian>()?,
+                unitsPerEm: reader.read_u16::<BigEndian>()?,
+                created: reader.read_i64::<BigEndian>()?,
+                modified: reader.read_i64::<BigEndian>()?,
+                xMin: reader.read_i16::<BigEndian>()?,
+                yMin: reader.read_i16::<BigEndian>()?,
+                xMax: reader.read_i16::<BigEndian>()?,
+                yMax: reader.read_i16::<BigEndian>()?,
+                macStyle: reader.read_u16::<BigEndian>()?,
+                lowestRecPPEM: reader.read_u16::<BigEndian>()?,
+                fontDirectionHint: reader.read_i16::<BigEndian>()?,
+                indexToLocFormat: reader.read_i16::<BigEndian>()?,
+                glyphDataFormat: reader.read_i16::<BigEndian>()?
+            })
+        }
     }
 
     /// Serialize this head table to the given writer.
-    fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.fontRevision)?;
@@ -639,14 +655,20 @@ struct TableUnspecified {
 
 /// Any font table.
 impl TableUnspecified {
+
     /// Creates an unspecified table from the given stream.
-    pub fn _new_from_reader<T: Read + Seek + ?Sized>(
-        _reader: &mut T,
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+        offset: u64,
+        size: usize
     ) -> core::result::Result<TableUnspecified, Error> {
-        Err(Error::FontLoadError)?
+        let mut raw_table_data: Vec<u8> = vec![0; size];
+        reader.seek(SeekFrom::Start(offset))?;
+        reader.read_exact(&mut raw_table_data)?;
+        Ok(Self { data: raw_table_data })
     }
 
-    /// Wrnite
+    /// Write
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         Ok(destination.write_all(&self.data[..])?)
     }
@@ -658,7 +680,7 @@ enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
-    //Head(TableHead),
+    Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
     /// WOFFHeader - not really a table
@@ -761,8 +783,9 @@ impl Font {
                     // Note that attempting a straightforward "table.write(destination)"
                     // causes
                     match table {
-                        Table::Unspecified(table) => table.write(destination)?,
                         Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
+                        Table::Head(head_table) => head_table.write(destination)?,
+                        Table::Unspecified(un_table) => un_table.write(destination)?,
                         Table::WoffHeader(_) => Err(Error::FontSaveError)?, /* canthappen. We could avoid having this code path by splitting TableUnspecified off into FakeTableUnspecified, and ignoring the fakes... */
                     }
                 }
@@ -803,29 +826,28 @@ impl Font {
             // Try to parse the next dir entry
             let wtde = WoffTableDirEntry::new_from_reader(reader)?;
             let next_table_dir_entry_offset = reader.stream_position()?;
+            let offset: u64 = wtde.offset as u64;
+            let size: usize = wtde.compLength as usize;
 
-            // Load this table
-            let mut table_data: Vec<u8> = vec![0; wtde.compLength as usize];
-            reader.seek(SeekFrom::Start(wtde.offset as u64))?;
-            reader.read_exact(&mut table_data)?;
-
-            // For now, just make an Unspecified table
-            let table: Table = Table::Unspecified(TableUnspecified { data: table_data });
+            // Create a table instance for it
+            let table: Table = {
+                match wtde.tag {
+                    C2PA_TABLE_TAG => {
+                        Table::C2PA(TableC2PA::new_from_reader(reader, offset, size)?)
+                    }
+                    HEAD_TABLE_TAG => {
+                        Table::Head(TableHead::new_from_reader(reader, offset, size)?)
+                    }
+                    _ => {
+                        Table::Unspecified(TableUnspecified::new_from_reader(reader, offset, size)?)
+                    }
+               }
+            };
 
             // But someday, key off the tag & create specialized instances for
             // certain tables, like so:
             //
-            //     let table: Table = {
-            //         match wtde.tag {
-            //             C2PA_TABLE_TAG => {
-            //                 Table::C2PA({tbl: }) {}
-            //             }
-            //             HEAD_TABLE_TAG => {
-            //                 Table::Head(TableHead) {}
-            //             }
-            //             _ => Table::Unspecified(...);
-            //         }
-            //     };
+            //     let table: T
 
             // Store it in the bucket
             the_font.tables.insert(wtde.tag, table);
