@@ -400,7 +400,7 @@ struct TableC2PARaw {
     minorVersion: u16,
     activeManifestUriOffset: u32,
     activeManifestUriLength: u16,
-    // TBD - need reserved u16,
+    reserved: u16,
     manifestStoreOffset: u32,
     manifestStoreLength: u32,
 }
@@ -510,6 +510,7 @@ impl TableC2PA {
             majorVersion: self.major_version,
             minorVersion: self.minor_version,
             activeManifestUriOffset: 0,
+            reserved: 0,
             activeManifestUriLength: 0,
             manifestStoreOffset: 0,
             manifestStoreLength: 0,
@@ -605,7 +606,7 @@ impl TableHead {
         })
     }
 
-    ///
+    /// Serialize this head table to the given writer.
     fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
