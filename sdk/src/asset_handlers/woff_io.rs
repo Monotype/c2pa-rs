@@ -1230,10 +1230,39 @@ where
 {
     // Read the font from the input stream
     let mut font = WoffFont::new_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
-    // If the C2PA table does not exist, then we will add an empty one
+    // If the C2PA table does not exist, then we will add an empty one.
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
+        // This table will succeed it.
+        let c2pa_entry = match font.directory.physical_order().last() {
+            Some(last_phys_entry) => WoffTableDirEntry {
+                tag: C2PA_TABLE_TAG,
+                offset: (last_phys_entry.offset + last_phys_entry.compLength + 3) % 4,
+                compLength: size_of::<TableC2PARaw>() as u32,
+                origLength: size_of::<TableC2PARaw>() as u32,
+                origChecksum: 0,
+            },
+            None => WoffTableDirEntry {
+                tag: C2PA_TABLE_TAG,
+                offset: (size_of::<WoffHeader>()
+                    + font.header.numTables as usize * size_of::<WoffTableDirEntry>())
+                    as u32,
+                compLength: size_of::<TableC2PARaw>() as u32,
+                origLength: size_of::<TableC2PARaw>() as u32,
+                origChecksum: 0,
+            },
+        };
+        // Push the entry and the table
+        font.directory.entries.push(c2pa_entry);
+        font.directory.entries.sort_by_key(|e| e.offset);
         font.tables
             .insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
+        // Bump the XML meta and private data blocks ahead if needed.
+        if font.header.metaOffset > 0 {
+            font.header.metaOffset += c2pa_entry.compLength;
+        }
+        if font.header.privOffset > 0 {
+            font.header.privOffset += c2pa_entry.compLength;
+        }
     }
     // Write the font to the output stream
     font.write(output_stream)
