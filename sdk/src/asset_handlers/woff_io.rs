@@ -343,27 +343,7 @@ enum Magic {
     Woff2 = 0x774f4632,
 }
 
-/// Tags for font tables, both real and imagined.
-///
-/// Because a table is just "a named block of data", it is convenient to treat
-/// the file header, table directory, metadata and private data as just more
-/// tables.
-///
-/// These fake tag names:
-///
-/// 1. **Must** be extremely unlikely to ever appear as real tables in any input
-///    font, since they will conflict. Therefore, they should probably contain
-///    unprintable ASCII values like 0x00, 0x7F, since most fonts specify that
-///    tables should have 4-character ASCII names, padded with spaces if needed.
-///
-/// 2. **Must** be chosen to sort into their correct physical order when
-///    compared with all other tables and non-tables in the font.
-///
-/// Should this be an enum, rather than a string of independent definitions? On
-/// the one hand, that would prevent having two accidentally-identical values.
-/// On the other hand, code that wanted to handle only a subset of values (via
-/// `match`) would then be force to handle all, possibly forcing a lot of cant-
-/// happen error-handling code.
+/// Tags for the font tables we care about.
 
 /// Tag for the 'C2PA' table.
 const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA" };
@@ -372,24 +352,24 @@ const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA" };
 const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head" };
 
 /// WOFF 1.0 WOFFHeader
-const WOFF_HEADER_TAG: TableTag = TableTag {
+const WOFF_HEADER_CHUNK_NAME: TableTag = TableTag {
     data: *b"\x00\x00\x00w",
 };
 // Then SFNT header could be *b"\x00\x00\x00w", and all the "header" chunks
 // will automatically BTreeMap to start-of-file.
 
 /// Pseudo-tag for the table directory.
-const WOFF_DIRECTORY_TAG: TableTag = TableTag {
+const WOFF_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
     data: *b"\x00\x00\x01D",
 }; // Sorts to just-after HEADER tag.
 
 /// WOFF 1.0 / 2.0 trailing XML metadata
-const WOFF_METADATA_TAG: TableTag = TableTag {
+const WOFF_METADATA_CHUNK_NAME: TableTag = TableTag {
     data: *b"\x7F\x7F\x7FM",
 }; // Sorts to the penultimate position.
 
 /// WOFF 1.0 / 2.0 trailing private data
-const WOFF_PRIVATE_TAG: TableTag = TableTag {
+const WOFF_PRIVATE_CHUNK_NAME: TableTag = TableTag {
     data: *b"\x7F\x7F\x7FP",
 }; // Sorts to the very end.
 
@@ -529,7 +509,7 @@ impl TableC2PA {
     }
 
     /// Serialize this C2PA table to the given writer.
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let mut raw_table = TableC2PARaw {
             majorVersion: self.major_version,
@@ -700,29 +680,10 @@ enum Table {
     //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
-    /// WOFFTableDirectory - not a true font table WOFF_DIRECTORY_TAG
-    WoffDirectory(WoffDirectory),
-    /// WOFFHeader - not really a table - WOFF_HEADER_TAG
-    WoffHeader(WoffHeader),
-    /// WOFF XML metadata - WOFF_METADATA_TAG
-    WoffMeta(TableUnspecified),
-    /// WOFF private data - WOFF_PRIVATE_TAG
-    WoffPrivate(TableUnspecified),
 }
 
-/// Font abstraction sufficient for SFNT (TrueType/OpenType), WOFF (1 and, with
-/// enhancements, perhaps 2) and EOT fonts. Potentially composable to support
-/// TrueType/OpenType Collections.
-///
-/// TBD - Font should be a trait, not a struct, and should then be implemented
-/// by struct Woff, struct Sfnt, struct Woff2, etc.
-///
-/// TBD-er - This should be struct WoffFont.
-///
-/// TBD-est - We should probably ditch the fake-table stuff, and just have
-/// first-class members for WoffHeader, WoffDirectory, Opt<WoffMeta> and
-/// Opt<WoffPrivate>...
-struct Font {
+/// Implementation of a WOFF 1.0 font
+struct WoffFont {
     header: WoffHeader,
     directory: WoffDirectory,
     /// All the Tables in this font, keyed by TableTag.
@@ -743,45 +704,11 @@ struct Font {
     private: Option<TableUnspecified>,
 }
 
-impl Font {
-    /// New blank font
-    //pub fn new() -> Self {
-    //    Self {
-    //        header: WoffHeader::new(),
-    //        directory: WoffDirectory::new(),
-    //        tables: BTreeMap::new(),
-    //        meta: Option::None,
-    //        private: Option::None,
-    //    }
-    //}
-
-    /// Reads in a font file.
+impl WoffFont {
+    /// Reads in a WOFF 1 font file from the given stream.
     fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
-    ) -> core::result::Result<Font, Error> {
-        // Must always rewind input
-        reader.rewind()?;
-        // Verify the font has a valid version in it before assuming the rest is
-        // valid (NOTE: we don't actually do anything with it, just as a safety check).
-        let font_magic_u32: u32 = reader.read_u32::<BigEndian>()?;
-        let font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(font_magic_u32)
-            .map_err(|_err| Error::UnsupportedFontError)?;
-        // Check the magic number, and dispatch to appropriate handler.
-        match font_magic {
-            // NOTE - The format-specific handlers should expect to be invoked
-            // with the stream positioned four (4) bytes from the origin; they
-            // may presume the magic number was correct.
-            Magic::Woff => Font::new_woff_from_reader(reader),
-            Magic::OpenType | Magic::TrueType => todo!("Yow! Implement new_sfnt_from_reader!"),
-            Magic::Woff2 => todo!("Yow! Implement new_woff2_from_reader!"),
-        }
-    }
-
-    /// Reads in a WOFF 1 font file. We expect the four magic bytes have already
-    /// been consumed.
-    fn new_woff_from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<Font, Error> {
+    ) -> core::result::Result<WoffFont, Error> {
         // Read in the WOFFHeader & record its chunk.
         // We expect to be called with the stream positioned just past the
         // magic number.
@@ -826,7 +753,7 @@ impl Font {
         //if woff_hdr.privOffset > 0  && woff_hdr.privLength > 0 {
         //}
 
-        Ok(Font {
+        Ok(WoffFont {
             header: woff_hdr,
             directory: woff_dir,
             tables: woff_tables,
@@ -838,40 +765,37 @@ impl Font {
     /// Writes out this font file.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // First the header.
-        self.header.write(destination);
+        self.header.write(destination)?;
         // Then the directory.
-        self.directory.write(destination);
+        self.directory.write(destination)?;
         // Then the tables, in physical order.
+        for entry in self.directory.physical_order().iter() {
+            // TBD - current-offset sanity-checking:
+            //  1. Did we go backwards (despite the request for physical_order)?
+            //  2. Did we go more than 3 bytes forward (file has excess padding)?
+            // destination.seek(SeekFrom::Start(entry.offset as u64))?;
+            // Note that dest stream is not seekable.
+            // Write out the (real and fake) tables.
+            match &self.tables[&entry.tag] {
+                Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
+                //Table::Head(head_table) => head_table.write(destination)?,
+                Table::Unspecified(un_table) => un_table.write(destination)?,
+            }
+        }
         // Then the XML meta, if present.
         match &self.meta {
-            Some(woff_meta) => woff_meta.write(destination),
-            None => Ok(()),
+            Some(woff_meta) => {
+                woff_meta.write(destination)?;
+            }
+            None => (),
         };
         // Then the private data, if present.
         match &self.private {
-            Some(woff_private) => woff_private.write(destination),
-            None => Ok(()),
+            Some(woff_private) => {
+                woff_private.write(destination)?;
+            }
+            None => (),
         };
-
-        //       // Iterate over the directory and write out its tables.
-        //       for entry in self.tables.physical_order().iter() {
-        //           // TBD - current-offset sanity-checking:
-        //           //  1. Did we go backwards (despite the request for physical_order)?
-        //           //  2. Did we go more than 3 bytes forward (file has excess padding)?
-        //           // destination.seek(SeekFrom::Start(entry.offset as u64))?;
-        //           // Note that dest stream is not seekable.
-        //           // Write out the (real and fake) tables.
-        //           match self.tables[entry.tag] {
-        //               Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-        //               //Table::Head(head_table) => head_table.write(destination)?,
-        //               Table::Unspecified(un_table) => un_table.write(destination)?,
-        //               Table::WoffHeader(woff_hdr) => woff_hdr.write(destination)?,
-        //               Table::WoffDirectory(woff_dir) => woff_dir.write(destination)?,
-        //               Table::WoffMeta(un_table) => un_table.write(destination)?,
-        //               Table::WoffPrivate(un_table) => un_table.write(destination)?,
-        //           }
-        //       }
-
         // If we made it here, it all worked.
         Ok(())
     }
@@ -1109,7 +1033,7 @@ impl ChunkReader for WoffIO {
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
-            name: WOFF_DIRECTORY_TAG.data,
+            name: WOFF_HEADER_CHUNK_NAME.data,
             chunk_type: ChunkType::Header,
         });
 
@@ -1150,7 +1074,7 @@ impl ChunkReader for WoffIO {
                 offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter))
                     as u64,
                 length: size_of::<WoffTableDirEntry>() as u32,
-                name,
+                name: WOFF_DIRECTORY_CHUNK_NAME.data,
                 chunk_type: ChunkType::Directory,
             });
 
@@ -1183,7 +1107,7 @@ impl ChunkReader for WoffIO {
             positions.push(ChunkPositions {
                 offset: woff_hdr.metaOffset as u64,
                 length: woff_hdr.metaLength,
-                name: WOFF_METADATA_TAG.data,
+                name: WOFF_METADATA_CHUNK_NAME.data,
                 chunk_type: ChunkType::WoffMeta,
             });
         }
@@ -1193,7 +1117,7 @@ impl ChunkReader for WoffIO {
             positions.push(ChunkPositions {
                 offset: woff_hdr.privOffset as u64,
                 length: woff_hdr.privLength,
-                name: WOFF_PRIVATE_TAG.data,
+                name: WOFF_PRIVATE_CHUNK_NAME.data,
                 chunk_type: ChunkType::WoffPrivate,
             });
         }
@@ -1239,7 +1163,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1298,7 +1222,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1349,7 +1273,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = Font::new_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::new_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist, then we will add an empty one
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         font.tables
@@ -1460,7 +1384,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1491,7 +1415,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = Font::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::new_from_reader(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1638,8 +1562,8 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let font: Font = Font::new_from_reader(reader).map_err(|_| Error::FontLoadError)?;
-    let c2pa_table: Option<TableC2PA> = match font.tables.get(&C2PA_TABLE_TAG) {
+    let woff = WoffFont::new_from_reader(reader).map_err(|_| Error::FontLoadError)?;
+    let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
         None => None,
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
             Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
