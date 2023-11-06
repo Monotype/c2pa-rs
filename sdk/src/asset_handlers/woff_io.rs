@@ -1036,72 +1036,25 @@ impl ChunkReader for WoffIO {
             chunk_type: ChunkType::Header,
         });
 
-        // Create a buffer to hold each table entry as we read through the file
-        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()] =
-            [0; size_of::<WoffTableDirEntry>()];
-
-        // Table counter, to keep up with how many tables we have processed.
-        let mut table_counter = 0;
-
         // Advance to the start of the table entries
         reader.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
-        // Create a temporary vector to hold the table offsets and lengths, which
-        // will be added after the table records have been added
-        let mut table_offset_pos = Vec::new();
+        // Read in the directory, and add its chunk
+        let woff_dir = WoffDirectory::new_from_reader(reader, woff_hdr.numTables as usize)?;
+        positions.push(ChunkPositions {
+            offset: reader.stream_position()?,
+            length: woff_hdr.numTables as u32 * size_of::<WoffTableDirEntry>() as u32,
+            name: WOFF_DIRECTORY_CHUNK_NAME.data,
+            chunk_type: ChunkType::Directory,
+        });
 
-        // Loop through the `tableRecords` array
-        while reader.read_exact(&mut woff_dirent_buf).is_ok() {
-            // Grab the tag of the table record entry
-            let mut table_tag: [u8; 4] = [0; 4];
-            table_tag.copy_from_slice(&woff_dirent_buf[0..4]);
-
-            // Then grab the offset and length of the actual name table to
-            // create the other exclusion zone.
-            let offset = (&woff_dirent_buf[5..8]).read_u32::<BigEndian>()?;
-            let _comp_length = (&woff_dirent_buf[9..12]).read_u32::<BigEndian>()?;
-            let orig_length = (&woff_dirent_buf[13..16]).read_u32::<BigEndian>()?;
-
-            // At this point we will add the table record entry to the temporary
-            // buffer as just a regular table
-            table_offset_pos.push((offset, orig_length, table_tag, ChunkType::Table));
-
-            // Build up table record chunk to add to the positions
-            let mut name: [u8; 4] = [0; 4];
-            // Copy from the table tag to be owned by the chunk position record
-            name.copy_from_slice(&table_tag);
-
-            // Create a table record chunk position as a default table record type
-            // and add it to the collection of positions
+        // Add a chunk for each table, in directory order
+        for entry in woff_dir.physical_order().iter() {
             positions.push(ChunkPositions {
-                offset: (size_of::<WoffHeader>() + (size_of::<WoffTableDirEntry>() * table_counter))
-                    as u64,
-                length: size_of::<WoffTableDirEntry>() as u32,
-                name: WOFF_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::Directory,
-            });
-
-            // Increment the table counter
-            table_counter += 1;
-
-            // If we have iterated over all of our tables, bail
-            if table_counter >= (woff_hdr.numTables as usize) {
-                break;
-            }
-        }
-        // Now we can add the table offsets and lengths to the positions, appearing
-        // after the table record chunks, staying as close to the original font layout
-        // as possible
-        // NOTE: The font specification doesn't necessarily ensure the table data records
-        //       have to be in order, but that shouldn't really matter.
-        for entry in table_offset_pos {
-            let mut name = [0; 4];
-            name.copy_from_slice(entry.2.as_slice());
-            positions.push(ChunkPositions {
-                offset: entry.0 as u64,
-                length: entry.1,
-                name,
-                chunk_type: entry.3,
+                offset: entry.offset as u64,
+                length: entry.origLength, // TBD compression support
+                name: entry.tag.data,
+                chunk_type: ChunkType::Table,
             });
         }
 
