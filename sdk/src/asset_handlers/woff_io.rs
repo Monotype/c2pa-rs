@@ -344,7 +344,7 @@ enum Magic {
 }
 
 /// Tags for font tables, both real and imagined.
-/// 
+///
 /// Because a table is just "a named block of data", it is convenient to treat
 /// the file header, table directory, metadata and private data as just more
 /// tables.
@@ -358,7 +358,7 @@ enum Magic {
 ///
 /// 2. **Must** be chosen to sort into their correct physical order when
 ///    compared with all other tables and non-tables in the font.
-/// 
+///
 /// Should this be an enum, rather than a string of independent definitions? On
 /// the one hand, that would prevent having two accidentally-identical values.
 /// On the other hand, code that wanted to handle only a subset of values (via
@@ -716,9 +716,9 @@ enum Table {
 ///
 /// TBD - Font should be a trait, not a struct, and should then be implemented
 /// by struct Woff, struct Sfnt, struct Woff2, etc.
-/// 
+///
 /// TBD-er - This should be struct WoffFont.
-/// 
+///
 /// TBD-est - We should probably ditch the fake-table stuff, and just have
 /// first-class members for WoffHeader, WoffDirectory, Opt<WoffMeta> and
 /// Opt<WoffPrivate>...
@@ -779,7 +779,9 @@ impl Font {
 
     /// Reads in a WOFF 1 font file. We expect the four magic bytes have already
     /// been consumed.
-    fn new_woff_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> core::result::Result<Font, Error> {
+    fn new_woff_from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Font, Error> {
         // Read in the WOFFHeader & record its chunk.
         // We expect to be called with the stream positioned just past the
         // magic number.
@@ -829,8 +831,8 @@ impl Font {
             directory: woff_dir,
             tables: woff_tables,
             meta: woff_meta,
-            private: woff_private
-            })
+            private: woff_private,
+        })
     }
 
     /// Writes out this font file.
@@ -843,37 +845,36 @@ impl Font {
         // Then the XML meta, if present.
         match &self.meta {
             Some(woff_meta) => woff_meta.write(destination),
-            None => Ok(())
+            None => Ok(()),
         };
         // Then the private data, if present.
         match &self.private {
             Some(woff_private) => woff_private.write(destination),
-            None => Ok(())
+            None => Ok(()),
         };
 
-//       // Iterate over the directory and write out its tables.
-//       for entry in self.tables.physical_order().iter() {
-//           // TBD - current-offset sanity-checking:
-//           //  1. Did we go backwards (despite the request for physical_order)?
-//           //  2. Did we go more than 3 bytes forward (file has excess padding)?
-//           // destination.seek(SeekFrom::Start(entry.offset as u64))?;
-//           // Note that dest stream is not seekable.
-//           // Write out the (real and fake) tables.
-//           match self.tables[entry.tag] {
-//               Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-//               //Table::Head(head_table) => head_table.write(destination)?,
-//               Table::Unspecified(un_table) => un_table.write(destination)?,
-//               Table::WoffHeader(woff_hdr) => woff_hdr.write(destination)?,
-//               Table::WoffDirectory(woff_dir) => woff_dir.write(destination)?,
-//               Table::WoffMeta(un_table) => un_table.write(destination)?,
-//               Table::WoffPrivate(un_table) => un_table.write(destination)?,
-//           }
-//       }
+        //       // Iterate over the directory and write out its tables.
+        //       for entry in self.tables.physical_order().iter() {
+        //           // TBD - current-offset sanity-checking:
+        //           //  1. Did we go backwards (despite the request for physical_order)?
+        //           //  2. Did we go more than 3 bytes forward (file has excess padding)?
+        //           // destination.seek(SeekFrom::Start(entry.offset as u64))?;
+        //           // Note that dest stream is not seekable.
+        //           // Write out the (real and fake) tables.
+        //           match self.tables[entry.tag] {
+        //               Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
+        //               //Table::Head(head_table) => head_table.write(destination)?,
+        //               Table::Unspecified(un_table) => un_table.write(destination)?,
+        //               Table::WoffHeader(woff_hdr) => woff_hdr.write(destination)?,
+        //               Table::WoffDirectory(woff_dir) => woff_dir.write(destination)?,
+        //               Table::WoffMeta(un_table) => un_table.write(destination)?,
+        //               Table::WoffPrivate(un_table) => un_table.write(destination)?,
+        //           }
+        //       }
 
         // If we made it here, it all worked.
         Ok(())
     }
-
 }
 
 /// TBD: All the serialization structures so far have been defined using native
@@ -921,6 +922,7 @@ impl WoffHeader {
             privLength: reader.read_u32::<BigEndian>()?,
         })
     }
+
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.signature)?;
         destination.write_u32::<BigEndian>(self.flavor)?;
@@ -979,6 +981,7 @@ impl WoffTableDirEntry {
             origChecksum: reader.read_u32::<BigEndian>()?,
         })
     }
+
     /// Serialize this directory entry to the given writer.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
@@ -990,19 +993,28 @@ impl WoffTableDirEntry {
     }
 }
 
-/// WOFF 1.0 Directory is just an array of entries. Undoubtedly there exists a 
+/// WOFF 1.0 Directory is just an array of entries. Undoubtedly there exists a
 /// more-oxidized way of just using Vec directly for this...
 #[derive(Debug)]
 struct WoffDirectory {
-    entries: Vec<WoffTableDirEntry>
+    entries: Vec<WoffTableDirEntry>,
 }
 impl WoffDirectory {
-    pub fn new() -> Result<Self> { Ok(Self { entries: Vec::new() } ) }
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            entries: Vec::new(),
+        })
+    }
 
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T, entry_count: usize) -> Result<Self> {
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+        entry_count: usize,
+    ) -> Result<Self> {
         let mut the_directory = WoffDirectory::new()?;
         for _entry in 0..entry_count {
-            the_directory.entries.push(WoffTableDirEntry::new_from_reader(reader)?);
+            the_directory
+                .entries
+                .push(WoffTableDirEntry::new_from_reader(reader)?);
         }
         Ok(the_directory)
     }
@@ -1039,7 +1051,7 @@ pub enum ChunkType {
     /// WOFF metadata
     WoffMeta,
     /// WOFF private data
-    WoffPrivate
+    WoffPrivate,
 }
 
 /// Represents regions within a font file that may be of interest when it
@@ -1086,8 +1098,9 @@ impl ChunkReader for WoffIO {
         let woff_hdr = WoffHeader::new_from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety check).
-        let _font_magic: Magic = <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
-            .map_err(|_err| Error::UnsupportedFontError)?;
+        let _font_magic: Magic =
+            <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
+                .map_err(|_err| Error::UnsupportedFontError)?;
         // Create a buffer to hold each table entry as we read through the file
         let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()] =
             [0; size_of::<WoffTableDirEntry>()];
