@@ -831,7 +831,7 @@ struct WoffHeader {
 impl WoffHeader {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            signature: Magic::Woff as u32,
+            signature: reader.read_u32::<BigEndian>()?,
             flavor: reader.read_u32::<BigEndian>()?,
             length: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -1017,25 +1017,28 @@ impl ChunkReader for WoffIO {
         reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPositions>, Self::Error> {
         reader.rewind()?;
-        let mut positions: Vec<ChunkPositions> = Vec::new();
         // WOFFHeader
         let woff_hdr = WoffHeader::new_from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
-        // valid (NOTE: we don't actually do anything with it, just as a safety check).
+        // valid (NOTE: we don't actually do anything with it, just as a safety
+        // check).
+        //
+        // TBD - Push this into WoffHeader::new_from_reader
         let _font_magic: Magic =
             <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
                 .map_err(|_err| Error::UnsupportedFontError)?;
-        // Create a buffer to hold each table entry as we read through the file
-        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()] =
-            [0; size_of::<WoffTableDirEntry>()];
-        // Add the position of the table directory, excluding the actual table
-        // records, as those positions will be added separately
+        // Add the position of the header.
+        let mut positions: Vec<ChunkPositions> = Vec::new();
         positions.push(ChunkPositions {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
             name: WOFF_HEADER_CHUNK_NAME.data,
             chunk_type: ChunkType::Header,
         });
+
+        // Create a buffer to hold each table entry as we read through the file
+        let mut woff_dirent_buf: [u8; size_of::<WoffTableDirEntry>()] =
+            [0; size_of::<WoffTableDirEntry>()];
 
         // Table counter, to keep up with how many tables we have processed.
         let mut table_counter = 0;
