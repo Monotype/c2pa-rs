@@ -391,7 +391,7 @@ impl TryFrom<u32> for Magic {
 
 /// 'C2PA' font table - in storage
 #[derive(Debug)]
-#[repr(C, packed)] // As defined by the C2PA spec.
+#[repr(C, packed(4))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 struct TableC2PARaw {
     majorVersion: u16,
@@ -560,7 +560,7 @@ impl Default for TableC2PA {
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
 #[derive(Debug)]
-#[repr(C, packed)]
+#[repr(C, packed(4))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 struct TableHead {
@@ -810,7 +810,7 @@ impl WoffFont {
 /// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
 /// always sorts first, for operational reasons?
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed)] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffHeader {
     signature: u32,
@@ -886,7 +886,7 @@ impl Default for WoffHeader {
 
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed)] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffTableDirEntry {
     tag: TableTag,
@@ -964,7 +964,7 @@ impl WoffDirectory {
 /// values precede those with greater enum values; order within a given group
 /// of chunks (such as a series of `Table` chunks) must be preserved by some
 /// other mechanism.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum ChunkType {
     /// Whole-container header.
     Header,
@@ -980,8 +980,8 @@ pub enum ChunkType {
 
 /// Represents regions within a font file that may be of interest when it
 /// comes to hashing data for C2PA.
-#[derive(Debug)]
-pub struct ChunkPositions {
+#[derive(Debug, Eq, PartialEq)]
+pub struct ChunkPosition {
     /// Offset to the start of the chunk
     pub offset: u64,
     /// Length of the chunk
@@ -991,6 +991,15 @@ pub struct ChunkPositions {
     /// Type of chunk
     pub chunk_type: ChunkType,
 }
+
+//impl PartialEq for ChunkPosition {
+//    fn eq(&self, other: &Self) -> bool {
+//        self.offset == other.offset
+//            && self.length == other.length
+//            && self.name == other.name
+//            && self.chunk_type == other.chunk_type
+//    }
+//}
 
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
 pub trait ChunkReader {
@@ -1005,7 +1014,7 @@ pub trait ChunkReader {
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
         reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPositions>, Self::Error>;
+    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
 }
 
 /// Reads in chunks for a WOFF 1.0 file
@@ -1015,7 +1024,7 @@ impl ChunkReader for WoffIO {
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
         reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPositions>, Self::Error> {
+    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
         reader.rewind()?;
         // WOFFHeader
         let woff_hdr = WoffHeader::new_from_reader(reader)?;
@@ -1028,8 +1037,8 @@ impl ChunkReader for WoffIO {
             <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
                 .map_err(|_err| Error::UnsupportedFontError)?;
         // Add the position of the header.
-        let mut positions: Vec<ChunkPositions> = Vec::new();
-        positions.push(ChunkPositions {
+        let mut positions: Vec<ChunkPosition> = Vec::new();
+        positions.push(ChunkPosition {
             offset: 0,
             length: size_of::<WoffHeader>() as u32,
             name: WOFF_HEADER_CHUNK_NAME.data,
@@ -1041,7 +1050,7 @@ impl ChunkReader for WoffIO {
 
         // Read in the directory, and add its chunk
         let woff_dir = WoffDirectory::new_from_reader(reader, woff_hdr.numTables as usize)?;
-        positions.push(ChunkPositions {
+        positions.push(ChunkPosition {
             offset: reader.stream_position()?,
             length: woff_hdr.numTables as u32 * size_of::<WoffTableDirEntry>() as u32,
             name: WOFF_DIRECTORY_CHUNK_NAME.data,
@@ -1050,7 +1059,7 @@ impl ChunkReader for WoffIO {
 
         // Add a chunk for each table, in directory order
         for entry in woff_dir.physical_order().iter() {
-            positions.push(ChunkPositions {
+            positions.push(ChunkPosition {
                 offset: entry.offset as u64,
                 length: entry.origLength, // TBD compression support
                 name: entry.tag.data,
@@ -1060,7 +1069,7 @@ impl ChunkReader for WoffIO {
 
         // Check for XML metadata trailer
         if woff_hdr.metaLength > 0 {
-            positions.push(ChunkPositions {
+            positions.push(ChunkPosition {
                 offset: woff_hdr.metaOffset as u64,
                 length: woff_hdr.metaLength,
                 name: WOFF_METADATA_CHUNK_NAME.data,
@@ -1070,7 +1079,7 @@ impl ChunkReader for WoffIO {
 
         // Check for private data trailer
         if woff_hdr.privLength > 0 {
-            positions.push(ChunkPositions {
+            positions.push(ChunkPosition {
                 offset: woff_hdr.privOffset as u64,
                 length: woff_hdr.privLength,
                 name: WOFF_PRIVATE_CHUNK_NAME.data,
@@ -1753,4 +1762,73 @@ pub mod tests {
     #![allow(clippy::expect_used)]
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
+
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn add_c2pa_table_minimal() {
+        let font_data = vec![
+            // WOFFHeader
+            0x77, 0x4f, 0x46, 0x46, // wOFF
+            0x72, 0x73, 0x74, 0x75, // flavor
+            0x00, 0x00, 0x00, 0x00, // length
+            0x00, 0x00, 0x00, 0x00, // numTables / reserved
+            0x00, 0x00, 0x00, 0x00, // totalSfntSize
+            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
+            0x00, 0x00, 0x00, 0x00, // metaOffset
+            0x00, 0x00, 0x00, 0x00, // metaLength
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength
+            0x00, 0x00, 0x00, 0x00, // privOffset
+            0x00, 0x00, 0x00, 0x00, // privLength
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let woff = WoffFont::new_from_reader(&mut font_stream).unwrap();
+        assert_eq!(woff.header.signature, 0x774f4646);
+       // woff.add_c2pa_table();
+    }
+
+    #[test]
+    fn get_chunk_positions_minimal() {
+        let font_data = vec![
+            // WOFFHeader
+            0x77, 0x4f, 0x46, 0x46, // wOFF
+            0x72, 0x73, 0x74, 0x75, // flavor
+            0x00, 0x00, 0x00, 0x00, // length
+            0x00, 0x00, 0x00, 0x00, // numTables / reserved
+            0x00, 0x00, 0x00, 0x00, // totalSfntSize
+            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
+            0x00, 0x00, 0x00, 0x00, // metaOffset
+            0x00, 0x00, 0x00, 0x00, // metaLength
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength
+            0x00, 0x00, 0x00, 0x00, // privOffset
+            0x00, 0x00, 0x00, 0x00, // privLength
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let woff_io = WoffIO {};
+        let positions = woff_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have one position reported for the table directory itself
+        assert_eq!(2, positions.len());
+        let header_posn = positions.get(0).unwrap();
+        assert_eq!(
+            *header_posn,
+            ChunkPosition {
+                offset: 0,
+                length: 44,
+                name: WOFF_HEADER_CHUNK_NAME.data,
+                chunk_type: ChunkType::Header,
+            }
+        );
+        let directory_posn = positions.get(1).unwrap();
+        assert_eq!(
+            *directory_posn,
+            ChunkPosition {
+                offset: 44,
+                length: 0,
+                name: WOFF_DIRECTORY_CHUNK_NAME.data,
+                chunk_type: ChunkType::Directory,
+            }
+        );
+    }
 }
