@@ -1765,15 +1765,17 @@ pub mod tests {
 
     use std::io::Cursor;
 
+    use claims::*;
+
     use super::*;
 
     #[test]
-    fn add_c2pa_table_minimal() {
-        let font_data = vec![
+    fn add_required_chunks_to_stream_minimal() {
+        let min_font_data = vec![
             // WOFFHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor
-            0x00, 0x00, 0x00, 0x00, // length
+            0x72, 0x73, 0x74, 0x75, // flavor - wrong
+            0x00, 0x00, 0x00, 0x00, // length - wrong
             0x00, 0x00, 0x00, 0x00, // numTables / reserved
             0x00, 0x00, 0x00, 0x00, // totalSfntSize
             0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
@@ -1783,10 +1785,42 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // privOffset
             0x00, 0x00, 0x00, 0x00, // privLength
         ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let woff = WoffFont::new_from_reader(&mut font_stream).unwrap();
-        assert_eq!(woff.header.signature, 0x774f4646);
-       // woff.add_c2pa_table();
+        let min_font_data_min_c2pa = vec![
+            // WOFFHeader
+            0x77, 0x4f, 0x46, 0x46, // wOFF
+            0x72, 0x73, 0x74, 0x75, // flavor
+            0x00, 0x00, 0x00, 0x00, // length
+            0x00, 0x01, 0x00, 0x00, // numTables / reserved
+            0x00, 0x00, 0x00, 0x00, // totalSfntSize -wrong
+            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion - wrong
+            0x00, 0x00, 0x00, 0x00, // metaOffset
+            0x00, 0x00, 0x00, 0x00, // metaLength
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength
+            0x00, 0x00, 0x00, 0x00, // privOffset
+            0x00, 0x00, 0x00, 0x00, // privLength
+            // WOFFTableDirectory
+            0x43, 0x32, 0x50, 0x41, // C2PA
+            0x00, 0x00, 0x00, 0x00, //   offset
+            0x00, 0x00, 0x00, 0x00, //   compLength
+            0x00, 0x00, 0x00, 0x00, //   origLength
+            0x00, 0x00, 0x00, 0x00, //   origChecksum
+            // C2PA Table
+            0x00, 0x00, 0x00, 0x01, // Major / Minor versions
+            0x00, 0x00, 0x00, 0x00, // Manifest URI offset
+            0x00, 0x00, 0x00, 0x00, // Manifest URI length / reserved
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
+        ];
+        let mut the_reader: Cursor<&[u8]> = Cursor::<&[u8]>::new(&min_font_data);
+        let mut the_writer = Cursor::new(Vec::new());
+
+        assert_ok!(add_required_chunks_to_stream(
+            &mut the_reader,
+            &mut the_writer
+        ));
+
+        // Write into the "file" and seek to the beginning
+        assert_eq!(the_writer.get_ref().as_slice(), min_font_data_min_c2pa);
     }
 
     #[test]
