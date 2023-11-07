@@ -447,6 +447,7 @@ impl TableC2PA {
         if size < size_of::<TableC2PARaw>() {
             Err(Error::FontLoadError)?
         } else {
+            todo!("Ookay, do this...")
             // Old implementation, for reference...
             //
             //impl Deserialize for TableC2PA {
@@ -499,7 +500,6 @@ impl TableC2PA {
             //        })
             //    }
             //}
-            Err(Error::FontLoadError)?
         }
     }
 
@@ -804,6 +804,17 @@ impl WoffFont {
 /// TBD: All the serialization structures so far have been defined using native
 /// Rust types; should we go all-out in the other direction, and establish a
 /// layer of "font" types (FWORD, FIXED, etc.)?
+
+/// SFNT Table Directory Entry, from the OpenType spec.
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[allow(non_snake_case)] // As named by the WOFF spec.
+struct SfntTableDirEntry {
+    _tag: TableTag,
+    _checksum: u32,
+    _offset: u32,
+    _length: u32,
+}
 
 /// WOFF 1.0 file header, from the WOFF spec.
 ///
@@ -1260,11 +1271,15 @@ where
                 origChecksum: 0,
             },
         };
-        // Push the entry and the table
+        // Store the new directory entry & table.
         font.directory.entries.push(c2pa_entry);
-        font.directory.entries.sort_by_key(|e| e.offset);
         font.tables
             .insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
+        // Count the table, grow the total size, grow, the "SFNT size"
+        font.header.numTables += 1;
+        // (TBD compression - conflating comp/uncomp sizes here.)
+        font.header.length += size_of::<WoffTableDirEntry>() as u32 + c2pa_entry.compLength;
+        font.header.totalSfntSize += size_of::<SfntTableDirEntry>() as u32 + c2pa_entry.compLength;
         // Bump the XML meta and private data blocks ahead if needed.
         if font.header.metaOffset > 0 {
             font.header.metaOffset += c2pa_entry.compLength;
@@ -1770,46 +1785,50 @@ pub mod tests {
     use super::*;
 
     #[test]
+    // Key to test comments:
+    //
+    //   IIP - Invalid/Ignored/Passthrough
+    //         This field's value is bogus, possibly illegal, but it is expected
+    //         that this code will neither detect nor modify it.
     fn add_required_chunks_to_stream_minimal() {
         let min_font_data = vec![
-            // WOFFHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor - wrong
-            0x00, 0x00, 0x00, 0x00, // length - wrong
-            0x00, 0x00, 0x00, 0x00, // numTables / reserved
-            0x00, 0x00, 0x00, 0x00, // totalSfntSize
-            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
-            0x00, 0x00, 0x00, 0x00, // metaOffset
-            0x00, 0x00, 0x00, 0x00, // metaLength
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength
-            0x00, 0x00, 0x00, 0x00, // privOffset
-            0x00, 0x00, 0x00, 0x00, // privLength
+            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
+            0x00, 0x00, 0x00, 0x2c, // length (44)
+            0x00, 0x00, 0x00, 0x00, // numTables (0) / reserved (0)
+            0x00, 0x00, 0x00, 0x0c, // totalSfntSize (12 for header only)
+            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
+            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
+            0x00, 0x00, 0x00, 0x00, // metaLength (0)
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
+            0x00, 0x00, 0x00, 0x00, // privOffset (0)
+            0x00, 0x00, 0x00, 0x00, // privLength (0)
         ];
-        let min_font_data_min_c2pa = vec![
+        let expected_min_font_data_min_c2pa = vec![
             // WOFFHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor
-            0x00, 0x00, 0x00, 0x00, // length
-            0x00, 0x01, 0x00, 0x00, // numTables / reserved
-            0x00, 0x00, 0x00, 0x00, // totalSfntSize -wrong
-            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion - wrong
-            0x00, 0x00, 0x00, 0x00, // metaOffset
-            0x00, 0x00, 0x00, 0x00, // metaLength
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength
-            0x00, 0x00, 0x00, 0x00, // privOffset
-            0x00, 0x00, 0x00, 0x00, // privLength
+            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
+            0x00, 0x00, 0x00, 0x54, // length (84)
+            0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
+            0x00, 0x00, 0x00, 0x44, // totalSfntSize (68 = 12 + 12 + 20)
+            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
+            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
+            0x00, 0x00, 0x00, 0x00, // metaLength (0)
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
+            0x00, 0x00, 0x00, 0x00, // privOffset (0)
+            0x00, 0x00, 0x00, 0x00, // privLength (0)
             // WOFFTableDirectory
             0x43, 0x32, 0x50, 0x41, // C2PA
-            0x00, 0x00, 0x00, 0x00, //   offset
-            0x00, 0x00, 0x00, 0x00, //   compLength
-            0x00, 0x00, 0x00, 0x00, //   origLength
-            0x00, 0x00, 0x00, 0x00, //   origChecksum
+            0x00, 0x00, 0x00, 0x40, //   offset (64)
+            0x00, 0x00, 0x00, 0x14, //   compLength (20)
+            0x00, 0x00, 0x00, 0x14, //   origLength (20)
+            0x11, 0x22, 0x33, 0x44, //   origChecksum (tbd)
             // C2PA Table
-            0x00, 0x00, 0x00, 0x01, // Major / Minor versions
-            0x00, 0x00, 0x00, 0x00, // Manifest URI offset
-            0x00, 0x00, 0x00, 0x00, // Manifest URI length / reserved
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
+            0x00, 0x01, 0x00, 0x00, // Major / Minor versions
+            0x00, 0x00, 0x00, 0x00, // Manifest URI offset (0)
+            0x00, 0x00, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset (0)
+            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length (0)
         ];
         let mut the_reader: Cursor<&[u8]> = Cursor::<&[u8]>::new(&min_font_data);
         let mut the_writer = Cursor::new(Vec::new());
@@ -1820,7 +1839,10 @@ pub mod tests {
         ));
 
         // Write into the "file" and seek to the beginning
-        assert_eq!(the_writer.get_ref().as_slice(), min_font_data_min_c2pa);
+        assert_eq!(
+            expected_min_font_data_min_c2pa,
+            the_writer.get_ref().as_slice()
+        );
     }
 
     #[test]
@@ -1828,16 +1850,16 @@ pub mod tests {
         let font_data = vec![
             // WOFFHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor
-            0x00, 0x00, 0x00, 0x00, // length
-            0x00, 0x00, 0x00, 0x00, // numTables / reserved
-            0x00, 0x00, 0x00, 0x00, // totalSfntSize
+            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
+            0x00, 0x00, 0x00, 0x2c, // length (44)
+            0x00, 0x00, 0x00, 0x00, // numTables (0) / reserved (0)
+            0x00, 0x00, 0x00, 0x0c, // totalSfntSize (12 for header only)
             0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
-            0x00, 0x00, 0x00, 0x00, // metaOffset
-            0x00, 0x00, 0x00, 0x00, // metaLength
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength
-            0x00, 0x00, 0x00, 0x00, // privOffset
-            0x00, 0x00, 0x00, 0x00, // privLength
+            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
+            0x00, 0x00, 0x00, 0x00, // metaLength (0)
+            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
+            0x00, 0x00, 0x00, 0x00, // privOffset (0)
+            0x00, 0x00, 0x00, 0x00, // privLength (0)
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let woff_io = WoffIO {};
