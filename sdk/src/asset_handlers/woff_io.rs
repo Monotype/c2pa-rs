@@ -408,6 +408,7 @@ impl TableC2PARaw {
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
         destination.write_u16::<BigEndian>(self.activeManifestUriLength)?;
+        destination.write_u16::<BigEndian>(self.reserved)?;
         destination.write_u32::<BigEndian>(self.manifestStoreOffset)?;
         destination.write_u32::<BigEndian>(self.manifestStoreLength)?;
         Ok(())
@@ -543,8 +544,8 @@ impl TableC2PA {
             majorVersion: self.major_version,
             minorVersion: self.minor_version,
             activeManifestUriOffset: 0,
-            reserved: 0,
             activeManifestUriLength: 0,
+            reserved: 0,
             manifestStoreOffset: 0,
             manifestStoreLength: 0,
         };
