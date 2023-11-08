@@ -447,7 +447,7 @@ impl TableC2PA {
         // }
         // // Compute checksum of stream
         // stream.seek(SeekFrom::Start(0)).unwrap();
-        let /*mut*/ cksum: u32 = 0x12345678;
+        // let mut cksum: u32 = 0;
         // while stream.get_ref().len() > 4 {
         //     let ckword: u32 = stream.read_u32::<BigEndian>()?;
         //     cksum += ckword;
@@ -462,7 +462,7 @@ impl TableC2PA {
         //     }
         //     cksum += ckfrag;
         // }
-        return Ok(cksum);
+        Ok(0x12345678)
     }
 
     /// Creates a new C2PA table from the given stream.
@@ -577,8 +577,8 @@ impl TableC2PA {
 impl Default for TableC2PA {
     fn default() -> Self {
         Self {
-            major_version: 0,
-            minor_version: 1,
+            major_version: 1,
+            minor_version: 4,
             active_manifest_uri: Default::default(),
             manifest_store: Default::default(),
         }
@@ -1868,7 +1868,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x14, //   origLength (20)
             0x12, 0x34, 0x56, 0x78, //   origChecksum (0x00010000)
             // C2PA Table
-            0x00, 0x01, 0x00, 0x00, // Major / Minor versions
+            0x00, 0x01, 0x00, 0x04, // Major / Minor versions
             0x00, 0x00, 0x00, 0x00, // Manifest URI offset (0)
             0x00, 0x00, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
             0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset (0)
