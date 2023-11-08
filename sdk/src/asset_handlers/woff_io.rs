@@ -437,6 +437,34 @@ impl TableC2PA {
         }
     }
 
+    /// Create the checksum for this table
+    fn checksum(&self) -> Result<u32> {
+        // Serialize self to a throwaway stream
+        let mut stream = Cursor::new(Vec::new());
+        match self.write(&mut stream) {
+            Ok(()) => (),
+            Err(error) => return Err(error),
+        }
+        // Compute checksum of stream
+        stream.seek(SeekFrom::Start(0)).unwrap();
+        let mut cksum: u32 = 0;
+        while stream.get_ref().len() > 4 {
+            let ckword: u32 = stream.read_u32::<BigEndian>()?;
+            cksum += ckword;
+        }
+        if stream.get_ref().len() > 0 {
+            let mut ckfrag: u32 = 0;
+            let mut factor: u32 = 256 * 256 * 256;
+            while stream.get_ref().len() > 0 {
+                let ckbyte = stream.read_u8()?;
+                ckfrag += ckbyte as u32 * factor;
+                factor /= 256;
+            }
+            cksum += ckfrag;
+        }
+        return Ok(cksum);
+    }
+
     /// Creates a new C2PA table from the given stream.
     pub fn new_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -805,10 +833,22 @@ impl WoffFont {
 /// Rust types; should we go all-out in the other direction, and establish a
 /// layer of "font" types (FWORD, FIXED, etc.)?
 
+/// SFNT header, from the OpenType spec.
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[allow(non_snake_case)] // As defined by the OpenType spec.
+struct SfntHeader {
+    _sfntVersion: u32,
+    _numTables: u16,
+    _searchRange: u16,
+    _entrySelector: u16,
+    _rangeShift: u16,
+}
+
 /// SFNT Table Directory Entry, from the OpenType spec.
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
-#[allow(non_snake_case)] // As named by the WOFF spec.
+#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[allow(non_snake_case)] // As defined by the OpenType spec.
 struct SfntTableDirEntry {
     _tag: TableTag,
     _checksum: u32,
@@ -1253,13 +1293,14 @@ where
     // If the C2PA table does not exist, then we will add an empty one.
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // This table will succeed it.
+        let c2pa_table = TableC2PA::new(None, None);
         let c2pa_entry = match font.directory.physical_order().last() {
             Some(last_phys_entry) => WoffTableDirEntry {
                 tag: C2PA_TABLE_TAG,
                 offset: (last_phys_entry.offset + last_phys_entry.compLength + 3) % 4,
                 compLength: size_of::<TableC2PARaw>() as u32,
                 origLength: size_of::<TableC2PARaw>() as u32,
-                origChecksum: 0,
+                origChecksum: c2pa_table.checksum()?,
             },
             None => WoffTableDirEntry {
                 tag: C2PA_TABLE_TAG,
@@ -1268,17 +1309,19 @@ where
                     as u32,
                 compLength: size_of::<TableC2PARaw>() as u32,
                 origLength: size_of::<TableC2PARaw>() as u32,
-                origChecksum: 0,
+                origChecksum: c2pa_table.checksum()?,
             },
         };
         // Store the new directory entry & table.
         font.directory.entries.push(c2pa_entry);
-        font.tables
-            .insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::new(None, None)));
+        font.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
         // Count the table, grow the total size, grow, the "SFNT size"
         font.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
         font.header.length += size_of::<WoffTableDirEntry>() as u32 + c2pa_entry.compLength;
+        let sfnt_hdr = size_of::<SfntHeader>();
+        let sfnt_dir = size_of::<SfntTableDirEntry>();
+        println!("{}, {}", sfnt_hdr, sfnt_dir);
         font.header.totalSfntSize += size_of::<SfntTableDirEntry>() as u32 + c2pa_entry.compLength;
         // Bump the XML meta and private data blocks ahead if needed.
         if font.header.metaOffset > 0 {
@@ -1810,7 +1853,7 @@ pub mod tests {
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
             0x00, 0x00, 0x00, 0x54, // length (84)
             0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-            0x00, 0x00, 0x00, 0x44, // totalSfntSize (68 = 12 + 12 + 20)
+            0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
             0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
             0x00, 0x00, 0x00, 0x00, // metaOffset (0)
             0x00, 0x00, 0x00, 0x00, // metaLength (0)
@@ -1822,7 +1865,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x40, //   offset (64)
             0x00, 0x00, 0x00, 0x14, //   compLength (20)
             0x00, 0x00, 0x00, 0x14, //   origLength (20)
-            0x11, 0x22, 0x33, 0x44, //   origChecksum (tbd)
+            0x00, 0x01, 0x00, 0x00, //   origChecksum (0x00010000)
             // C2PA Table
             0x00, 0x01, 0x00, 0x00, // Major / Minor versions
             0x00, 0x00, 0x00, 0x00, // Manifest URI offset (0)
