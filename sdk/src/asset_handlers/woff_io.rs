@@ -738,9 +738,7 @@ impl WoffFont {
     fn make_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
     ) -> core::result::Result<WoffFont, Error> {
-        // Read in the WOFFHeader & record its chunk.
-        // We expect to be called with the stream positioned just past the
-        // magic number.
+        // Read in the WOFFHeader
         let woff_hdr = WoffHeader::new_from_reader(reader)?;
 
         // After the header should be the directory.
@@ -774,16 +772,29 @@ impl WoffFont {
             woff_tables.insert(entry.tag, table);
         }
 
-        // Discover XML metadata
-        let /*mut*/ woff_meta = Option::None;
-        //if woff_hdr.metaOffset > 0 && woff_hdr.metaLength > 0 {
-        //
+        // Get the XML metadata if present
+        let woff_meta = if woff_hdr.metaLength > 0 {
+            Some(TableUnspecified::make_from_reader(
+                reader,
+                woff_hdr.metaOffset as u64,
+                woff_hdr.metaOrigLength as usize,
+            )?)
+        } else {
+            None
+        };
 
-        // If private data is present, store it as a table.
-        let /*mut*/ woff_private = Option::None;
-        //if woff_hdr.privOffset > 0  && woff_hdr.privLength > 0 {
-        //}
+        // Get the private data if present
+        let woff_private = if woff_hdr.privLength > 0 {
+            Some(TableUnspecified::make_from_reader(
+                reader,
+                woff_hdr.privOffset as u64,
+                woff_hdr.privLength as usize,
+            )?)
+        } else {
+            None
+        };
 
+        // Assemble the five lions as shown to construct your robot.
         Ok(WoffFont {
             header: woff_hdr,
             directory: woff_dir,
