@@ -855,9 +855,11 @@ impl WoffFont {
             Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.compLength,
             None => (size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>()) as u32,
         };
-        let pre_padding = (existing_table_data_limit + 3) & 3;
-        let post_padding = (existing_table_data_limit + pre_padding + empty_table_size + 3) & 3;
-
+        // Padding needed before the new table.
+        let pre_padding = (4 - (existing_table_data_limit & 3)) & 3;
+        // Padded needed after.
+        let post_padding =
+            (4 - ((existing_table_data_limit + pre_padding + empty_table_size) & 3)) & 3;
         // And a directory entry for it. The easiest approach is to add the table
         // to the end of the font; for one thing, resizing it is much simpler,
         // since we'll just need to change some size fields (and not re-flow
