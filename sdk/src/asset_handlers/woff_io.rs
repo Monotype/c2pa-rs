@@ -897,7 +897,7 @@ impl WoffFont {
             .directory
             .entries
             .iter()
-            .map(|e| e.origLength + 3 & !3)
+            .map(|e| (e.origLength + 3) & !3)
             .sum::<u32>();
         // Success at last
         Ok(())
@@ -2003,8 +2003,8 @@ pub mod tests {
         let positions = woff_io.get_chunk_positions(&mut font_stream).unwrap();
         // Should have one position reported for the table directory itself
         assert_eq!(1, positions.len());
-        assert_eq!(0, positions.get(0).unwrap().offset);
-        assert_eq!(12, positions.get(0).unwrap().length);
+        assert_eq!(0, positions.first().unwrap().offset);
+        assert_eq!(12, positions.first().unwrap().length);
     }
 
     /// Verify when reading the object locations for hashing, we get zero
@@ -2042,7 +2042,7 @@ pub mod tests {
         // record, and the table data
         assert_eq!(3, positions.len());
 
-        let table_directory = positions.get(0).unwrap();
+        let table_directory = positions.first().unwrap();
         assert_eq!(ChunkType::Header, table_directory.chunk_type);
         assert_eq!(0, table_directory.offset);
         assert_eq!(12, table_directory.length);
@@ -2368,7 +2368,7 @@ pub mod tests {
         let positions = woff_io.get_chunk_positions(&mut font_stream).unwrap();
         // Should have one position reported for the table directory itself
         assert_eq!(2, positions.len());
-        let header_posn = positions.get(0).unwrap();
+        let header_posn = positions.first().unwrap();
         assert_eq!(
             *header_posn,
             ChunkPosition {
