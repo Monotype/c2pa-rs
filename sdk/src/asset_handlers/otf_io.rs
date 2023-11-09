@@ -1174,7 +1174,10 @@ pub mod tests {
     fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
             0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, 0x00, // 0 tables
+            0x00,
+            0x00,
+            // 0 tables / missing searchRange!
+            // missing entrySelector! / missing rangeShift!
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let otf_io = OtfIO {};
