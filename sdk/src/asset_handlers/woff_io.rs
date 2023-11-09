@@ -841,6 +841,74 @@ impl WoffFont {
         // If we made it here, it all worked.
         Ok(())
     }
+
+    /// Add an empty C2PA table in this font, at the end, so we don't have to
+    /// re-position any existing tables.
+    fn append_empty_c2pa_table(&mut self) -> Result<()> {
+        // Create the empty table
+        let c2pa_table = TableC2PA::new(None, None);
+        // Size of the empty table in the font file
+        let empty_table_size = size_of::<TableC2PARaw>() as u32;
+        // Offset just past the last valid byte of font table data. This should
+        // point to pad bytes, XML data, or private data, but nothing else.
+        let existing_table_data_limit = match self.directory.physical_order().last() {
+            Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.compLength,
+            None => (size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>()) as u32,
+        };
+        let pre_padding = (existing_table_data_limit + 3) & 3;
+        let post_padding = (existing_table_data_limit + pre_padding + empty_table_size + 3) & 3;
+
+        // And a directory entry for it. The easiest approach is to add the table
+        // to the end of the font; for one thing, resizing it is much simpler,
+        // since we'll just need to change some size fields (and not re-flow
+        // other tables.
+        let c2pa_entry = WoffTableDirEntry {
+            tag: C2PA_TABLE_TAG,
+            offset: existing_table_data_limit + pre_padding,
+            compLength: empty_table_size,
+            origLength: empty_table_size,
+            origChecksum: c2pa_table.checksum()?,
+        };
+        // Store the new directory entry & table.
+        self.directory.entries.push(c2pa_entry);
+        self.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
+        // Count the table, grow the total size, grow, the "SFNT size"
+        self.header.numTables += 1;
+        // (TBD compression - conflating comp/uncomp sizes here.)
+        // (TBD philosophy - better to just re-compute these from scratch, yeah?)
+        self.header.length =
+            existing_table_data_limit + pre_padding + c2pa_entry.compLength + post_padding;
+        // Bump the XML meta block ahead, if present.
+        if self.header.metaOffset > 0 {
+            self.header.metaOffset += c2pa_entry.compLength + post_padding;
+        }
+        // Bump the private block ahead, if present.
+        if self.header.privOffset > 0 {
+            self.header.privOffset += c2pa_entry.compLength + post_padding;
+        }
+        // Re-reckon the size of this font as an SFNT:
+        //   First, the header, then the directory, and finally the tables
+        self.header.totalSfntSize = size_of::<SfntHeader>() as u32;
+        self.header.totalSfntSize +=
+            (size_of::<SfntTableDirEntry>() * self.header.numTables as usize) as u32;
+        self.header.totalSfntSize += self
+            .directory
+            .entries
+            .iter()
+            .map(|e| e.origLength + 3 & !3)
+            .sum::<u32>();
+        // Success at last
+        Ok(())
+    }
+
+    fn _resize_c2pa_table(&mut self, _desired_new_size: u32) -> Result<()> {
+        // 1. If no table present -- create one?
+        // 2. With a table in hand:
+        //    a. Resize the table
+        //    b. Change the compSize/origSize in the directory
+        //    c. Update self.header.length and .totalSfntSize
+        todo!("When the content changes, we'll need to be invoked.")
+    }
 }
 
 /// TBD: All the serialization structures so far have been defined using native
@@ -1304,41 +1372,10 @@ where
 {
     // Read the font from the input stream
     let mut font = WoffFont::make_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
-    // If the C2PA table does not exist, then we will add an empty one.
+    // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
-        // This table will succeed it.
-        let c2pa_table = TableC2PA::new(None, None);
-        let c2pa_entry = match font.directory.physical_order().last() {
-            Some(last_phys_entry) => WoffTableDirEntry {
-                tag: C2PA_TABLE_TAG,
-                offset: (last_phys_entry.offset + last_phys_entry.compLength + 3) & !3,
-                compLength: size_of::<TableC2PARaw>() as u32,
-                origLength: size_of::<TableC2PARaw>() as u32,
-                origChecksum: c2pa_table.checksum()?,
-            },
-            None => WoffTableDirEntry {
-                tag: C2PA_TABLE_TAG,
-                offset: (size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>()) as u32,
-                compLength: size_of::<TableC2PARaw>() as u32,
-                origLength: size_of::<TableC2PARaw>() as u32,
-                origChecksum: c2pa_table.checksum()?,
-            },
-        };
-        // Store the new directory entry & table.
-        font.directory.entries.push(c2pa_entry);
-        font.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
-        // Count the table, grow the total size, grow, the "SFNT size"
-        font.header.numTables += 1;
-        // (TBD compression - conflating comp/uncomp sizes here.)
-        font.header.length += size_of::<WoffTableDirEntry>() as u32 + c2pa_entry.compLength;
-        font.header.totalSfntSize += size_of::<SfntTableDirEntry>() as u32 + c2pa_entry.compLength;
-        // Bump the XML meta and private data blocks ahead if needed.
-        if font.header.metaOffset > 0 {
-            font.header.metaOffset += c2pa_entry.compLength;
-        }
-        if font.header.privOffset > 0 {
-            font.header.privOffset += c2pa_entry.compLength;
-        }
+        // ...install an empty one.
+        font.append_empty_c2pa_table()?;
     }
     // Write the font to the output stream
     font.write(output_stream)
@@ -1842,6 +1879,9 @@ pub mod tests {
     //   IIP - Invalid/Ignored/Passthrough
     //         This field's value is bogus, possibly illegal, but it is expected
     //         that this code will neither detect nor modify it.
+    //
+
+    //
     fn add_required_chunks_to_stream_minimal() {
         let min_font_data = vec![
             0x77, 0x4f, 0x46, 0x46, // wOFF
