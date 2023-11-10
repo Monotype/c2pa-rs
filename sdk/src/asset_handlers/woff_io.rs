@@ -1187,7 +1187,7 @@ impl ChunkReader for WoffIO {
         // Read in the directory, and add its chunk
         let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
         positions.push(ChunkPosition {
-            offset: reader.stream_position()?,
+            offset: size_of::<WoffHeader>() as u64,
             length: woff_hdr.numTables as u32 * size_of::<WoffTableDirEntry>() as u32,
             name: WOFF_DIRECTORY_CHUNK_NAME.data,
             chunk_type: ChunkType::Directory,
@@ -2055,20 +2055,23 @@ pub mod tests {
         // record, and the table data
         assert_eq!(3, positions.len());
 
-        let table_directory = positions.first().unwrap();
-        assert_eq!(ChunkType::Header, table_directory.chunk_type);
-        assert_eq!(0, table_directory.offset);
-        assert_eq!(size_of::<WoffHeader>(), table_directory.length as usize);
+        let hdr_chunk = positions.first().unwrap();
+        assert_eq!(ChunkType::Header, hdr_chunk.chunk_type);
+        assert_eq!(0, hdr_chunk.offset);
+        assert_eq!(size_of::<WoffHeader>(), hdr_chunk.length as usize);
 
-        let table_record = positions.get(1).unwrap();
-        assert_eq!(ChunkType::Directory, table_record.chunk_type);
-        assert_eq!(12, table_record.offset);
-        assert_eq!(size_of::<WoffTableDirEntry>(), table_record.length as usize);
+        let dir_chunk = positions.get(1).unwrap();
+        assert_eq!(ChunkType::Directory, dir_chunk.chunk_type);
+        assert_eq!(size_of::<WoffHeader>(), dir_chunk.offset as usize);
+        assert_eq!(size_of::<WoffTableDirEntry>(), dir_chunk.length as usize);
 
-        let table = positions.get(2).unwrap();
-        assert_eq!(ChunkType::Table, table.chunk_type);
-        assert_eq!(28, table.offset);
-        assert_eq!(7, table.length);
+        let tbl_chunk = positions.get(2).unwrap();
+        assert_eq!(ChunkType::Table, tbl_chunk.chunk_type);
+        assert_eq!(
+            size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>(),
+            tbl_chunk.offset as usize
+        );
+        assert_eq!(7, tbl_chunk.length);
     }
 
     #[ignore] // Need WOFF 1 test fixture
