@@ -2005,12 +2005,19 @@ pub mod tests {
         let woff_io = WoffIO {};
         let positions = woff_io.get_chunk_positions(&mut font_stream).unwrap();
         // Should have one position reported for the table directory itself
-        assert_eq!(1, positions.len());
+        assert_eq!(2, positions.len());
         assert_eq!(0, positions.first().unwrap().offset);
         assert_eq!(
             size_of::<WoffHeader>(),
             positions.first().unwrap().length as usize
         );
+        assert_eq!(ChunkType::Header, positions.first().unwrap().chunk_type);
+        assert_eq!(
+            size_of::<WoffHeader>(),
+            positions.get(1).unwrap().offset as usize
+        );
+        assert_eq!(0, positions.get(1).unwrap().length as usize);
+        assert_eq!(ChunkType::Directory, positions.get(1).unwrap().chunk_type);
     }
 
     /// Verify when reading the object locations for hashing, we get zero
