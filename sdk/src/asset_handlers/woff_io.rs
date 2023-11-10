@@ -527,8 +527,8 @@ impl TableC2PA {
             Ok(TableC2PA {
                 major_version: raw_table.majorVersion,
                 minor_version: raw_table.minorVersion,
-                active_manifest_uri: active_manifest_uri,
-                manifest_store: manifest_store,
+                active_manifest_uri,
+                manifest_store,
             })
         }
     }
