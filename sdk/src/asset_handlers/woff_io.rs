@@ -2278,16 +2278,27 @@ pub mod tests {
         #[test]
         fn build_xmp_from_stream_without_reference() {
             let font_data = vec![
-                0x4f, 0x54, 0x54, 0x4f, // OTTO
-                0x00, 0x01, // 1 tables
-                0x00, 0x00, // search range
-                0x00, 0x00, // entry selector
-                0x00, 0x00, // range shift
-                0x43, 0x32, 0x50, 0x42, // C2PB table tag
-                0x00, 0x00, 0x00, 0x00, // Checksum
-                0x00, 0x00, 0x00, 0x1c, // offset to table data
-                0x00, 0x00, 0x00, 0x01, // length of table data
-                0x00, // C2PB data
+                // WOFFHeader
+                0x77, 0x4f, 0x46, 0x46, // wOFF
+                0x72, 0x73, 0x74, 0x75, // flavor (IIP)
+                0x00, 0x00, 0x00, 0x54, // length (84)
+                0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
+                0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
+                0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
+                0x00, 0x00, 0x00, 0x00, // metaOffset (0)
+                0x00, 0x00, 0x00, 0x00, // metaLength (0)
+                0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
+                0x00, 0x00, 0x00, 0x00, // privOffset (0)
+                0x00, 0x00, 0x00, 0x00, // privLength (0)
+                // WOFFTableDirectory
+                0x67, 0x61, 0x71, 0x66, // garf
+                0x00, 0x00, 0x00, 0x40, //   offset (64)
+                0x00, 0x00, 0x00, 0x07, //   compLength (7)
+                0x00, 0x00, 0x00, 0x07, //   origLength (7)
+                0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
+                // garf Table
+                0x6c, 0x61, 0x73, 0x61, // Major / Minor versions
+                0x67, 0x6e, 0x61,
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
@@ -2303,23 +2314,43 @@ pub mod tests {
         #[test]
         fn build_xmp_from_stream_with_reference_not_xmp() {
             let font_data = vec![
-                0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
-                0x00, 0x01, // 1 tables
-                0x00, 0x00, // search range
-                0x00, 0x00, // entry selector
-                0x00, 0x00, // range shift
-                0x43, 0x32, 0x50, 0x41, // C2PA table tag
-                0x00, 0x00, 0x00, 0x00, // Checksum
-                0x00, 0x00, 0x00, 0x1c, // offset to table data
-                0x00, 0x00, 0x00, 0x1c, // length of table data
-                0x00, 0x00, // Major version
-                0x00, 0x01, // Minor version
-                0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
-                0x00, 0x08, // Active manifest URI length
-                0x00, 0x00, // reserved
-                0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
-                0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
-                0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
+                // WOFFHeader
+                0x77, 0x4f, 0x46, 0x46, // wOFF
+                0x72, 0x73, 0x74, 0x75, // flavor (IIP)
+                0x00, 0x00, 0x00, 0x54, // length (84)
+                0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
+                0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
+                0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
+                0x00, 0x00, 0x00, 0x00, // metaOffset (0)
+                0x00, 0x00, 0x00, 0x00, // metaLength (0)
+                0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
+                0x00, 0x00, 0x00, 0x00, // privOffset (0)
+                0x00, 0x00, 0x00, 0x00, // privLength (0)
+                // WOFFTableDirectory
+                0x43, 0x32, 0x50, 0x41, // C2PA
+                0x00, 0x00, 0x00, 0x40, //   offset (64)
+                0x00, 0x00, 0x00, 0x25, //   compLength (37)
+                0x00, 0x00, 0x00, 0x25, //   origLength (37)
+                0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
+                // C2PA Table
+                0x00, 0x01, 0x00, 0x04, // Major / Minor versions
+                0x00, 0x00, 0x00, 0x14, // Manifest URI offset (0)
+                0x00, 0x08, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
+                0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset (0)
+                0x00, 0x00, 0x00, 0x09, // C2PA manifest store length (0)
+                0x66, 0x69, 0x6c, 0x65, // active manifest uri data
+                0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data cont'd
+                // Rust Question - Is there some way of breaking up this array
+                // definition into chunks? For example, in C, the syntax
+                //    "some" "more" "string"
+                // gets consolidated by the compiler into the single string literal
+                // "somemorestring" - if we could could do that, we could D.R.Y. up
+                // the definition of this content-fragment and the literal in the
+                // assert down below that checks. (And maybe the chunk lengths could
+                // be compile-time-knowable, too, for checking size/offset stuff?)
+                0x74, 0x65, 0x73, 0x74, // manifest store data
+                0x2d, 0x64, 0x61, 0x74, // manifest store data, cont'd
+                0x61, // manifest store data, cont'd
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
