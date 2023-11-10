@@ -17,6 +17,7 @@ use std::{
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::*,
+    str::from_utf8,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -403,6 +404,18 @@ struct TableC2PARaw {
     manifestStoreLength: u32,
 }
 impl TableC2PARaw {
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+        Ok(Self {
+            majorVersion: reader.read_u16::<BigEndian>()?,
+            minorVersion: reader.read_u16::<BigEndian>()?,
+            activeManifestUriOffset: reader.read_u32::<BigEndian>()?,
+            activeManifestUriLength: reader.read_u16::<BigEndian>()?,
+            reserved: reader.read_u16::<BigEndian>()?,
+            manifestStoreOffset: reader.read_u32::<BigEndian>()?,
+            manifestStoreLength: reader.read_u32::<BigEndian>()?,
+        })
+    }
+
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -472,63 +485,51 @@ impl TableC2PA {
         offset: u64,
         size: usize,
     ) -> core::result::Result<TableC2PA, Error> {
-        reader.seek(SeekFrom::Start(offset))?;
         if size < size_of::<TableC2PARaw>() {
             Err(Error::FontLoadError)?
         } else {
-            todo!("Ookay, do this...")
-            // Old implementation, for reference...
-            //
-            //impl Deserialize for TableC2PA {
-            //    fn from_bytes(c: &mut ReaderContext) -> Result<Self, DeserializationError> {
-            //        let mut active_manifest_uri: Option<String> = None;
-            //        let mut manifest_store: Option<Box<[u8]>> = None;
-            //        // Save the pointer of the current reader context, before we read the
-            //        // internal record for obtaining the offset from the beginning of the
-            //        // table to the data as to specification.
-            //        c.push();
-            //
-            //        // Read the components of the C2PA header
-            //        let internal_record: C2PARecordInternal = c.de()?;
-            //
-            //        if internal_record.activeManifestUriOffset > 0 {
-            //            // Offset to the active manifest URI
-            //            c.ptr = c.top_of_table() + internal_record.activeManifestUriOffset as usize;
-            //            // Reading in the active URI as bytes
-            //            let uri_as_bytes: Vec<u8> =
-            //                c.de_counted(internal_record.activeManifestUriLength as usize)?;
-            //            // And converting to a string read as UTF-8 encoding
-            //            active_manifest_uri = Some(
-            //                str::from_utf8(&uri_as_bytes)
-            //                    .map_err(|_| {
-            //                        DeserializationError("Failed to read UTF-8 string from bytes".to_string())
-            //                    })?
-            //                    .to_string(),
-            //            );
-            //        }
-            //
-            //        if internal_record.manifestStoreOffset > 0 {
-            //            // Reset the offset to the C2PA manifest store
-            //            c.ptr = c.top_of_table() + internal_record.manifestStoreOffset as usize;
-            //            // Read the store as bytes
-            //            let store_as_bytes: Option<Vec<u8>> =
-            //                Some(c.de_counted(internal_record.manifestStoreLength as usize)?);
-            //            // And then convert to a string as UTF-8 bytes
-            //            manifest_store = store_as_bytes.map(|d| d.into_boxed_slice());
-            //        }
-            //
-            //        // Restore the state of the reader
-            //        c.pop();
-            //
-            //        // Return our record
-            //        Ok(C2PA {
-            //            majorVersion: internal_record.majorVersion,
-            //            minorVersion: internal_record.minorVersion,
-            //            active_manifest_uri: active_manifest_uri,
-            //            manifestStore: manifest_store,
-            //        })
-            //    }
-            //}
+            let mut active_manifest_uri: Option<String> = None;
+            let mut manifest_store: Option<Vec<u8>> = None;
+            // Read the initial fixed-sized portion of the table
+            reader.seek(SeekFrom::Start(offset))?;
+            let raw_table = TableC2PARaw::new_from_reader(reader)?;
+            // Check parameters
+            if size
+                < size_of::<TableC2PARaw>()
+                    + raw_table.activeManifestUriLength as usize
+                    + raw_table.manifestStoreLength as usize
+            {
+                Err(Error::FontLoadError)?
+            }
+            // If a remote manifest URI is present, unpack it from the remaining
+            // data in the table.
+            if raw_table.activeManifestUriLength > 0 {
+                let mut uri_bytes: Vec<u8> = vec![0; raw_table.activeManifestUriLength as usize];
+                reader.seek(SeekFrom::Start(
+                    offset + raw_table.activeManifestUriOffset as u64,
+                ))?;
+                reader.read_exact(&mut uri_bytes)?;
+                active_manifest_uri = Some(
+                    from_utf8(&uri_bytes)
+                        .map_err(|_e| Error::FontLoadError)?
+                        .to_string(),
+                );
+            }
+            if raw_table.manifestStoreLength > 0 {
+                let mut mani_bytes: Vec<u8> = vec![0; raw_table.manifestStoreLength as usize];
+                reader.seek(SeekFrom::Start(
+                    offset + raw_table.manifestStoreOffset as u64,
+                ))?;
+                reader.read_exact(&mut mani_bytes)?;
+                manifest_store = Some(mani_bytes);
+            }
+            // Return our record
+            Ok(TableC2PA {
+                major_version: raw_table.majorVersion,
+                minor_version: raw_table.minorVersion,
+                active_manifest_uri: active_manifest_uri,
+                manifest_store: manifest_store,
+            })
         }
     }
 
