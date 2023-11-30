@@ -270,18 +270,7 @@ impl TempFile {
 }
 
 /// Supported extension and mime-types
-static SUPPORTED_TYPES: [&str; 10] = [
-    "application/font-sfnt",
-    "application/x-font-opentype",
-    "application/x-font-ttf",
-    "application/x-font-truetype",
-    "font/otf",
-    "font/sfnt",
-    "font/ttf",
-    "otf",
-    "sfnt",
-    "ttf",
-];
+static SUPPORTED_TYPES: [&str; 3] = ["application/x-font-opentype", "font/otf", "otf"];
 
 /// Tag for the 'C2PA' table in a font.
 const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
