@@ -11,7 +11,6 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
-    collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
@@ -309,7 +308,7 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: BTreeMap<TableTag, Table>,
+    tables: Vec<TableTag, Table>,
     meta: Option<TableUnspecified>,
     private: Option<TableUnspecified>,
 }
@@ -326,7 +325,7 @@ impl WoffFont {
         let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
-        let mut woff_tables = BTreeMap::new();
+        let mut woff_tables = Vec::new();
 
         for entry in woff_dir.entries.iter() {
             // Try to parse the next dir entry
@@ -492,33 +491,6 @@ impl WoffFont {
         //    c. Update self.header.length and .totalSfntSize
         todo!("When the content changes, we'll need to be invoked.")
     }
-}
-
-/// TBD: All the serialization structures so far have been defined using native
-/// Rust types; should we go all-out in the other direction, and establish a
-/// layer of "font" types (FWORD, FIXED, etc.)?
-
-/// SFNT header, from the OpenType spec.
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
-#[allow(non_snake_case)] // As defined by the OpenType spec.
-struct SfntHeader {
-    _sfntVersion: u32,
-    _numTables: u16,
-    _searchRange: u16,
-    _entrySelector: u16,
-    _rangeShift: u16,
-}
-
-/// SFNT Table Directory Entry, from the OpenType spec.
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
-#[allow(non_snake_case)] // As defined by the OpenType spec.
-struct SfntTableDirEntry {
-    _tag: TableTag,
-    _checksum: u32,
-    _offset: u32,
-    _length: u32,
 }
 
 /// WOFF 1.0 file header, from the WOFF spec.

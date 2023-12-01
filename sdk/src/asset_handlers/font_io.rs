@@ -445,3 +445,36 @@ pub enum Table {
     /// any other table
     Unspecified(TableUnspecified),
 }
+
+/// TBD: All the serialization structures so far have been defined using native
+/// Rust types; should we go all-out in the other direction, and establish a
+/// layer of "font" types (FWORD, FIXED, etc.)?
+
+/// SFNT header, from the OpenType spec.
+///
+/// This SFNT type is also referenced by WOFF formats, so it is defined here for
+/// common use.
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
+pub struct SfntHeader {
+    pub sfntVersion: u32,
+    pub numTables: u16,
+    pub searchRange: u16,
+    pub entrySelector: u16,
+    pub rangeShift: u16,
+}
+
+/// SFNT Table Directory Entry, from the OpenType spec.
+///
+/// This SFNT type is also referenced by WOFF formats, so it is defined here for
+/// common use.
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
+pub struct SfntTableDirEntry {
+    pub tag: TableTag,
+    pub checksum: u32,
+    pub offset: u32,
+    pub length: u32,
+}

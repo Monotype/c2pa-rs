@@ -11,13 +11,10 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
-    collections::BTreeMap,
-    convert::TryFrom,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::*,
-    str::from_utf8,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -28,6 +25,7 @@ use uuid::Uuid;
 
 use crate::{
     assertions::BoxMap,
+    asset_handlers::font_io::*,
     asset_io::{
         AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
@@ -271,443 +269,20 @@ impl TempFile {
     }
 }
 
-/// Four-character tag which names a font table.
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct TableTag {
-    data: [u8; 4],
-}
-
-impl TableTag {
-    /// Construct a new TableTag with the given value.
-    pub fn new(source_data: [u8; 4]) -> Self {
-        Self { data: source_data }
-    }
-
-    /// Read a new TableTag from the given source.
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        Ok(Self::new([
-            reader.read_u8()?,
-            reader.read_u8()?,
-            reader.read_u8()?,
-            reader.read_u8()?,
-        ]))
-    }
-
-    /// Serialized this tag data to the given writer.
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        destination.write_all(&self.data[..])?;
-        Ok(())
-    }
-}
-
-impl std::fmt::Display for TableTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}{}",
-            self.data[0], self.data[1], self.data[2], self.data[3]
-        )
-    }
-}
-
-impl std::fmt::Debug for TableTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}{}",
-            self.data[0], self.data[1], self.data[2], self.data[3]
-        )
-    }
-}
-
-/// 32-bit font-format identification magic number.
-///
-/// Embedded OpenType and MicroType Express formats cannot be detected with a
-/// simple magic-number sniff. Conceivably, EOT could be dealt with as a
-/// variation on SFNT, but MTX needs more exotic handling.
-enum Magic {
-    /// 'OTTO' - OpenType
-    OpenType = 0x4f54544f,
-    /// FIXED 1.0 - TrueType (or possibly v1.0 Embedded OpenType)
-    TrueType = 0x00010000,
-    /// 'wOFF' - WOFF 1.0
-    Woff = 0x774f4646,
-    /// 'wOF2' - WOFF 2.0
-    Woff2 = 0x774f4632,
-}
-
-/// Tags for the font tables we care about.
-
-/// Tag for the 'C2PA' table.
-const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA" };
-
-/// Tag for the 'head' table in a font.
-const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head" };
-
-/// WOFF 1.0 WOFFHeader
-const WOFF_HEADER_CHUNK_NAME: TableTag = TableTag {
-    data: *b"\x00\x00\x00w",
+/// Pseudo-tag for the SFNT file header
+const SFNT_HEADER_CHUNK_NAME: TableTag = TableTag {
+    data: *b"\x00\x00\x00s",
 };
-// Then SFNT header could be *b"\x00\x00\x00w", and all the "header" chunks
-// will automatically BTreeMap to start-of-file.
 
 /// Pseudo-tag for the table directory.
-const WOFF_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
-    data: *b"\x00\x00\x01D",
+const SFNT_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
+    data: *b"\x00\x00\x00d",
 }; // Sorts to just-after HEADER tag.
 
-/// WOFF 1.0 / 2.0 trailing XML metadata
-const WOFF_METADATA_CHUNK_NAME: TableTag = TableTag {
-    data: *b"\x7F\x7F\x7FM",
-}; // Sorts to the penultimate position.
-
-/// WOFF 1.0 / 2.0 trailing private data
-const WOFF_PRIVATE_CHUNK_NAME: TableTag = TableTag {
-    data: *b"\x7F\x7F\x7FP",
-}; // Sorts to the very end.
-
-/// Used to attempt conversion from u32 to a Magic value.
-impl TryFrom<u32> for Magic {
-    type Error = crate::error::Error;
-
-    /// Tries to convert from u32 to a valid font version.
-    fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
-        match v {
-            tt if tt == Magic::TrueType as u32 => Ok(Magic::TrueType),
-            ot if ot == Magic::OpenType as u32 => Ok(Magic::OpenType),
-            w1 if w1 == Magic::Woff as u32 => Ok(Magic::Woff),
-            w2 if w2 == Magic::Woff2 as u32 => Ok(Magic::Woff2),
-            _unknown => Err(Error::FontUnknownMagic),
-        }
-    }
-}
-
-/// 'C2PA' font table - in storage
-#[derive(Debug)]
-#[repr(C, packed(4))] // As defined by the C2PA spec.
-#[allow(non_snake_case)] // As named by the C2PA spec.
-struct TableC2PARaw {
-    majorVersion: u16,
-    minorVersion: u16,
-    activeManifestUriOffset: u32,
-    activeManifestUriLength: u16,
-    reserved: u16,
-    manifestStoreOffset: u32,
-    manifestStoreLength: u32,
-}
-impl TableC2PARaw {
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        Ok(Self {
-            majorVersion: reader.read_u16::<BigEndian>()?,
-            minorVersion: reader.read_u16::<BigEndian>()?,
-            activeManifestUriOffset: reader.read_u32::<BigEndian>()?,
-            activeManifestUriLength: reader.read_u16::<BigEndian>()?,
-            reserved: reader.read_u16::<BigEndian>()?,
-            manifestStoreOffset: reader.read_u32::<BigEndian>()?,
-            manifestStoreLength: reader.read_u32::<BigEndian>()?,
-        })
-    }
-
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        destination.write_u16::<BigEndian>(self.majorVersion)?;
-        destination.write_u16::<BigEndian>(self.minorVersion)?;
-        destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
-        destination.write_u16::<BigEndian>(self.activeManifestUriLength)?;
-        destination.write_u16::<BigEndian>(self.reserved)?;
-        destination.write_u32::<BigEndian>(self.manifestStoreOffset)?;
-        destination.write_u32::<BigEndian>(self.manifestStoreLength)?;
-        Ok(())
-    }
-}
-
-/// 'C2PA' font table - after loading from storage
-#[derive(Clone, Debug)]
-struct TableC2PA {
-    /// Major version of the C2PA table record
-    major_version: u16,
-    /// Minor version of the C2PA table record
-    minor_version: u16,
-    /// Optional URI to an active manifest
-    active_manifest_uri: Option<String>,
-    /// Optional embedded manifest store
-    manifest_store: Option<Vec<u8>>,
-}
-
-impl TableC2PA {
-    /// Creates a new C2PA table with the given values.
-    pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
-        Self {
-            active_manifest_uri,
-            manifest_store,
-            ..TableC2PA::default()
-        }
-    }
-
-    /// Create the checksum for this table
-    fn checksum(&self) -> Result<u32> {
-        // // Serialize self to a throwaway stream
-        // let mut stream = Cursor::new(Vec::new());
-        // match self.write(&mut stream) {
-        //     Ok(()) => (),
-        //     Err(error) => return Err(error),
-        // }
-        // // Compute checksum of stream
-        // stream.seek(SeekFrom::Start(0)).unwrap();
-        // let mut cksum: u32 = 0;
-        // while stream.get_ref().len() > 4 {
-        //     let ckword: u32 = stream.read_u32::<BigEndian>()?;
-        //     cksum += ckword;
-        // }
-        // if stream.get_ref().len() > 0 {
-        //     let mut ckfrag: u32 = 0;
-        //     let mut factor: u32 = 256 * 256 * 256;
-        //     while stream.get_ref().len() > 0 {
-        //         let ckbyte = stream.read_u8()?;
-        //         ckfrag += ckbyte as u32 * factor;
-        //         factor /= 256;
-        //     }
-        //     cksum += ckfrag;
-        // }
-        Ok(0x12345678)
-    }
-
-    /// Creates a new C2PA table from the given stream.
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-        offset: u64,
-        size: usize,
-    ) -> core::result::Result<TableC2PA, Error> {
-        if size < size_of::<TableC2PARaw>() {
-            Err(Error::FontLoadError)?
-        } else {
-            let mut active_manifest_uri: Option<String> = None;
-            let mut manifest_store: Option<Vec<u8>> = None;
-            // Read the initial fixed-sized portion of the table
-            reader.seek(SeekFrom::Start(offset))?;
-            let raw_table = TableC2PARaw::new_from_reader(reader)?;
-            // Check parameters
-            if size
-                < size_of::<TableC2PARaw>()
-                    + raw_table.activeManifestUriLength as usize
-                    + raw_table.manifestStoreLength as usize
-            {
-                Err(Error::FontLoadError)?
-            }
-            // If a remote manifest URI is present, unpack it from the remaining
-            // data in the table.
-            if raw_table.activeManifestUriLength > 0 {
-                let mut uri_bytes: Vec<u8> = vec![0; raw_table.activeManifestUriLength as usize];
-                reader.seek(SeekFrom::Start(
-                    offset + raw_table.activeManifestUriOffset as u64,
-                ))?;
-                reader.read_exact(&mut uri_bytes)?;
-                active_manifest_uri = Some(
-                    from_utf8(&uri_bytes)
-                        .map_err(|_e| Error::FontLoadError)?
-                        .to_string(),
-                );
-            }
-            if raw_table.manifestStoreLength > 0 {
-                let mut mani_bytes: Vec<u8> = vec![0; raw_table.manifestStoreLength as usize];
-                reader.seek(SeekFrom::Start(
-                    offset + raw_table.manifestStoreOffset as u64,
-                ))?;
-                reader.read_exact(&mut mani_bytes)?;
-                manifest_store = Some(mani_bytes);
-            }
-            // Return our record
-            Ok(TableC2PA {
-                major_version: raw_table.majorVersion,
-                minor_version: raw_table.minorVersion,
-                active_manifest_uri,
-                manifest_store,
-            })
-        }
-    }
-
-    /// Get the manifest store data if available
-    pub fn get_manifest_store(&self) -> Option<&[u8]> {
-        self.manifest_store.as_deref()
-    }
-
-    /// Serialize this C2PA table to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        // Set up the structured data
-        let mut raw_table = TableC2PARaw {
-            majorVersion: self.major_version,
-            minorVersion: self.minor_version,
-            activeManifestUriOffset: 0,
-            activeManifestUriLength: 0,
-            reserved: 0,
-            manifestStoreOffset: 0,
-            manifestStoreLength: 0,
-        };
-        // If a remote URI is present, prepare to store it.
-        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            raw_table.activeManifestUriOffset = size_of::<TableC2PARaw>() as u32;
-            raw_table.activeManifestUriLength = uri_string.len() as u16;
-        }
-        // If a local store is present, prepare to store it.
-        if let Some(manifest_store) = self.manifest_store.as_ref() {
-            raw_table.manifestStoreOffset =
-                raw_table.activeManifestUriOffset + raw_table.activeManifestUriLength as u32;
-            raw_table.manifestStoreLength = manifest_store.len() as u32;
-        }
-        // Write the table data
-        raw_table.write(destination)?;
-        // Write the remote manifest URI, if present.
-        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            destination.write_all(uri_string.as_bytes())?;
-        }
-        // Write out the local manifest store, if present.
-        if let Some(manifest_store) = self.manifest_store.as_ref() {
-            destination.write_all(manifest_store)?;
-        }
-        // Done
-        Ok(())
-    }
-}
-
-impl Default for TableC2PA {
-    fn default() -> Self {
-        Self {
-            major_version: 1,
-            minor_version: 4,
-            active_manifest_uri: Default::default(),
-            manifest_store: Default::default(),
-        }
-    }
-}
-
-/// 'head' font table. For now, there is no need for a 'raw' variant, since only
-/// byte-swapping is needed.
-#[derive(Debug)]
-#[repr(C, packed(4))]
-// As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
-#[allow(non_snake_case)] // As named by Open Font Format / OpenType.
-struct TableHead {
-    majorVersion: u16,
-    minorVersion: u16,
-    fontRevision: u32,
-    checksumAdjustment: u32,
-    magicNumber: u32,
-    flags: u16,
-    unitsPerEm: u16,
-    created: i64,
-    modified: i64,
-    xMin: i16,
-    yMin: i16,
-    xMax: i16,
-    yMax: i16,
-    macStyle: u16,
-    lowestRecPPEM: u16,
-    fontDirectionHint: i16,
-    indexToLocFormat: i16,
-    glyphDataFormat: i16,
-}
-
-impl TableHead {
-    /// Creates a `head` table from the given stream.
-    pub fn _make_from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-        offset: u64,
-        size: usize,
-    ) -> core::result::Result<TableHead, Error> {
-        reader.seek(SeekFrom::Start(offset))?;
-        if size != size_of::<TableHead>() {
-            Err(Error::FontLoadError)?
-        } else {
-            Ok(Self {
-                majorVersion: reader.read_u16::<BigEndian>()?,
-                minorVersion: reader.read_u16::<BigEndian>()?,
-                fontRevision: reader.read_u32::<BigEndian>()?,
-                checksumAdjustment: reader.read_u32::<BigEndian>()?,
-                magicNumber: reader.read_u32::<BigEndian>()?,
-                flags: reader.read_u16::<BigEndian>()?,
-                unitsPerEm: reader.read_u16::<BigEndian>()?,
-                created: reader.read_i64::<BigEndian>()?,
-                modified: reader.read_i64::<BigEndian>()?,
-                xMin: reader.read_i16::<BigEndian>()?,
-                yMin: reader.read_i16::<BigEndian>()?,
-                xMax: reader.read_i16::<BigEndian>()?,
-                yMax: reader.read_i16::<BigEndian>()?,
-                macStyle: reader.read_u16::<BigEndian>()?,
-                lowestRecPPEM: reader.read_u16::<BigEndian>()?,
-                fontDirectionHint: reader.read_i16::<BigEndian>()?,
-                indexToLocFormat: reader.read_i16::<BigEndian>()?,
-                glyphDataFormat: reader.read_i16::<BigEndian>()?,
-            })
-        }
-    }
-
-    /// Serialize this head table to the given writer.
-    fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        destination.write_u16::<BigEndian>(self.majorVersion)?;
-        destination.write_u16::<BigEndian>(self.minorVersion)?;
-        destination.write_u32::<BigEndian>(self.fontRevision)?;
-        destination.write_u32::<BigEndian>(self.checksumAdjustment)?;
-        destination.write_u32::<BigEndian>(self.magicNumber)?;
-        destination.write_u16::<BigEndian>(self.flags)?;
-        destination.write_u16::<BigEndian>(self.unitsPerEm)?;
-        destination.write_i64::<BigEndian>(self.created)?;
-        destination.write_i64::<BigEndian>(self.modified)?;
-        destination.write_u16::<BigEndian>(self.unitsPerEm)?;
-        destination.write_i16::<BigEndian>(self.xMin)?;
-        destination.write_i16::<BigEndian>(self.yMin)?;
-        destination.write_i16::<BigEndian>(self.xMax)?;
-        destination.write_i16::<BigEndian>(self.yMax)?;
-        destination.write_u16::<BigEndian>(self.macStyle)?;
-        destination.write_u16::<BigEndian>(self.lowestRecPPEM)?;
-        destination.write_i16::<BigEndian>(self.fontDirectionHint)?;
-        destination.write_i16::<BigEndian>(self.indexToLocFormat)?;
-        destination.write_i16::<BigEndian>(self.glyphDataFormat)?;
-        Ok(())
-    }
-}
-
-/// Generic font table with unknown contents.
-#[derive(Debug)]
-struct TableUnspecified {
-    data: Vec<u8>,
-}
-
-/// Any font table.
-impl TableUnspecified {
-    /// Creates an unspecified table from the given stream.
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-        offset: u64,
-        size: usize,
-    ) -> core::result::Result<TableUnspecified, Error> {
-        let mut raw_table_data: Vec<u8> = vec![0; size];
-        reader.seek(SeekFrom::Start(offset))?;
-        reader.read_exact(&mut raw_table_data)?;
-        Ok(Self {
-            data: raw_table_data,
-        })
-    }
-
-    /// Serialized this table data to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        Ok(destination.write_all(&self.data[..])?)
-    }
-}
-
-/// Possible tables
-#[derive(Debug)]
-enum Table {
-    /// 'C2PA' table
-    C2PA(TableC2PA),
-    /// 'head' table
-    //Head(TableHead),
-    /// any other table
-    Unspecified(TableUnspecified),
-}
-
-/// Implementation of a WOFF 1.0 font
-struct WoffFont {
-    header: WoffHeader,
-    directory: WoffDirectory,
+/// Implementation of ye olde SFNT
+struct SfntFont {
+    header: SfntHeader,
+    directory: SfntDirectory,
     /// All the Tables in this font, keyed by TableTag.
     // TBD - WOFF2 - For this format, the Table Directory entries are not
     // sorted by tag; rather, their order determines the physical order of the
@@ -721,26 +296,24 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: BTreeMap<TableTag, Table>,
-    meta: Option<TableUnspecified>,
-    private: Option<TableUnspecified>,
+    tables: Vec<TableTag, Table>,
 }
 
-impl WoffFont {
-    /// Reads in a WOFF 1 font file from the given stream.
+impl SfntFont {
+    /// Reads in an SFNT file from the given stream.
     fn make_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
-    ) -> core::result::Result<WoffFont, Error> {
-        // Read in the WOFFHeader
-        let woff_hdr = WoffHeader::new_from_reader(reader)?;
+    ) -> core::result::Result<SfntFont, Error> {
+        // Read in the SfntHeader
+        let sfnt_hdr = SfntHeader::new_from_reader(reader)?;
 
         // After the header should be the directory.
-        let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
+        let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
-        let mut woff_tables = BTreeMap::new();
+        let mut sfnt_tables = Vec::new();
 
-        for entry in woff_dir.entries.iter() {
+        for entry in sfnt_dir.entries.iter() {
             // Try to parse the next dir entry
             let offset: u64 = entry.offset as u64;
             let size: usize = entry.compLength as usize;
@@ -762,38 +335,36 @@ impl WoffFont {
                 }
             };
             // Tell it to get in the van
-            woff_tables.insert(entry.tag, table);
+            sfnt_tables.insert(entry.tag, table);
         }
 
         // Get the XML metadata if present
-        let woff_meta = if woff_hdr.metaLength > 0 {
+        let sfnt_meta = if sfnt_hdr.metaLength > 0 {
             Some(TableUnspecified::make_from_reader(
                 reader,
-                woff_hdr.metaOffset as u64,
-                woff_hdr.metaOrigLength as usize,
+                sfnt_hdr.metaOffset as u64,
+                sfnt_hdr.metaOrigLength as usize,
             )?)
         } else {
             None
         };
 
         // Get the private data if present
-        let woff_private = if woff_hdr.privLength > 0 {
+        let sfnt_private = if sfnt_hdr.privLength > 0 {
             Some(TableUnspecified::make_from_reader(
                 reader,
-                woff_hdr.privOffset as u64,
-                woff_hdr.privLength as usize,
+                sfnt_hdr.privOffset as u64,
+                sfnt_hdr.privLength as usize,
             )?)
         } else {
             None
         };
 
         // Assemble the five lions as shown to construct your robot.
-        Ok(WoffFont {
-            header: woff_hdr,
-            directory: woff_dir,
-            tables: woff_tables,
-            meta: woff_meta,
-            private: woff_private,
+        Ok(SfntFont {
+            header: sfnt_hdr,
+            directory: sfnt_dir,
+            tables: sfnt_tables,
         })
     }
 
@@ -819,15 +390,15 @@ impl WoffFont {
         }
         // Then the XML meta, if present.
         match &self.meta {
-            Some(woff_meta) => {
-                woff_meta.write(destination)?;
+            Some(sfnt_meta) => {
+                sfnt_meta.write(destination)?;
             }
             None => (),
         };
         // Then the private data, if present.
         match &self.private {
-            Some(woff_private) => {
-                woff_private.write(destination)?;
+            Some(sfnt_private) => {
+                sfnt_private.write(destination)?;
             }
             None => (),
         };
@@ -846,7 +417,7 @@ impl WoffFont {
         // point to pad bytes, XML data, or private data, but nothing else.
         let existing_table_data_limit = match self.directory.physical_order().last() {
             Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.compLength,
-            None => (size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>()) as u32,
+            None => (size_of::<SfntHeader>() + size_of::<SfntTableDirEntry>()) as u32,
         };
         // Padding needed before the new table.
         let pre_padding = (4 - (existing_table_data_limit & 3)) & 3;
@@ -857,7 +428,7 @@ impl WoffFont {
         // to the end of the font; for one thing, resizing it is much simpler,
         // since we'll just need to change some size fields (and not re-flow
         // other tables.
-        let c2pa_entry = WoffTableDirEntry {
+        let c2pa_entry = SfntTableDirEntry {
             tag: C2PA_TABLE_TAG,
             offset: existing_table_data_limit + pre_padding,
             compLength: empty_table_size,
@@ -906,152 +477,48 @@ impl WoffFont {
     }
 }
 
-/// TBD: All the serialization structures so far have been defined using native
-/// Rust types; should we go all-out in the other direction, and establish a
-/// layer of "font" types (FWORD, FIXED, etc.)?
+/// Definitions for the SFNT file header and Table Directory structures are in
+/// the font_io module, because WOFF support needs to use them as well.
 
-/// SFNT header, from the OpenType spec.
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
-#[allow(non_snake_case)] // As defined by the OpenType spec.
-struct SfntHeader {
-    _sfntVersion: u32,
-    _numTables: u16,
-    _searchRange: u16,
-    _entrySelector: u16,
-    _rangeShift: u16,
-}
-
-/// SFNT Table Directory Entry, from the OpenType spec.
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
-#[allow(non_snake_case)] // As defined by the OpenType spec.
-struct SfntTableDirEntry {
-    _tag: TableTag,
-    _checksum: u32,
-    _offset: u32,
-    _length: u32,
-}
-
-/// WOFF 1.0 file header, from the WOFF spec.
-///
-/// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
-/// always sorts first, for operational reasons?
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
-#[allow(non_snake_case)] // As named by the WOFF spec.
-struct WoffHeader {
-    signature: u32,
-    flavor: u32,
-    length: u32,
-    numTables: u16,
-    reserved: u16,
-    totalSfntSize: u32,
-    majorVersion: u16,
-    minorVersion: u16,
-    metaOffset: u32,
-    metaLength: u32,
-    metaOrigLength: u32,
-    privOffset: u32,
-    privLength: u32,
-}
-
-impl WoffHeader {
+impl SfntHeader {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            signature: reader.read_u32::<BigEndian>()?,
-            flavor: reader.read_u32::<BigEndian>()?,
-            length: reader.read_u32::<BigEndian>()?,
+            sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
-            reserved: reader.read_u16::<BigEndian>()?,
-            totalSfntSize: reader.read_u32::<BigEndian>()?,
-            majorVersion: reader.read_u16::<BigEndian>()?,
-            minorVersion: reader.read_u16::<BigEndian>()?,
-            metaOffset: reader.read_u32::<BigEndian>()?,
-            metaLength: reader.read_u32::<BigEndian>()?,
-            metaOrigLength: reader.read_u32::<BigEndian>()?,
-            privOffset: reader.read_u32::<BigEndian>()?,
-            privLength: reader.read_u32::<BigEndian>()?,
+            searchRange: reader.read_u16::<BigEndian>()?,
+            entrySelector: reader.read_u16::<BigEndian>()?,
+            rangeShift: reader.read_u16::<BigEndian>()?,
         })
     }
 
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        destination.write_u32::<BigEndian>(self.signature)?;
-        destination.write_u32::<BigEndian>(self.flavor)?;
-        destination.write_u32::<BigEndian>(self.length)?;
+        destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
-        destination.write_u16::<BigEndian>(self.reserved)?;
-        destination.write_u32::<BigEndian>(self.totalSfntSize)?;
-        destination.write_u16::<BigEndian>(self.majorVersion)?;
-        destination.write_u16::<BigEndian>(self.minorVersion)?;
-        destination.write_u32::<BigEndian>(self.metaOffset)?;
-        destination.write_u32::<BigEndian>(self.metaLength)?;
-        destination.write_u32::<BigEndian>(self.metaOrigLength)?;
-        destination.write_u32::<BigEndian>(self.privOffset)?;
-        destination.write_u32::<BigEndian>(self.privLength)?;
+        destination.write_u16::<BigEndian>(self.searchRange)?;
+        destination.write_u16::<BigEndian>(self.entrySelector)?;
+        destination.write_u16::<BigEndian>(self.rangeShift)?;
         Ok(())
     }
 }
-impl Default for WoffHeader {
+impl Default for SfntHeader {
     fn default() -> Self {
         Self {
-            signature: Magic::Woff as u32,
-            flavor: 0,
-            length: 0,
+            signature: Magic::TrueType as u32,
             numTables: 0,
-            reserved: 0,
-            totalSfntSize: 44,
-            majorVersion: 1,
-            minorVersion: 0,
-            metaOffset: 0,
-            metaLength: 0,
-            metaOrigLength: 0,
-            privOffset: 0,
-            privLength: 0,
+            searchRange: 0,
+            entrySelector: 0,
+            rangeShift: 0,
         }
     }
 }
 
-/// WOFF 1.0 Table Directory Entry, from the WOFF spec.
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
-#[allow(non_snake_case)] // As named by the WOFF spec.
-struct WoffTableDirEntry {
-    tag: TableTag,
-    offset: u32,
-    compLength: u32,
-    origLength: u32,
-    origChecksum: u32,
-}
-impl WoffTableDirEntry {
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        Ok(Self {
-            tag: TableTag::new_from_reader(reader)?,
-            offset: reader.read_u32::<BigEndian>()?,
-            compLength: reader.read_u32::<BigEndian>()?,
-            origLength: reader.read_u32::<BigEndian>()?,
-            origChecksum: reader.read_u32::<BigEndian>()?,
-        })
-    }
-
-    /// Serialize this directory entry to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        self.tag.write(destination)?;
-        destination.write_u32::<BigEndian>(self.offset)?;
-        destination.write_u32::<BigEndian>(self.compLength)?;
-        destination.write_u32::<BigEndian>(self.origLength)?;
-        destination.write_u32::<BigEndian>(self.origChecksum)?;
-        Ok(())
-    }
-}
-
-/// WOFF 1.0 Directory is just an array of entries. Undoubtedly there exists a
+/// SFNT Directory is just an array of entries. Undoubtedly there exists a
 /// more-oxidized way of just using Vec directly for this...
 #[derive(Debug)]
-struct WoffDirectory {
-    entries: Vec<WoffTableDirEntry>,
+struct SfntDirectory {
+    entries: Vec<SfntTableDirEntry>,
 }
-impl WoffDirectory {
+impl SfntDirectory {
     pub fn new() -> Result<Self> {
         Ok(Self {
             entries: Vec::new(),
@@ -1062,11 +529,11 @@ impl WoffDirectory {
         reader: &mut T,
         entry_count: usize,
     ) -> Result<Self> {
-        let mut the_directory = WoffDirectory::new()?;
+        let mut the_directory = SfntDirectory::new()?;
         for _entry in 0..entry_count {
             the_directory
                 .entries
-                .push(WoffTableDirEntry::new_from_reader(reader)?);
+                .push(SfntTableDirEntry::new_from_reader(reader)?);
         }
         Ok(the_directory)
     }
@@ -1081,7 +548,7 @@ impl WoffDirectory {
 
     /// Returns an array which contains the indices of this directory's entries,
     /// arranged in their physical (offset+size) order.
-    fn physical_order(&self) -> Vec<WoffTableDirEntry> {
+    fn physical_order(&self) -> Vec<SfntTableDirEntry> {
         let mut physically_ordered_entries = self.entries.clone();
         physically_ordered_entries.sort_by_key(|e| e.offset);
         physically_ordered_entries
@@ -1100,10 +567,6 @@ pub enum ChunkType {
     Directory,
     /// Table data
     Table,
-    /// WOFF metadata
-    WoffMeta,
-    /// WOFF private data
-    WoffPrivate,
 }
 
 /// Represents regions within a font file that may be of interest when it
@@ -1145,7 +608,7 @@ pub trait ChunkReader {
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
 }
 
-/// Reads in chunks for a WOFF 1.0 file
+/// Reads in chunks for an SFNT file
 impl ChunkReader for SfntIO {
     type Error = crate::error::Error;
 
@@ -1154,64 +617,44 @@ impl ChunkReader for SfntIO {
         reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
         reader.rewind()?;
-        // WOFFHeader
-        let woff_hdr = WoffHeader::new_from_reader(reader)?;
+        // SfntHeader
+        let sfnt_hdr = SfntHeader::new_from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety
         // check).
         //
-        // TBD - Push this into WoffHeader::new_from_reader
+        // TBD - Push this into SfntHeader::new_from_reader
         let _font_magic: Magic =
-            <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
+            <u32 as std::convert::TryInto<Magic>>::try_into(sfnt_hdr.signature)
                 .map_err(|_err| Error::UnsupportedFontError)?;
         // Add the position of the header.
         let mut positions: Vec<ChunkPosition> = Vec::new();
         positions.push(ChunkPosition {
             offset: 0,
-            length: size_of::<WoffHeader>() as u32,
-            name: WOFF_HEADER_CHUNK_NAME.data,
+            length: size_of::<SfntHeader>() as u32,
+            name: SFNT_HEADER_CHUNK_NAME.data,
             chunk_type: ChunkType::Header,
         });
 
         // Advance to the start of the table entries
-        reader.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
+        reader.seek(SeekFrom::Start(size_of::<SfntHeader>() as u64))?;
 
         // Read in the directory, and add its chunk
-        let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
+        let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
         positions.push(ChunkPosition {
-            offset: size_of::<WoffHeader>() as u64,
-            length: woff_hdr.numTables as u32 * size_of::<WoffTableDirEntry>() as u32,
-            name: WOFF_DIRECTORY_CHUNK_NAME.data,
+            offset: size_of::<SfntHeader>() as u64,
+            length: sfnt_hdr.numTables as u32 * size_of::<SfntTableDirEntry>() as u32,
+            name: SFNT_DIRECTORY_CHUNK_NAME.data,
             chunk_type: ChunkType::Directory,
         });
 
         // Add a chunk for each table, in directory order
-        for entry in woff_dir.physical_order().iter() {
+        for entry in sfnt_dir.physical_order().iter() {
             positions.push(ChunkPosition {
                 offset: entry.offset as u64,
                 length: entry.origLength, // TBD compression support
                 name: entry.tag.data,
                 chunk_type: ChunkType::Table,
-            });
-        }
-
-        // Check for XML metadata trailer
-        if woff_hdr.metaLength > 0 {
-            positions.push(ChunkPosition {
-                offset: woff_hdr.metaOffset as u64,
-                length: woff_hdr.metaLength,
-                name: WOFF_METADATA_CHUNK_NAME.data,
-                chunk_type: ChunkType::WoffMeta,
-            });
-        }
-
-        // Check for private data trailer
-        if woff_hdr.privLength > 0 {
-            positions.push(ChunkPosition {
-                offset: woff_hdr.privOffset as u64,
-                length: woff_hdr.privLength,
-                name: WOFF_PRIVATE_CHUNK_NAME.data,
-                chunk_type: ChunkType::WoffPrivate,
             });
         }
 
@@ -1256,7 +699,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1315,7 +758,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -1366,7 +809,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = WoffFont::make_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::make_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -1477,7 +920,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1508,7 +951,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1598,7 +1041,7 @@ where
             // adjustment.
             //
             // ("Other" data gets treated the same as an uninteresting table.)
-            ChunkType::Table | ChunkType::WoffMeta | ChunkType::WoffPrivate => {
+            ChunkType::Table => {
                 let mut table_positions = Vec::<HashObjectPositions>::new();
                 // We must split out the head table to ignore the checksum
                 // adjustment, because it changes after the C2PA table is
@@ -1655,8 +1098,8 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let woff = WoffFont::make_from_reader(reader).map_err(|_| Error::FontLoadError)?;
-    let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
+    let sfnt = SfntFont::make_from_reader(reader).map_err(|_| Error::FontLoadError)?;
+    let c2pa_table: Option<TableC2PA> = match sfnt.tables.get(&C2PA_TABLE_TAG) {
         None => None,
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
             Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
@@ -1668,7 +1111,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
     c2pa_table.ok_or(Error::JumbfNotFound)
 }
 
-/// Main WOFF IO feature.
+/// Main SFNT IO feature.
 pub struct SfntIO {}
 
 impl SfntIO {
@@ -1683,7 +1126,7 @@ impl SfntIO {
     }
 }
 
-/// WOFF implementation of the CAILoader trait.
+/// SFNT implementation of the CAILoader trait.
 impl CAIReader for SfntIO {
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
         let c2pa_table = read_c2pa_from_stream(asset_reader)?;
@@ -1703,7 +1146,7 @@ impl CAIReader for SfntIO {
     }
 }
 
-/// WOFF/TTF implementations for the CAIWriter trait.
+/// SFNT implementations for the CAIWriter trait.
 impl CAIWriter for SfntIO {
     fn write_cai(
         &self,
@@ -1730,7 +1173,7 @@ impl CAIWriter for SfntIO {
     }
 }
 
-/// WOFF/TTF implementations for the AssetIO trait.
+/// SFNT implementations for the AssetIO trait.
 impl AssetIO for SfntIO {
     fn new(_asset_type: &str) -> Self
     where
@@ -2009,12 +1452,12 @@ pub mod tests {
         assert_eq!(2, positions.len());
         assert_eq!(0, positions.first().unwrap().offset);
         assert_eq!(
-            size_of::<WoffHeader>(),
+            size_of::<SfntHeader>(),
             positions.first().unwrap().length as usize
         );
         assert_eq!(ChunkType::Header, positions.first().unwrap().chunk_type);
         assert_eq!(
-            size_of::<WoffHeader>(),
+            size_of::<SfntHeader>(),
             positions.get(1).unwrap().offset as usize
         );
         assert_eq!(0, positions.get(1).unwrap().length as usize);
@@ -2026,7 +1469,7 @@ pub mod tests {
     #[test]
     fn get_chunk_positions_without_c2pa_table() {
         let font_data = vec![
-            // WOFFHeader
+            // SfntHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
             0x00, 0x00, 0x00, 0x54, // length (84)
@@ -2038,7 +1481,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
             0x00, 0x00, 0x00, 0x00, // privOffset (0)
             0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // WOFFTableDirectory
+            // SfntTableDirectory
             0x67, 0x61, 0x71, 0x66, // garf
             0x00, 0x00, 0x00, 0x40, //   offset (64)
             0x00, 0x00, 0x00, 0x07, //   compLength (7)
@@ -2059,17 +1502,17 @@ pub mod tests {
         let hdr_chunk = positions.first().unwrap();
         assert_eq!(ChunkType::Header, hdr_chunk.chunk_type);
         assert_eq!(0, hdr_chunk.offset);
-        assert_eq!(size_of::<WoffHeader>(), hdr_chunk.length as usize);
+        assert_eq!(size_of::<SfntHeader>(), hdr_chunk.length as usize);
 
         let dir_chunk = positions.get(1).unwrap();
         assert_eq!(ChunkType::Directory, dir_chunk.chunk_type);
-        assert_eq!(size_of::<WoffHeader>(), dir_chunk.offset as usize);
-        assert_eq!(size_of::<WoffTableDirEntry>(), dir_chunk.length as usize);
+        assert_eq!(size_of::<SfntHeader>(), dir_chunk.offset as usize);
+        assert_eq!(size_of::<SfntTableDirEntry>(), dir_chunk.length as usize);
 
         let tbl_chunk = positions.get(2).unwrap();
         assert_eq!(ChunkType::Table, tbl_chunk.chunk_type);
         assert_eq!(
-            size_of::<WoffHeader>() + size_of::<WoffTableDirEntry>(),
+            size_of::<SfntHeader>() + size_of::<SfntTableDirEntry>(),
             tbl_chunk.offset as usize
         );
         assert_eq!(7, tbl_chunk.length);
@@ -2101,7 +1544,7 @@ pub mod tests {
     #[test]
     fn reads_c2pa_table_from_stream() {
         let font_data = vec![
-            // WOFFHeader
+            // SfntHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
             0x00, 0x00, 0x00, 0x54, // length (84)
@@ -2113,7 +1556,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
             0x00, 0x00, 0x00, 0x00, // privOffset (0)
             0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // WOFFTableDirectory
+            // SfntTableDirectory
             0x43, 0x32, 0x50, 0x41, // C2PA
             0x00, 0x00, 0x00, 0x40, //   offset (64)
             0x00, 0x00, 0x00, 0x25, //   compLength (37)
@@ -2259,9 +1702,9 @@ pub mod tests {
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
 
-            let woff_handler = SfntIO {};
+            let sfnt_handler = SfntIO {};
             let mut f: File = File::open(output).unwrap();
-            match woff_handler.read_xmp(&mut f) {
+            match sfnt_handler.read_xmp(&mut f) {
                 Some(xmp_data_str) => {
                     let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
                     match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
@@ -2279,7 +1722,7 @@ pub mod tests {
         #[test]
         fn build_xmp_from_stream_without_reference() {
             let font_data = vec![
-                // WOFFHeader
+                // SfntHeader
                 0x77, 0x4f, 0x46, 0x46, // wOFF
                 0x72, 0x73, 0x74, 0x75, // flavor (IIP)
                 0x00, 0x00, 0x00, 0x54, // length (84)
@@ -2291,7 +1734,7 @@ pub mod tests {
                 0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
                 0x00, 0x00, 0x00, 0x00, // privOffset (0)
                 0x00, 0x00, 0x00, 0x00, // privLength (0)
-                // WOFFTableDirectory
+                // SfntTableDirectory
                 0x67, 0x61, 0x71, 0x66, // garf
                 0x00, 0x00, 0x00, 0x40, //   offset (64)
                 0x00, 0x00, 0x00, 0x07, //   compLength (7)
@@ -2315,7 +1758,7 @@ pub mod tests {
         #[test]
         fn build_xmp_from_stream_with_reference_not_xmp() {
             let font_data = vec![
-                // WOFFHeader
+                // SfntHeader
                 0x77, 0x4f, 0x46, 0x46, // wOFF
                 0x72, 0x73, 0x74, 0x75, // flavor (IIP)
                 0x00, 0x00, 0x00, 0x54, // length (84)
@@ -2327,7 +1770,7 @@ pub mod tests {
                 0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
                 0x00, 0x00, 0x00, 0x00, // privOffset (0)
                 0x00, 0x00, 0x00, 0x00, // privLength (0)
-                // WOFFTableDirectory
+                // SfntTableDirectory
                 0x43, 0x32, 0x50, 0x41, // C2PA
                 0x00, 0x00, 0x00, 0x40, //   offset (64)
                 0x00, 0x00, 0x00, 0x25, //   compLength (37)
@@ -2377,7 +1820,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // privLength (0)
         ];
         let expected_min_font_data_min_c2pa = vec![
-            // WOFFHeader
+            // SfntHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
             0x00, 0x00, 0x00, 0x54, // length (84)
@@ -2389,7 +1832,7 @@ pub mod tests {
             0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
             0x00, 0x00, 0x00, 0x00, // privOffset (0)
             0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // WOFFTableDirectory
+            // SfntTableDirectory
             0x43, 0x32, 0x50, 0x41, // C2PA
             0x00, 0x00, 0x00, 0x40, //   offset (64)
             0x00, 0x00, 0x00, 0x14, //   compLength (20)
@@ -2420,7 +1863,7 @@ pub mod tests {
     #[test]
     fn get_chunk_positions_minimal() {
         let font_data = vec![
-            // WOFFHeader
+            // SfntHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
             0x00, 0x00, 0x00, 0x2c, // length (44)
@@ -2444,7 +1887,7 @@ pub mod tests {
             ChunkPosition {
                 offset: 0,
                 length: 44,
-                name: WOFF_HEADER_CHUNK_NAME.data,
+                name: SFNT_HEADER_CHUNK_NAME.data,
                 chunk_type: ChunkType::Header,
             }
         );
@@ -2454,7 +1897,7 @@ pub mod tests {
             ChunkPosition {
                 offset: 44,
                 length: 0,
-                name: WOFF_DIRECTORY_CHUNK_NAME.data,
+                name: SFNT_DIRECTORY_CHUNK_NAME.data,
                 chunk_type: ChunkType::Directory,
             }
         );
