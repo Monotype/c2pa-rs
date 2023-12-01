@@ -271,17 +271,6 @@ impl TempFile {
     }
 }
 
-/// Supported extension and mime-types
-static SUPPORTED_TYPES: [&str; 7] = [
-    "application/font-sfnt",
-    "application/x-font-ttf",
-    "application/x-font-truetype",
-    "font/sfnt",
-    "font/ttf",
-    "sfnt",
-    "ttf",
-];
-
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct TableTag {
@@ -1767,7 +1756,16 @@ impl AssetIO for SfntIO {
     }
 
     fn supported_types(&self) -> &[&str] {
-        &SUPPORTED_TYPES
+        // Supported extension and mime-types
+        &[
+            "application/font-sfnt",
+            "application/x-font-ttf",
+            "application/x-font-truetype",
+            "font/sfnt",
+            "font/ttf",
+            "sfnt",
+            "ttf",
+        ]
     }
 
     fn read_cai_store(&self, asset_path: &Path) -> Result<Vec<u8>> {

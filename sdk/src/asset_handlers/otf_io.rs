@@ -269,9 +269,6 @@ impl TempFile {
     }
 }
 
-/// Supported extension and mime-types
-static SUPPORTED_TYPES: [&str; 3] = ["application/x-font-opentype", "font/otf", "otf"];
-
 /// Tag for the 'C2PA' table in a font.
 const C2PA_TABLE_TAG: Tag = tables::C2PA::TAG;
 /// Tag for the 'head' table in a font.
@@ -949,7 +946,8 @@ impl AssetIO for OtfIO {
     }
 
     fn supported_types(&self) -> &[&str] {
-        &SUPPORTED_TYPES
+        // Supported extension and mime-types
+        &["application/x-font-opentype", "font/otf", "otf"]
     }
 
     fn read_cai_store(&self, asset_path: &Path) -> Result<Vec<u8>> {
