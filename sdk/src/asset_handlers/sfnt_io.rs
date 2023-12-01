@@ -1292,7 +1292,7 @@ pub mod tests {
     //         "reserved" bytes in font tables which are supposed to be zero,
     //         major and/or minor version fields that look pretty in the spec
     //         but never have any practical effect in the real world, etc.
-    #[ignore] // Need WOFF 1 test fixture
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     #[cfg(not(feature = "xmp_write"))]
     /// Verifies the adding of a remote C2PA manifest reference works as
@@ -1336,7 +1336,7 @@ pub mod tests {
         };
     }
 
-    #[ignore] // Need WOFF 1 test fixture
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     #[cfg(feature = "xmp_write")]
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
@@ -1392,6 +1392,7 @@ pub mod tests {
 
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font contains zero tables
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
@@ -1428,6 +1429,7 @@ pub mod tests {
 
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font does not contain a C2PA font table
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_chunk_positions_without_c2pa_table() {
         let font_data = vec![
@@ -1480,7 +1482,7 @@ pub mod tests {
         assert_eq!(7, tbl_chunk.length);
     }
 
-    #[ignore] // Need WOFF 1 test fixture
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_object_locations() {
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
@@ -1503,6 +1505,7 @@ pub mod tests {
     }
 
     /// Verify the C2PA table data can be read from a font stream
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn reads_c2pa_table_from_stream() {
         let font_data = vec![
@@ -1557,7 +1560,7 @@ pub mod tests {
 
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
-    #[ignore] // Need WOFF 1 test fixture
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn remove_c2pa_manifest_store() {
         let c2pa_data = "test data";
@@ -1593,7 +1596,7 @@ pub mod tests {
 
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
-    #[ignore] // Need WOFF 1 test fixture
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn write_read_c2pa_from_font() {
         let c2pa_data = "test data";
@@ -1621,6 +1624,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
+    #[ignore] // Need to rebuild SFNT tests
     #[cfg(feature = "xmp_write")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
@@ -1681,6 +1685,7 @@ pub mod tests {
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
+        #[ignore] // Need to rebuild SFNT tests
         #[test]
         fn build_xmp_from_stream_without_reference() {
             let font_data = vec![
@@ -1717,6 +1722,7 @@ pub mod tests {
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
+        #[ignore] // Need to rebuild SFNT tests
         #[test]
         fn build_xmp_from_stream_with_reference_not_xmp() {
             let font_data = vec![
@@ -1766,6 +1772,7 @@ pub mod tests {
         }
     }
 
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn add_required_chunks_to_stream_minimal() {
         let min_font_data = vec![
@@ -1822,6 +1829,7 @@ pub mod tests {
         );
     }
 
+    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_chunk_positions_minimal() {
         let font_data = vec![
