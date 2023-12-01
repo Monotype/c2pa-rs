@@ -1301,11 +1301,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Need WOFF 1 test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.woff");
+        let output = temp_dir_path(&temp_dir, "test.ttf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1349,11 +1349,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF 1 test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.woff");
+        let output = temp_dir_path(&temp_dir, "test.ttf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1486,11 +1486,11 @@ pub mod tests {
     #[test]
     fn get_object_locations() {
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.woff");
+        let output = temp_dir_path(&temp_dir, "test.ttf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1566,11 +1566,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.woff");
+        let output = temp_dir_path(&temp_dir, "test.ttf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1602,11 +1602,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
-        let source = fixture_path("font.woff");
+        let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.woff");
+        let output = temp_dir_path(&temp_dir, "test.ttf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1642,15 +1642,14 @@ pub mod tests {
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
-        #[ignore] // Need WOFF 1 test fixture
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
             // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
-            let source = crate::utils::test::fixture_path("font.woff");
+            let source = crate::utils::test::fixture_path("font.ttf");
 
             // Create a temporary output for the file
             let temp_dir = tempdir().unwrap();
-            let output = temp_dir_path(&temp_dir, "test.woff");
+            let output = temp_dir_path(&temp_dir, "test.ttf");
 
             // Copy the source to the output
             std::fs::copy(source, &output).unwrap();
