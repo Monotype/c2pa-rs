@@ -386,9 +386,6 @@ impl SfntFont {
         };
         // Padding needed before the new table.
         let pre_padding = (4 - (existing_table_data_limit & 3)) & 3;
-        // Padded needed after.
-        let post_padding =
-            (4 - ((existing_table_data_limit + pre_padding + empty_table_size) & 3)) & 3;
         // And a directory entry for it. The easiest approach is to add the table
         // to the end of the font; for one thing, resizing it is much simpler,
         // since we'll just need to change some size fields (and not re-flow
@@ -425,7 +422,6 @@ impl SfntFont {
 
 /// Definitions for the SFNT file header and Table Directory structures are in
 /// the font_io module, because WOFF support needs to use them as well.
-
 impl SfntHeader {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -455,6 +451,26 @@ impl Default for SfntHeader {
             entrySelector: 0,
             rangeShift: 0,
         }
+    }
+}
+
+impl SfntTableDirEntry {
+    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+        Ok(Self {
+            tag: TableTag::new_from_reader(reader)?,
+            offset: reader.read_u32::<BigEndian>()?,
+            length: reader.read_u32::<BigEndian>()?,
+            checksum: reader.read_u32::<BigEndian>()?,
+        })
+    }
+
+    /// Serialize this directory entry to the given writer.
+    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+        self.tag.write(destination)?;
+        destination.write_u32::<BigEndian>(self.offset)?;
+        destination.write_u32::<BigEndian>(self.length)?;
+        destination.write_u32::<BigEndian>(self.checksum)?;
+        Ok(())
     }
 }
 
@@ -571,7 +587,7 @@ impl ChunkReader for SfntIO {
         //
         // TBD - Push this into SfntHeader::new_from_reader
         let _font_magic: Magic =
-            <u32 as std::convert::TryInto<Magic>>::try_into(sfnt_hdr.signature)
+            <u32 as std::convert::TryInto<Magic>>::try_into(sfnt_hdr.sfntVersion)
                 .map_err(|_err| Error::UnsupportedFontError)?;
         // Add the position of the header.
         let mut positions: Vec<ChunkPosition> = Vec::new();
@@ -598,7 +614,7 @@ impl ChunkReader for SfntIO {
         for entry in sfnt_dir.physical_order().iter() {
             positions.push(ChunkPosition {
                 offset: entry.offset as u64,
-                length: entry.origLength, // TBD compression support
+                length: entry.length, // TBD compression support
                 name: entry.tag.data,
                 chunk_type: ChunkType::Table,
             });
