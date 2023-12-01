@@ -1624,7 +1624,6 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[ignore] // Need to rebuild SFNT tests
     #[cfg(feature = "xmp_write")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
