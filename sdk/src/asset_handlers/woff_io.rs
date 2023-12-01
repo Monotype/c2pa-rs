@@ -11,6 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
+    collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
@@ -308,7 +309,7 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: Vec<TableTag, Table>,
+    tables: BTreeMap<TableTag, Table>,
     meta: Option<TableUnspecified>,
     private: Option<TableUnspecified>,
 }
@@ -325,7 +326,7 @@ impl WoffFont {
         let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
-        let mut woff_tables = Vec::new();
+        let mut woff_tables = BTreeMap::new();
 
         for entry in woff_dir.entries.iter() {
             // Try to parse the next dir entry

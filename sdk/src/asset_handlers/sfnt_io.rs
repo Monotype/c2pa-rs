@@ -11,6 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
+    collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
@@ -296,7 +297,7 @@ struct SfntFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: Vec<TableTag, Table>,
+    tables: BTreeMap<TableTag, Table>,
 }
 
 impl SfntFont {
@@ -311,12 +312,12 @@ impl SfntFont {
         let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
-        let mut sfnt_tables = Vec::new();
+        let mut sfnt_tables = BTreeMap::new();
 
         for entry in sfnt_dir.entries.iter() {
             // Try to parse the next dir entry
             let offset: u64 = entry.offset as u64;
-            let size: usize = entry.compLength as usize;
+            let size: usize = entry.length as usize;
             // Create a table instance for it.
             let table: Table = {
                 match entry.tag {
@@ -337,28 +338,6 @@ impl SfntFont {
             // Tell it to get in the van
             sfnt_tables.insert(entry.tag, table);
         }
-
-        // Get the XML metadata if present
-        let sfnt_meta = if sfnt_hdr.metaLength > 0 {
-            Some(TableUnspecified::make_from_reader(
-                reader,
-                sfnt_hdr.metaOffset as u64,
-                sfnt_hdr.metaOrigLength as usize,
-            )?)
-        } else {
-            None
-        };
-
-        // Get the private data if present
-        let sfnt_private = if sfnt_hdr.privLength > 0 {
-            Some(TableUnspecified::make_from_reader(
-                reader,
-                sfnt_hdr.privOffset as u64,
-                sfnt_hdr.privLength as usize,
-            )?)
-        } else {
-            None
-        };
 
         // Assemble the five lions as shown to construct your robot.
         Ok(SfntFont {
@@ -388,20 +367,6 @@ impl SfntFont {
                 Table::Unspecified(un_table) => un_table.write(destination)?,
             }
         }
-        // Then the XML meta, if present.
-        match &self.meta {
-            Some(sfnt_meta) => {
-                sfnt_meta.write(destination)?;
-            }
-            None => (),
-        };
-        // Then the private data, if present.
-        match &self.private {
-            Some(sfnt_private) => {
-                sfnt_private.write(destination)?;
-            }
-            None => (),
-        };
         // If we made it here, it all worked.
         Ok(())
     }
@@ -416,7 +381,7 @@ impl SfntFont {
         // Offset just past the last valid byte of font table data. This should
         // point to pad bytes, XML data, or private data, but nothing else.
         let existing_table_data_limit = match self.directory.physical_order().last() {
-            Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.compLength,
+            Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.length,
             None => (size_of::<SfntHeader>() + size_of::<SfntTableDirEntry>()) as u32,
         };
         // Padding needed before the new table.
@@ -431,9 +396,8 @@ impl SfntFont {
         let c2pa_entry = SfntTableDirEntry {
             tag: C2PA_TABLE_TAG,
             offset: existing_table_data_limit + pre_padding,
-            compLength: empty_table_size,
-            origLength: empty_table_size,
-            origChecksum: c2pa_table.checksum()?,
+            length: empty_table_size,
+            checksum: c2pa_table.checksum()?,
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
@@ -442,27 +406,9 @@ impl SfntFont {
         self.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
         // (TBD philosophy - better to just re-compute these from scratch, yeah?)
-        self.header.length =
-            existing_table_data_limit + pre_padding + c2pa_entry.compLength + post_padding;
-        // Bump the XML meta block ahead, if present.
-        if self.header.metaOffset > 0 {
-            self.header.metaOffset += c2pa_entry.compLength + post_padding;
-        }
-        // Bump the private block ahead, if present.
-        if self.header.privOffset > 0 {
-            self.header.privOffset += c2pa_entry.compLength + post_padding;
-        }
-        // Re-reckon the size of this font as an SFNT:
-        //   First, the header, then the directory, and finally the tables
-        self.header.totalSfntSize = size_of::<SfntHeader>() as u32;
-        self.header.totalSfntSize +=
-            (size_of::<SfntTableDirEntry>() * self.header.numTables as usize) as u32;
-        self.header.totalSfntSize += self
-            .directory
-            .entries
-            .iter()
-            .map(|e| (e.origLength + 3) & !3)
-            .sum::<u32>();
+        self.header.searchRange = 0; // TBD fix these
+        self.header.rangeShift = 0;
+        self.header.entrySelector = 0;
         // Success at last
         Ok(())
     }
@@ -503,7 +449,7 @@ impl SfntHeader {
 impl Default for SfntHeader {
     fn default() -> Self {
         Self {
-            signature: Magic::TrueType as u32,
+            sfntVersion: Magic::TrueType as u32,
             numTables: 0,
             searchRange: 0,
             entrySelector: 0,
