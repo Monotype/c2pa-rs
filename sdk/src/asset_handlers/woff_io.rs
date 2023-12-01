@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::{
     assertions::BoxMap,
-    asset_handlers::font_io::font_io::*,
+    asset_handlers::font_io::*,
     asset_io::{
         AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
