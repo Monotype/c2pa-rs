@@ -1642,6 +1642,11 @@ pub mod tests {
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
+        /// TBD - should work for OTF
+        /// TBD - should work for AppleTrue
+        /// TBD - should not work for Typ1
+        /// TBD - should not work for Woff
+        /// TBD - should not work for Woff2
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
             // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
@@ -1657,7 +1662,7 @@ pub mod tests {
             // Add a reference to the font
             match font_xmp_support::add_reference_as_xmp_to_font(&output, "test data") {
                 Ok(_) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
+                Err(e) => panic!("Unexpected error when building XMP data: {}", e),
             }
 
             // Add again, with a new value
