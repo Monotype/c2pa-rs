@@ -458,18 +458,18 @@ impl SfntTableDirEntry {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             tag: TableTag::new_from_reader(reader)?,
+            checksum: reader.read_u32::<BigEndian>()?,
             offset: reader.read_u32::<BigEndian>()?,
             length: reader.read_u32::<BigEndian>()?,
-            checksum: reader.read_u32::<BigEndian>()?,
         })
     }
 
     /// Serialize this directory entry to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
+        destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
         destination.write_u32::<BigEndian>(self.length)?;
-        destination.write_u32::<BigEndian>(self.checksum)?;
         Ok(())
     }
 }
