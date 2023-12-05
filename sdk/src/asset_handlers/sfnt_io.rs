@@ -349,12 +349,50 @@ impl SfntFont {
 
     /// Writes out this font file.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        // First the header.
+        let mut neo_header = SfntHeader::new();
+        let mut neo_directory = SfntDirectory::new()?;
+        // Re-synthesize the file header based on the actual table count
+        neo_header.numTables = self.tables.len() as u16;
+        neo_header.entrySelector = if neo_header.numTables > 0 {
+            neo_header.numTables.ilog2() as u16
+        } else {
+            0 as u16
+        };
+        neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
+        neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
+        // Figure out the size of the tables we know about already; any new
+        // tables will have to follow.
+        let new_data_offset = match self.directory.physical_order().last() {
+            Some(&stde) => round_up_to_four(stde.offset as usize + stde.length as usize),
+            None => 0 as usize,
+        };
+        // Enumerate the Tables and ensure each one has a Directory Entry.
+        for (tag, table) in &self.tables {
+            match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
+                Some(stde) => {
+                    let mut entry = SfntTableDirEntry::new();
+                    entry.tag = stde.tag;
+                    entry.offset = stde.offset;
+                    entry.checksum = stde.checksum;
+                    entry.length = stde.length;
+                    neo_directory.entries.push(entry);
+                }
+                None => {
+                    let mut entry = SfntTableDirEntry::new();
+                    entry.tag = *tag;
+                    entry.offset = round_up_to_four(new_data_offset) as u32;
+                    entry.checksum = table.checksum();
+                    entry.length = table.len() as u32;
+                    neo_directory.entries.push(entry);
+                }
+            }
+        }
+        // With everything in sync, we can start writing; first, the header.
         self.header.write(destination)?;
         // Then the directory.
-        self.directory.write(destination)?;
+        neo_directory.write(destination)?;
         // Then the tables, in physical order.
-        for entry in self.directory.physical_order().iter() {
+        for entry in neo_directory.physical_order().iter() {
             // TBD - current-offset sanity-checking:
             //  1. Did we go backwards (despite the request for physical_order)?
             //  2. Did we go more than 3 bytes forward (file has excess padding)?
@@ -394,7 +432,7 @@ impl SfntFont {
             tag: C2PA_TABLE_TAG,
             offset: existing_table_data_limit + pre_padding,
             length: empty_table_size,
-            checksum: c2pa_table.checksum()?,
+            checksum: c2pa_table.checksum(),
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
@@ -423,6 +461,10 @@ impl SfntFont {
 /// Definitions for the SFNT file header and Table Directory structures are in
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
@@ -455,6 +497,10 @@ impl Default for SfntHeader {
 }
 
 impl SfntTableDirEntry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             tag: TableTag::new_from_reader(reader)?,
@@ -471,6 +517,16 @@ impl SfntTableDirEntry {
         destination.write_u32::<BigEndian>(self.offset)?;
         destination.write_u32::<BigEndian>(self.length)?;
         Ok(())
+    }
+}
+impl Default for SfntTableDirEntry {
+    fn default() -> Self {
+        Self {
+            tag: TableTag::new(*b"\0\0\0\0"),
+            checksum: 0,
+            offset: 0,
+            length: 0,
+        }
     }
 }
 

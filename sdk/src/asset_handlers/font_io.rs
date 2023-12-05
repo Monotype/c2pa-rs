@@ -19,6 +19,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use log::trace;
 
 use crate::error::{Error, Result};
 
@@ -74,6 +75,11 @@ impl std::fmt::Debug for TableTag {
             self.data[0], self.data[1], self.data[2], self.data[3]
         )
     }
+}
+
+/// Font storage frequently requires padding things to four-byte boundaries.
+pub fn round_up_to_four(size: usize) -> usize {
+    size + 3 & !3
 }
 
 /// 32-bit font-format identification magic number.
@@ -186,7 +192,7 @@ impl TableC2PA {
     }
 
     /// Create the checksum for this table
-    pub fn checksum(&self) -> Result<u32> {
+    pub fn checksum(&self) -> u32 {
         // // Serialize self to a throwaway stream
         // let mut stream = Cursor::new(Vec::new());
         // match self.write(&mut stream) {
@@ -210,7 +216,20 @@ impl TableC2PA {
         //     }
         //     cksum += ckfrag;
         // }
-        Ok(0x12345678)
+        0x12345678
+    }
+
+    /// Size of this table if it were serialized right now
+    pub fn len(&self) -> usize {
+        size_of::<TableC2PARaw>()
+            + match &self.active_manifest_uri {
+                Some(uri) => uri.len(),
+                None => 0,
+            }
+            + match &self.manifest_store {
+                Some(store) => store.len(),
+                None => 0,
+            }
     }
 
     /// Creates a new C2PA table from the given stream.
@@ -429,6 +448,16 @@ impl TableUnspecified {
         })
     }
 
+    /// Compute the checksum
+    pub fn checksum(&self) -> u32 {
+        0x98765432
+    }
+
+    /// Size of this table if it were serialized right now
+    pub fn len(&self) -> usize {
+        return self.data.len();
+    }
+
     /// Serialized this table data to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         Ok(destination.write_all(&self.data[..])?)
@@ -444,6 +473,22 @@ pub enum Table {
     //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
+}
+
+impl Table {
+    pub fn len(&self) -> usize {
+        match self {
+            Table::C2PA(c2pa) => c2pa.len(),
+            Table::Unspecified(unk) => unk.len(),
+        }
+    }
+
+    pub fn checksum(&self) -> u32 {
+        match self {
+            Table::C2PA(c2pa) => c2pa.checksum(),
+            Table::Unspecified(unk) => unk.checksum(),
+        }
+    }
 }
 
 /// TBD: All the serialization structures so far have been defined using native
@@ -477,4 +522,21 @@ pub struct SfntTableDirEntry {
     pub checksum: u32,
     pub offset: u32,
     pub length: u32,
+}
+
+#[allow(dead_code)]
+pub fn debug_cough<T, E: std::fmt::Debug>(
+    result: std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
+    match result.as_ref() {
+        Err(ref e) => {
+            //println!("cough: ERROR! {:?}", e);
+            trace!("cough: ERROR! {:?}", e);
+        }
+        Ok(_) => {
+            //println!("cough: ok");
+            trace!("cough: ok");
+        }
+    }
+    result
 }
