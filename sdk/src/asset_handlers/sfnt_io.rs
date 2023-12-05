@@ -16,6 +16,7 @@ use std::{
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::*,
+    str::from_utf8,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -352,6 +353,7 @@ impl SfntFont {
         let mut neo_header = SfntHeader::new();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
+        neo_header.sfntVersion = self.header.sfntVersion;
         neo_header.numTables = self.tables.len() as u16;
         neo_header.entrySelector = if neo_header.numTables > 0 {
             neo_header.numTables.ilog2() as u16
@@ -363,7 +365,9 @@ impl SfntFont {
         // Figure out the size of the tables we know about already; any new
         // tables will have to follow.
         let new_data_offset = match self.directory.physical_order().last() {
-            Some(&stde) => round_up_to_four(stde.offset as usize + stde.length as usize),
+            Some(&stde) => round_up_to_four(
+                stde.offset as usize + stde.length as usize + size_of::<SfntTableDirEntry>(),
+            ),
             None => 0 as usize,
         };
         // Enumerate the Tables and ensure each one has a Directory Entry.
@@ -372,23 +376,43 @@ impl SfntFont {
                 Some(stde) => {
                     let mut entry = SfntTableDirEntry::new();
                     entry.tag = stde.tag;
-                    entry.offset = stde.offset;
+                    entry.offset = stde.offset + size_of::<SfntTableDirEntry>() as u32;
                     entry.checksum = stde.checksum;
                     entry.length = stde.length;
                     neo_directory.entries.push(entry);
                 }
-                None => {
-                    let mut entry = SfntTableDirEntry::new();
-                    entry.tag = *tag;
-                    entry.offset = round_up_to_four(new_data_offset) as u32;
-                    entry.checksum = table.checksum();
-                    entry.length = table.len() as u32;
-                    neo_directory.entries.push(entry);
-                }
+                None => match &tag.data {
+                    b"C2PA" => {
+                        let mut entry = SfntTableDirEntry::new();
+                        entry.tag = *tag;
+                        entry.offset = round_up_to_four(new_data_offset) as u32;
+                        entry.checksum = table.checksum();
+                        entry.length = table.len() as u32;
+                        neo_directory.entries.push(entry);
+                        // Note - new_data_offset is never actually used after
+                        // this point, but _if it were_, it would need to be
+                        // mutable, and we would move it ahead like so:
+                        // new_data_offset =
+                        //    round_up_to_four(entry.offset as usize + entry.length as usize);
+                    }
+                    unk_tag => {
+                        let unk_tag_str = if let Ok(s) = from_utf8(unk_tag) {
+                            s
+                        } else {
+                            "****"
+                        };
+                        panic!(
+                            "internal error: unexpected table appeared: '{}' ({:#04x}{:#04x}{:#04x}{:#04x})",
+                            unk_tag_str, unk_tag[0], unk_tag[1],
+                            unk_tag[2], unk_tag[3]);
+                    }
+                },
             }
         }
+        // TBD - Fix up checkSumAdjustment
+        // Requires TBD - turn on `head` table for real
         // With everything in sync, we can start writing; first, the header.
-        self.header.write(destination)?;
+        neo_header.write(destination)?;
         // Then the directory.
         neo_directory.write(destination)?;
         // Then the tables, in physical order.
@@ -1724,7 +1748,7 @@ pub mod tests {
             // Add again, with a new value
             match font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data") {
                 Ok(_) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
+                Err(e) => panic!("Unexpected error when building XMP data: {}", e),
             }
 
             let sfnt_handler = SfntIO {};

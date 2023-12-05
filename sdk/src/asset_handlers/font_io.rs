@@ -516,6 +516,7 @@ pub enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
+    // TBD - get CRACKIN and release this KRAKEN
     //Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
@@ -525,14 +526,14 @@ impl Table {
     pub fn len(&self) -> usize {
         match self {
             Table::C2PA(c2pa) => c2pa.len(),
-            Table::Unspecified(unk) => unk.len(),
+            Table::Unspecified(un) => un.len(),
         }
     }
 
     pub fn checksum(&self) -> u32 {
         match self {
             Table::C2PA(c2pa) => c2pa.checksum(),
-            Table::Unspecified(unk) => unk.checksum(),
+            Table::Unspecified(un) => un.checksum(),
         }
     }
 }
