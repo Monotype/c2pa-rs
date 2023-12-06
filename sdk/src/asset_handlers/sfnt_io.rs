@@ -1356,24 +1356,13 @@ pub mod tests {
     #![allow(clippy::expect_used)]
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
-
     use std::io::Cursor;
 
-    use claims::*;
     use tempfile::tempdir;
 
     use super::*;
     use crate::utils::test::{fixture_path, temp_dir_path};
 
-    // Key to cryptic test comments.
-    //
-    //   IIP - Invalid/Ignored/Passthrough
-    //         This field's value is bogus, possibly illegal, but it is expected
-    //         that this code will neither detect nor modify it. Examples are
-    //         "reserved" bytes in font tables which are supposed to be zero,
-    //         major and/or minor version fields that look pretty in the spec
-    //         but never have any practical effect in the real world, etc.
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     #[cfg(not(feature = "xmp_write"))]
     /// Verifies the adding of a remote C2PA manifest reference works as
@@ -1381,7 +1370,7 @@ pub mod tests {
     fn add_c2pa_ref() {
         let c2pa_data = "test data";
 
-        // Need WOFF 1 test fixture
+        // Load the basic OTF test fixture
         let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
@@ -1417,7 +1406,6 @@ pub mod tests {
         };
     }
 
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     #[cfg(feature = "xmp_write")]
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
@@ -1429,7 +1417,7 @@ pub mod tests {
 
         let c2pa_data = "test data";
 
-        // Load the basic WOFF 1 test fixture
+        // Load the basic OTF test fixture
         let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
@@ -1473,100 +1461,66 @@ pub mod tests {
 
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font contains zero tables
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x2c, // length (44)
-            0x00, 0x00, 0x00, 0x00, // numTables (0) / reserved (0)
-            0x00, 0x00, 0x00, 0x0c, // totalSfntSize (12 for header only)
-            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00,
+            0x00,
+            // 0 tables / missing searchRange!
+            // missing entrySelector! / missing rangeShift!
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
         let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
         // Should have one position reported for the table directory itself
-        assert_eq!(2, positions.len());
+        assert_eq!(1, positions.len());
         assert_eq!(0, positions.first().unwrap().offset);
-        assert_eq!(
-            size_of::<SfntHeader>(),
-            positions.first().unwrap().length as usize
-        );
-        assert_eq!(ChunkType::Header, positions.first().unwrap().chunk_type);
-        assert_eq!(
-            size_of::<SfntHeader>(),
-            positions.get(1).unwrap().offset as usize
-        );
-        assert_eq!(0, positions.get(1).unwrap().length as usize);
-        assert_eq!(ChunkType::Directory, positions.get(1).unwrap().chunk_type);
+        assert_eq!(12, positions.first().unwrap().length);
     }
 
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font does not contain a C2PA font table
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_chunk_positions_without_c2pa_table() {
         let font_data = vec![
-            // SfntHeader
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x54, // length (84)
-            0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-            0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
-            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // SfntTableDirectory
-            0x67, 0x61, 0x71, 0x66, // garf
-            0x00, 0x00, 0x00, 0x40, //   offset (64)
-            0x00, 0x00, 0x00, 0x07, //   compLength (7)
-            0x00, 0x00, 0x00, 0x07, //   origLength (7)
-            0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
-            // garf Table
-            0x6c, 0x61, 0x73, 0x61, // Major / Minor versions
-            0x67, 0x6e, 0x61,
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00, 0x01, // 1 tables
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x42, // C2PB table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x01, // length of table data
+            0x00, // C2PB data
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
         let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-
-        // Should have 3 positions reported for the header, directory, and table.
+        // Should have 3 positions reported for the table directory, table
         // record, and the table data
         assert_eq!(3, positions.len());
 
-        let hdr_chunk = positions.first().unwrap();
-        assert_eq!(ChunkType::Header, hdr_chunk.chunk_type);
-        assert_eq!(0, hdr_chunk.offset);
-        assert_eq!(size_of::<SfntHeader>(), hdr_chunk.length as usize);
+        let table_directory = positions.first().unwrap();
+        assert_eq!(ChunkType::Directory, table_directory.chunk_type);
+        assert_eq!(0, table_directory.offset);
+        assert_eq!(12, table_directory.length);
 
-        let dir_chunk = positions.get(1).unwrap();
-        assert_eq!(ChunkType::Directory, dir_chunk.chunk_type);
-        assert_eq!(size_of::<SfntHeader>(), dir_chunk.offset as usize);
-        assert_eq!(size_of::<SfntTableDirEntry>(), dir_chunk.length as usize);
+        let table_record = positions.get(1).unwrap();
+        assert_eq!(ChunkType::Table, table_record.chunk_type);
+        assert_eq!(12, table_record.offset);
+        assert_eq!(16, table_record.length);
 
-        let tbl_chunk = positions.get(2).unwrap();
-        assert_eq!(ChunkType::Table, tbl_chunk.chunk_type);
-        assert_eq!(
-            size_of::<SfntHeader>() + size_of::<SfntTableDirEntry>(),
-            tbl_chunk.offset as usize
-        );
-        assert_eq!(7, tbl_chunk.length);
+        let table = positions.get(2).unwrap();
+        assert_eq!(ChunkType::Table, table.chunk_type);
+        assert_eq!(28, table.offset);
+        assert_eq!(1, table.length);
     }
 
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn get_object_locations() {
-        // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
+        // Load the basic OTF test fixture
         let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
@@ -1586,47 +1540,28 @@ pub mod tests {
     }
 
     /// Verify the C2PA table data can be read from a font stream
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn reads_c2pa_table_from_stream() {
         let font_data = vec![
-            // SfntHeader
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x54, // length (84)
-            0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-            0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
-            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // SfntTableDirectory
-            0x43, 0x32, 0x50, 0x41, // C2PA
-            0x00, 0x00, 0x00, 0x40, //   offset (64)
-            0x00, 0x00, 0x00, 0x25, //   compLength (37)
-            0x00, 0x00, 0x00, 0x25, //   origLength (37)
-            0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
-            // C2PA Table
-            0x00, 0x01, 0x00, 0x04, // Major / Minor versions
-            0x00, 0x00, 0x00, 0x14, // Manifest URI offset (0)
-            0x00, 0x08, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
-            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset (0)
-            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length (0)
-            0x66, 0x69, 0x6c, 0x65, // active manifest uri data
-            0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data cont'd
-            // Rust Question - Is there some way of breaking up this array
-            // definition into chunks? For example, in C, the syntax
-            //    "some" "more" "string"
-            // gets consolidated by the compiler into the single string literal
-            // "somemorestring" - if we could could do that, we could D.R.Y. up
-            // the definition of this content-fragment and the literal in the
-            // assert down below that checks. (And maybe the chunk lengths could
-            // be compile-time-knowable, too, for checking size/offset stuff?)
-            0x74, 0x65, 0x73, 0x74, // manifest store data
-            0x2d, 0x64, 0x61, 0x74, // manifest store data, cont'd
-            0x61, // manifest store data, cont'd
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x25, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            0x61, // active manifest uri data (e.g., file://a)
+            0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, 0x74, 0x61, // C2PA manifest store data
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let c2pa_data = read_c2pa_from_stream(&mut font_stream).unwrap();
@@ -1641,12 +1576,11 @@ pub mod tests {
 
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn remove_c2pa_manifest_store() {
         let c2pa_data = "test data";
 
-        // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
+        // Load the basic OTF test fixture
         let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
@@ -1677,12 +1611,11 @@ pub mod tests {
 
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
-    #[ignore] // Need to rebuild SFNT tests
     #[test]
     fn write_read_c2pa_from_font() {
         let c2pa_data = "test data";
 
-        // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
+        // Load the basic OTF test fixture
         let source = fixture_path("font.ttf");
 
         // Create a temporary output for the file
@@ -1723,14 +1656,9 @@ pub mod tests {
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
-        /// TBD - should work for OTF
-        /// TBD - should work for AppleTrue
-        /// TBD - should not work for Typ1
-        /// TBD - should not work for Woff
-        /// TBD - should not work for Woff2
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
-            // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
+            // Load the basic OTF test fixture
             let source = crate::utils::test::fixture_path("font.ttf");
 
             // Create a temporary output for the file
@@ -1743,18 +1671,18 @@ pub mod tests {
             // Add a reference to the font
             match font_xmp_support::add_reference_as_xmp_to_font(&output, "test data") {
                 Ok(_) => {}
-                Err(e) => panic!("Unexpected error when building XMP data: {}", e),
+                Err(_) => panic!("Unexpected error when building XMP data"),
             }
 
             // Add again, with a new value
             match font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data") {
                 Ok(_) => {}
-                Err(e) => panic!("Unexpected error when building XMP data: {}", e),
+                Err(_) => panic!("Unexpected error when building XMP data"),
             }
 
-            let sfnt_handler = SfntIO {};
+            let otf_handler = SfntIO {};
             let mut f: File = File::open(output).unwrap();
-            match sfnt_handler.read_xmp(&mut f) {
+            match otf_handler.read_xmp(&mut f) {
                 Some(xmp_data_str) => {
                     let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
                     match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
@@ -1769,31 +1697,19 @@ pub mod tests {
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
-        #[ignore] // Need to rebuild SFNT tests
         #[test]
         fn build_xmp_from_stream_without_reference() {
             let font_data = vec![
-                // SfntHeader
-                0x77, 0x4f, 0x46, 0x46, // wOFF
-                0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-                0x00, 0x00, 0x00, 0x54, // length (84)
-                0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-                0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
-                0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-                0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-                0x00, 0x00, 0x00, 0x00, // metaLength (0)
-                0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-                0x00, 0x00, 0x00, 0x00, // privOffset (0)
-                0x00, 0x00, 0x00, 0x00, // privLength (0)
-                // SfntTableDirectory
-                0x67, 0x61, 0x71, 0x66, // garf
-                0x00, 0x00, 0x00, 0x40, //   offset (64)
-                0x00, 0x00, 0x00, 0x07, //   compLength (7)
-                0x00, 0x00, 0x00, 0x07, //   origLength (7)
-                0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
-                // garf Table
-                0x6c, 0x61, 0x73, 0x61, // Major / Minor versions
-                0x67, 0x6e, 0x61,
+                0x4f, 0x54, 0x54, 0x4f, // OTTO
+                0x00, 0x01, // 1 tables
+                0x00, 0x00, // search range
+                0x00, 0x00, // entry selector
+                0x00, 0x00, // range shift
+                0x43, 0x32, 0x50, 0x42, // C2PB table tag
+                0x00, 0x00, 0x00, 0x00, // Checksum
+                0x00, 0x00, 0x00, 0x1c, // offset to table data
+                0x00, 0x00, 0x00, 0x01, // length of table data
+                0x00, // C2PB data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
@@ -1806,47 +1722,26 @@ pub mod tests {
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
-        #[ignore] // Need to rebuild SFNT tests
         #[test]
         fn build_xmp_from_stream_with_reference_not_xmp() {
             let font_data = vec![
-                // SfntHeader
-                0x77, 0x4f, 0x46, 0x46, // wOFF
-                0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-                0x00, 0x00, 0x00, 0x54, // length (84)
-                0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-                0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
-                0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-                0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-                0x00, 0x00, 0x00, 0x00, // metaLength (0)
-                0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-                0x00, 0x00, 0x00, 0x00, // privOffset (0)
-                0x00, 0x00, 0x00, 0x00, // privLength (0)
-                // SfntTableDirectory
-                0x43, 0x32, 0x50, 0x41, // C2PA
-                0x00, 0x00, 0x00, 0x40, //   offset (64)
-                0x00, 0x00, 0x00, 0x25, //   compLength (37)
-                0x00, 0x00, 0x00, 0x25, //   origLength (37)
-                0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
-                // C2PA Table
-                0x00, 0x01, 0x00, 0x04, // Major / Minor versions
-                0x00, 0x00, 0x00, 0x14, // Manifest URI offset (0)
-                0x00, 0x08, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
-                0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset (0)
-                0x00, 0x00, 0x00, 0x09, // C2PA manifest store length (0)
-                0x66, 0x69, 0x6c, 0x65, // active manifest uri data
-                0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data cont'd
-                // Rust Question - Is there some way of breaking up this array
-                // definition into chunks? For example, in C, the syntax
-                //    "some" "more" "string"
-                // gets consolidated by the compiler into the single string literal
-                // "somemorestring" - if we could could do that, we could D.R.Y. up
-                // the definition of this content-fragment and the literal in the
-                // assert down below that checks. (And maybe the chunk lengths could
-                // be compile-time-knowable, too, for checking size/offset stuff?)
-                0x74, 0x65, 0x73, 0x74, // manifest store data
-                0x2d, 0x64, 0x61, 0x74, // manifest store data, cont'd
-                0x61, // manifest store data, cont'd
+                0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+                0x00, 0x01, // 1 tables
+                0x00, 0x00, // search range
+                0x00, 0x00, // entry selector
+                0x00, 0x00, // range shift
+                0x43, 0x32, 0x50, 0x41, // C2PA table tag
+                0x00, 0x00, 0x00, 0x00, // Checksum
+                0x00, 0x00, 0x00, 0x1c, // offset to table data
+                0x00, 0x00, 0x00, 0x1c, // length of table data
+                0x00, 0x00, // Major version
+                0x00, 0x01, // Minor version
+                0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+                0x00, 0x08, // Active manifest URI length
+                0x00, 0x00, // reserved
+                0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
+                0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
+                0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
@@ -1854,106 +1749,5 @@ pub mod tests {
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
         }
-    }
-
-    #[ignore] // Need to rebuild SFNT tests
-    #[test]
-    fn add_required_chunks_to_stream_minimal() {
-        let min_font_data = vec![
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x2c, // length (44)
-            0x00, 0x00, 0x00, 0x00, // numTables (0) / reserved (0)
-            0x00, 0x00, 0x00, 0x0c, // totalSfntSize (12 for header only)
-            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
-        ];
-        let expected_min_font_data_min_c2pa = vec![
-            // SfntHeader
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x54, // length (84)
-            0x00, 0x01, 0x00, 0x00, // numTables (1) / reserved (0)
-            0x00, 0x00, 0x00, 0x30, // totalSfntSize (48 = 12 + 16 + 20)
-            0x82, 0x83, 0x84, 0x85, // majorVersion / minorVersion (IIP)
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
-            // SfntTableDirectory
-            0x43, 0x32, 0x50, 0x41, // C2PA
-            0x00, 0x00, 0x00, 0x40, //   offset (64)
-            0x00, 0x00, 0x00, 0x14, //   compLength (20)
-            0x00, 0x00, 0x00, 0x14, //   origLength (20)
-            0x12, 0x34, 0x56, 0x78, //   origChecksum (0x12345678)
-            // C2PA Table
-            0x00, 0x01, 0x00, 0x04, // Major / Minor versions
-            0x00, 0x00, 0x00, 0x00, // Manifest URI offset (0)
-            0x00, 0x00, 0x00, 0x00, // Manifest URI length (0) / reserved (0)
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset (0)
-            0x00, 0x00, 0x00, 0x00, // C2PA manifest store length (0)
-        ];
-        let mut the_reader: Cursor<&[u8]> = Cursor::<&[u8]>::new(&min_font_data);
-        let mut the_writer = Cursor::new(Vec::new());
-
-        assert_ok!(add_required_chunks_to_stream(
-            &mut the_reader,
-            &mut the_writer
-        ));
-
-        // Write into the "file" and seek to the beginning
-        assert_eq!(
-            expected_min_font_data_min_c2pa,
-            the_writer.get_ref().as_slice()
-        );
-    }
-
-    #[ignore] // Need to rebuild SFNT tests
-    #[test]
-    fn get_chunk_positions_minimal() {
-        let font_data = vec![
-            // SfntHeader
-            0x77, 0x4f, 0x46, 0x46, // wOFF
-            0x72, 0x73, 0x74, 0x75, // flavor (IIP)
-            0x00, 0x00, 0x00, 0x2c, // length (44)
-            0x00, 0x00, 0x00, 0x00, // numTables (0) / reserved (0)
-            0x00, 0x00, 0x00, 0x0c, // totalSfntSize (12 for header only)
-            0x00, 0x00, 0x00, 0x00, // majorVersion / minorVersion
-            0x00, 0x00, 0x00, 0x00, // metaOffset (0)
-            0x00, 0x00, 0x00, 0x00, // metaLength (0)
-            0x00, 0x00, 0x00, 0x00, // metaOrigLength (0)
-            0x00, 0x00, 0x00, 0x00, // privOffset (0)
-            0x00, 0x00, 0x00, 0x00, // privLength (0)
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have one position reported for the table directory itself
-        assert_eq!(2, positions.len());
-        let header_posn = positions.first().unwrap();
-        assert_eq!(
-            *header_posn,
-            ChunkPosition {
-                offset: 0,
-                length: 44,
-                name: SFNT_HEADER_CHUNK_NAME.data,
-                chunk_type: ChunkType::Header,
-            }
-        );
-        let directory_posn = positions.get(1).unwrap();
-        assert_eq!(
-            *directory_posn,
-            ChunkPosition {
-                offset: 44,
-                length: 0,
-                name: SFNT_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::Directory,
-            }
-        );
     }
 }
