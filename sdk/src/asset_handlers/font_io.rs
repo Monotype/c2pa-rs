@@ -511,9 +511,9 @@ impl TableUnspecified {
             .map_err(|_e| Error::FontSaveError)?;
         let limit = self.data.len() % 4;
         if limit > 0 {
-            let pad = vec![b"0"; 4 - limit];
+            let pad: [u8; 3] = [0, 0, 0];
             destination
-                .write_all(pad[..][0])
+                .write_all(&pad[0..(4 - limit)])
                 .map_err(|_e| Error::FontSaveError)?;
         }
         Ok(())
