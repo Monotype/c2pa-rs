@@ -50,7 +50,7 @@ impl TableTag {
         ]))
     }
 
-    /// Serialized this tag data to the given writer.
+    /// Serialize this tag data to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data[..])?;
         Ok(())
@@ -504,9 +504,19 @@ impl TableUnspecified {
         return self.data.len();
     }
 
-    /// Serialized this table data to the given writer.
+    /// Serialize this table data to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        Ok(destination.write_all(&self.data[..])?)
+        destination
+            .write_all(&self.data[..])
+            .map_err(|_e| Error::FontSaveError)?;
+        let limit = self.data.len() % 4;
+        if limit > 0 {
+            let pad = vec![b"0"; 4 - limit];
+            destination
+                .write_all(pad[..][0])
+                .map_err(|_e| Error::FontSaveError)?;
+        }
+        Ok(())
     }
 }
 

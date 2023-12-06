@@ -415,7 +415,8 @@ impl SfntFont {
         neo_header.write(destination)?;
         // Then the directory.
         neo_directory.write(destination)?;
-        // Then the tables, in physical order.
+        // The above items are fixed sizes which are even multiples of four;
+        // therefore we can presume our current write offset.
         for entry in neo_directory.physical_order().iter() {
             // TBD - current-offset sanity-checking:
             //  1. Did we go backwards (despite the request for physical_order)?
