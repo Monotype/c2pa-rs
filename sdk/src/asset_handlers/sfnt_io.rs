@@ -362,41 +362,68 @@ impl SfntFont {
         };
         neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
         neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
+        // At the moment, font editing services are limited. We make the
+        // assumption that the *only* permissible font mutation is one of the
+        // following:
+        //
+        // - An existing C2PA table has been altered: table count unchanged
+        // - An existing C2PA table has been removed: num_tables -= 1
+        // - A new C2PA table has been added: num_tables += 1
+
         // If our actual table count has increased by one since the file was
         // read, it's because we've added a C2PA table; we'll need to add a
         // directory entry for it; shoving all the data in the file down a bit
         // to make room...
         let orig_table_count = self.header.numTables as usize;
-        let bytes_for_c2pa_tde = match self.tables.len().cmp(&orig_table_count) {
+        let td_derived_offset_bias: i64 = match self.tables.len().cmp(&orig_table_count) {
             Ordering::Greater => {
                 if (self.tables.len() as u16) - self.header.numTables == 1 {
                     // We added exactly one table
-                    size_of::<SfntTableDirEntry>()
+                    size_of::<SfntTableDirEntry>() as i64
                 } else {
                     // We added some other number of tables
                     return Err(Error::FontSaveError);
                 }
             }
             Ordering::Equal => 0,
-            Ordering::Less => return Err(Error::FontSaveError),
+            Ordering::Less => {
+                if self.header.numTables - (self.tables.len() as u16) == 1 {
+                    // Therefore, the actual table list should not contain
+                    // the C2PA table - that's the only one we should ever
+                    // be removing.
+                    if self.tables.contains_key(&C2PA_TABLE_TAG) {
+                        return Err(Error::FontSaveError);
+                    }
+                    // We removed exactly one table
+                    -(size_of::<SfntTableDirEntry>() as i64)
+                } else {
+                    // We added some other number of tables. Weird, right?
+                    return Err(Error::FontSaveError);
+                }
+            }
         };
 
         // Figure out the size of the tables we know about already; any new
         // tables will have to follow.
         let new_data_offset = match self.directory.physical_order().last() {
-            Some(&stde) => {
-                round_up_to_four(stde.offset as usize + stde.length as usize + bytes_for_c2pa_tde)
-            }
+            Some(&stde) => round_up_to_four(
+                (stde.offset as i64 + stde.length as i64 + td_derived_offset_bias) as usize,
+            ),
             None => 0_usize,
         };
 
         // Enumerate the Tables and ensure each one has a Directory Entry.
         for (tag, table) in &self.tables {
+            // 😕 There is logical entanglement between this `match` and the
+            // code above which figures out whether we added or removed (or
+            // neither) a C2PA table, and figures out the table data bias.
+            //
+            // As example, see the explicit error returns when td_derived_offset_bias is the "wrong" sign.
             match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
                 Some(stde) => {
                     let mut neo_entry = SfntTableDirEntry::new();
                     neo_entry.tag = stde.tag;
-                    neo_entry.offset = stde.offset + bytes_for_c2pa_tde as u32;
+                    neo_entry.offset = ((stde.offset as i64) + td_derived_offset_bias) as u32;
                     neo_entry.checksum = match &tag.data {
                         b"C2PA" => table.checksum(),
                         _ => stde.checksum,
@@ -411,7 +438,7 @@ impl SfntFont {
                     b"C2PA" => {
                         let mut neo_entry = SfntTableDirEntry::new();
                         neo_entry.tag = *tag;
-                        neo_entry.offset = round_up_to_four(new_data_offset) as u32;
+                        neo_entry.offset = round_up_to_four(new_data_offset as usize) as u32;
                         neo_entry.checksum = table.checksum();
                         neo_entry.length = table.len() as u32;
                         neo_directory.entries.push(neo_entry);
