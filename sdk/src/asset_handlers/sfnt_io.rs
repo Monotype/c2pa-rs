@@ -421,6 +421,12 @@ impl SfntFont {
             // As example, see the explicit error returns when td_derived_offset_bias is the "wrong" sign.
             match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
                 Some(stde) => {
+                    // Check - if this is the C2PA table, then this *must not*
+                    // be the case where we're removing the C2PA table; the
+                    // bias *must not* be negative.
+                    if stde.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
+                        return Err(Error::FontSaveError);
+                    }
                     let mut neo_entry = SfntTableDirEntry::new();
                     neo_entry.tag = stde.tag;
                     neo_entry.offset = ((stde.offset as i64) + td_derived_offset_bias) as u32;
@@ -436,9 +442,14 @@ impl SfntFont {
                 }
                 None => match &tag.data {
                     b"C2PA" => {
+                        // Check - this *must* be the case where we're adding
+                        // a C2PA table - therefore the bias should be positive.
+                        if td_derived_offset_bias <= 0 {
+                            return Err(Error::FontSaveError);
+                        }
                         let mut neo_entry = SfntTableDirEntry::new();
                         neo_entry.tag = *tag;
-                        neo_entry.offset = round_up_to_four(new_data_offset as usize) as u32;
+                        neo_entry.offset = round_up_to_four(new_data_offset) as u32;
                         neo_entry.checksum = table.checksum();
                         neo_entry.length = table.len() as u32;
                         neo_directory.entries.push(neo_entry);
