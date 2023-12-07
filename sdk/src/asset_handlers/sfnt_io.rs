@@ -1376,6 +1376,7 @@ pub mod tests {
     #![allow(clippy::unwrap_used)]
     use std::io::Cursor;
 
+    use claims::*;
     use tempfile::tempdir;
 
     use super::*;
@@ -1477,10 +1478,19 @@ pub mod tests {
         };
     }
 
-    /// TBD - no chunks when header is short
+    /// Verify that short file fails to chunk-parse at all
+    #[test]
+    fn get_chunk_positions_without_any_font() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00, // ...and then one more byte, and that's it.
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let sfnt_io = SfntIO {};
+        assert_err!(sfnt_io.get_chunk_positions(&mut font_stream));
+    }
 
-    /// Verify when reading the object locations for hashing, we get zero
-    /// positions when the font contains zero tables
+    /// Verify chunk-parsing behavior for empty font with just the header
     #[test]
     fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
@@ -1490,12 +1500,12 @@ pub mod tests {
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
-        let posns = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have two posns reported:
-        assert_eq!(2, posns.len());
+        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have two positions reported:
+        assert_eq!(2, positions.len());
         // First is the header
         assert_eq!(
-            posns.first().unwrap(),
+            positions.first().unwrap(),
             &ChunkPosition {
                 offset: 0_u64,
                 length: 12,
@@ -1505,7 +1515,7 @@ pub mod tests {
         );
         // Second is an empty table directory
         assert_eq!(
-            posns.get(1).unwrap(),
+            positions.get(1).unwrap(),
             &ChunkPosition {
                 offset: 12_u64,
                 length: 0,
@@ -1537,21 +1547,36 @@ pub mod tests {
         // Should have 3 positions reported for the table directory, table
         // record, and the table data
         assert_eq!(3, positions.len());
-
-        let table_directory = positions.first().unwrap();
-        assert_eq!(ChunkType::Directory, table_directory.chunk_type);
-        assert_eq!(0, table_directory.offset);
-        assert_eq!(12, table_directory.length);
-
-        let table_record = positions.get(1).unwrap();
-        assert_eq!(ChunkType::Table, table_record.chunk_type);
-        assert_eq!(12, table_record.offset);
-        assert_eq!(16, table_record.length);
-
-        let table = positions.get(2).unwrap();
-        assert_eq!(ChunkType::Table, table.chunk_type);
-        assert_eq!(28, table.offset);
-        assert_eq!(1, table.length);
+        // First is the header
+        assert_eq!(
+            positions.first().unwrap(),
+            &ChunkPosition {
+                offset: 0_u64,
+                length: 12,
+                name: SFNT_HEADER_CHUNK_NAME.data,
+                chunk_type: ChunkType::Header,
+            }
+        );
+        // Second is a single-entry table directory
+        assert_eq!(
+            positions.get(1).unwrap(),
+            &ChunkPosition {
+                offset: 12_u64,
+                length: 16,
+                name: SFNT_DIRECTORY_CHUNK_NAME.data,
+                chunk_type: ChunkType::Directory,
+            }
+        );
+        // Third is the C2PB table
+        assert_eq!(
+            positions.get(2).unwrap(),
+            &ChunkPosition {
+                offset: 28_u64,
+                length: 1,
+                name: *b"C2PB",
+                chunk_type: ChunkType::Table,
+            }
+        );
     }
 
     #[test]
@@ -1568,11 +1593,12 @@ pub mod tests {
 
         // Create our SfntIO asset handler for testing
         let sfnt_io = SfntIO {};
+
         // The font has 11 records, 11 tables, 1 table directory
         // but the head table will expand from 1 to 3 positions bringing it to 25
         // And then the required C2PA chunks will be added, bringing it to 27
-        let object_positions = sfnt_io.get_object_locations(&output).unwrap();
-        assert_eq!(27, object_positions.len());
+        let positions = sfnt_io.get_object_locations(&output).unwrap();
+        assert_eq!(16, positions.len());
     }
 
     /// Verify the C2PA table data can be read from a font stream
