@@ -11,12 +11,12 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
+    cmp::Ordering,
     collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::*,
-    str::from_utf8,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -366,16 +366,19 @@ impl SfntFont {
         // read, it's because we've added a C2PA table; we'll need to add a
         // directory entry for it; shoving all the data in the file down a bit
         // to make room...
-        let bytes_for_c2pa_tde = if self.tables.len() as u16 == self.header.numTables {
-            0
-        } else if (self.tables.len() as u16) > self.header.numTables {
-            if (self.tables.len() as u16) - self.header.numTables == 1 {
-                size_of::<SfntTableDirEntry>()
-            } else {
-                panic!("Internal error: added too many font tables!");
+        let orig_table_count = self.header.numTables as usize;
+        let bytes_for_c2pa_tde = match self.tables.len().cmp(&orig_table_count) {
+            Ordering::Greater => {
+                if (self.tables.len() as u16) - self.header.numTables == 1 {
+                    // We added exactly one table
+                    size_of::<SfntTableDirEntry>()
+                } else {
+                    // We added some other number of tables
+                    return Err(Error::FontSaveError);
+                }
             }
-        } else {
-            panic!("Internal error: lost font tables!");
+            Ordering::Equal => 0,
+            Ordering::Less => return Err(Error::FontSaveError),
         };
 
         // Figure out the size of the tables we know about already; any new
@@ -386,6 +389,7 @@ impl SfntFont {
             }
             None => 0_usize,
         };
+
         // Enumerate the Tables and ensure each one has a Directory Entry.
         for (tag, table) in &self.tables {
             match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
@@ -417,16 +421,8 @@ impl SfntFont {
                         // new_data_offset =
                         //    round_up_to_four(entry.offset as usize + entry.length as usize);
                     }
-                    unk_tag => {
-                        let unk_tag_str = if let Ok(s) = from_utf8(unk_tag) {
-                            s
-                        } else {
-                            "****"
-                        };
-                        panic!(
-                            "internal error: unexpected table appeared: '{}' ({:#04x}{:#04x}{:#04x}{:#04x})",
-                            unk_tag_str, unk_tag[0], unk_tag[1],
-                            unk_tag[2], unk_tag[3]);
+                    _unknown_tag => {
+                        return Err(Error::FontSaveError);
                     }
                 },
             }
@@ -1481,24 +1477,42 @@ pub mod tests {
         };
     }
 
+    /// TBD - no chunks when header is short
+
     /// Verify when reading the object locations for hashing, we get zero
     /// positions when the font contains zero tables
     #[test]
     fn get_chunk_positions_without_any_tables() {
         let font_data = vec![
             0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00,
-            0x00,
-            // 0 tables / missing searchRange!
-            // missing entrySelector! / missing rangeShift!
+            0x00, 0x00, 0x00, 0x00, // 0 tables / 0
+            0x00, 0x00, 0x00, 0x00, // 0 / 0
         ];
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have one position reported for the table directory itself
-        assert_eq!(1, positions.len());
-        assert_eq!(0, positions.first().unwrap().offset);
-        assert_eq!(12, positions.first().unwrap().length);
+        let posns = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have two posns reported:
+        assert_eq!(2, posns.len());
+        // First is the header
+        assert_eq!(
+            posns.first().unwrap(),
+            &ChunkPosition {
+                offset: 0_u64,
+                length: 12,
+                name: SFNT_HEADER_CHUNK_NAME.data,
+                chunk_type: ChunkType::Header,
+            }
+        );
+        // Second is an empty table directory
+        assert_eq!(
+            posns.get(1).unwrap(),
+            &ChunkPosition {
+                offset: 12_u64,
+                length: 0,
+                name: SFNT_DIRECTORY_CHUNK_NAME.data,
+                chunk_type: ChunkType::Directory,
+            }
+        );
     }
 
     /// Verify when reading the object locations for hashing, we get zero

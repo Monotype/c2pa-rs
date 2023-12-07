@@ -450,23 +450,24 @@ impl TableUnspecified {
 
     /// Compute the checksum
     pub fn checksum(&self) -> u32 {
-        let mut cksum: u32 = 0;
-        let mut i = 0; // sorry Rust, .chunks_exact still doesn't quite cut it
-        while i < (self.data.len() & !3) {
-            let ckword = u32::from_be_bytes(self.data[i..i + 3].try_into().unwrap());
-            cksum += ckword;
-            i += 4;
-        }
-        let remainder = self.data.len() - i;
-        if remainder > 0 {
-            if remainder > 3 {
-                panic!("internal error!");
-            }
-            let mut fragbuf: [u8; 4] = [0, 0, 0, 0];
-            fragbuf[0..remainder].copy_from_slice(&self.data[i..self.data.len() - 1]);
-            let ckword = u32::from_be_bytes(fragbuf);
-            cksum += ckword;
-        }
+        0x19283746
+        //let mut cksum: u32 = 0;
+        //let mut i = 0; // sorry Rust, .chunks_exact still doesn't quite cut it
+        //while i < (self.data.len() & !3) {
+        //    let ckword = u32::from_be_bytes(self.data[i..i + 3].try_into());
+        //    cksum += ckword;
+        //    i += 4;
+        //}
+        //let remainder = self.data.len() - i;
+        //if remainder > 0 {
+        //    if remainder > 3 {
+        //        panic!("internal error!");
+        //    }
+        //    let mut fragbuf: [u8; 4] = [0, 0, 0, 0];
+        //    fragbuf[0..remainder].copy_from_slice(&self.data[i..self.data.len() - 1]);
+        //    let ckword = u32::from_be_bytes(fragbuf);
+        //    cksum += ckword;
+        //}
         //let mut ckchunks = self.data.chunks_exact(4);
         //for chunk in ckchunks.into_iter() {
         //    let ckword = u32::from_be_bytes(chunk.try_into().unwrap());
@@ -481,7 +482,6 @@ impl TableUnspecified {
         //    let ckword = u32::from_be_bytes(lastfragment);
         //    cksum += ckword;
         //}
-        cksum
         // let mut cksum: u32 = 0;
         // while stream.get_ref().len() > 4 {
         //     let ckword: u32 = stream.read_u32::<BigEndian>()?;
