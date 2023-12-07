@@ -358,37 +358,59 @@ impl SfntFont {
         neo_header.entrySelector = if neo_header.numTables > 0 {
             neo_header.numTables.ilog2() as u16
         } else {
-            0 as u16
+            0_u16
         };
         neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
         neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
+        // If our actual table count has increased by one since the file was
+        // read, it's because we've added a C2PA table; we'll need to add a
+        // directory entry for it; shoving all the data in the file down a bit
+        // to make room...
+        let bytes_for_c2pa_tde = if self.tables.len() as u16 == self.header.numTables {
+            0
+        } else if (self.tables.len() as u16) > self.header.numTables {
+            if (self.tables.len() as u16) - self.header.numTables == 1 {
+                size_of::<SfntTableDirEntry>()
+            } else {
+                panic!("Internal error: added too many font tables!");
+            }
+        } else {
+            panic!("Internal error: lost font tables!");
+        };
+
         // Figure out the size of the tables we know about already; any new
         // tables will have to follow.
         let new_data_offset = match self.directory.physical_order().last() {
-            Some(&stde) => round_up_to_four(
-                stde.offset as usize + stde.length as usize + size_of::<SfntTableDirEntry>(),
-            ),
-            None => 0 as usize,
+            Some(&stde) => {
+                round_up_to_four(stde.offset as usize + stde.length as usize + bytes_for_c2pa_tde)
+            }
+            None => 0_usize,
         };
         // Enumerate the Tables and ensure each one has a Directory Entry.
         for (tag, table) in &self.tables {
             match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
                 Some(stde) => {
-                    let mut entry = SfntTableDirEntry::new();
-                    entry.tag = stde.tag;
-                    entry.offset = stde.offset + size_of::<SfntTableDirEntry>() as u32;
-                    entry.checksum = stde.checksum;
-                    entry.length = stde.length;
-                    neo_directory.entries.push(entry);
+                    let mut neo_entry = SfntTableDirEntry::new();
+                    neo_entry.tag = stde.tag;
+                    neo_entry.offset = stde.offset + bytes_for_c2pa_tde as u32;
+                    neo_entry.checksum = match &tag.data {
+                        b"C2PA" => table.checksum(),
+                        _ => stde.checksum,
+                    };
+                    neo_entry.length = match &tag.data {
+                        b"C2PA" => table.len() as u32,
+                        _ => stde.length,
+                    };
+                    neo_directory.entries.push(neo_entry);
                 }
                 None => match &tag.data {
                     b"C2PA" => {
-                        let mut entry = SfntTableDirEntry::new();
-                        entry.tag = *tag;
-                        entry.offset = round_up_to_four(new_data_offset) as u32;
-                        entry.checksum = table.checksum();
-                        entry.length = table.len() as u32;
-                        neo_directory.entries.push(entry);
+                        let mut neo_entry = SfntTableDirEntry::new();
+                        neo_entry.tag = *tag;
+                        neo_entry.offset = round_up_to_four(new_data_offset) as u32;
+                        neo_entry.checksum = table.checksum();
+                        neo_entry.length = table.len() as u32;
+                        neo_directory.entries.push(neo_entry);
                         // Note - new_data_offset is never actually used after
                         // this point, but _if it were_, it would need to be
                         // mutable, and we would move it ahead like so:

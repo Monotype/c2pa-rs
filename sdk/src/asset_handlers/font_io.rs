@@ -79,7 +79,7 @@ impl std::fmt::Debug for TableTag {
 
 /// Font storage frequently requires padding things to four-byte boundaries.
 pub fn round_up_to_four(size: usize) -> usize {
-    size + 3 & !3
+    (size + 3) & (!3)
 }
 
 /// 32-bit font-format identification magic number.
@@ -501,7 +501,7 @@ impl TableUnspecified {
 
     /// Size of this table if it were serialized right now
     pub fn len(&self) -> usize {
-        return self.data.len();
+        self.data.len()
     }
 
     /// Serialize this table data to the given writer.
