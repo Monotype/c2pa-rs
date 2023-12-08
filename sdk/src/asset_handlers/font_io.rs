@@ -528,6 +528,8 @@ pub enum Table {
     Unspecified(TableUnspecified),
 }
 
+// TBD - This looks sort of like the CRTP from C++; do we want a Trait here
+// that *both* table *and* its value-types implement?
 impl Table {
     pub fn len(&self) -> usize {
         match self {
