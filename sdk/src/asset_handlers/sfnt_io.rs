@@ -631,11 +631,9 @@ impl SfntHeader {
         // 0x00
         self.sfntVersion
             // 0x04
-            + u32::from(self.numTables) * 65536
-            + self.searchRange as u32
+            + u32_from_u16_pair(self.numTables, self.searchRange)
             // 0x08
-            + u32::from(self.entrySelector) * 65536
-            + self.rangeShift as u32
+            + u32_from_u16_pair(self.entrySelector, self.rangeShift)
     }
 }
 

@@ -131,6 +131,25 @@ impl TryFrom<u32> for Magic {
     }
 }
 
+/// Function to assemble two u16s into a u32 - useful for check summing
+#[allow(dead_code)]
+pub fn u32_from_u16_pair(hi: u16, lo: u16) -> u32 {
+    (hi as u32 * 65536) + lo as u32
+}
+
+/// Function to get high-order u32 from given u64
+#[allow(dead_code)]
+pub fn u32_from_u64_hi(big: u64) -> u32 {
+    ((big & 0xffffffff00000000) >> 32) as u32
+}
+
+/// Function to get low-order u32 from given u64
+#[allow(dead_code)]
+
+pub fn u32_from_u64_lo(big: u64) -> u32 {
+    (big & 0x00000000ffffffff) as u32
+}
+
 /// 'C2PA' font table - in storage
 #[derive(Debug)]
 #[repr(C, packed(4))] // As defined by the C2PA spec.
@@ -408,23 +427,22 @@ impl TableHead {
         // ?? How to step over checksumAdjustment without mutating?
         //pub majorVersion: u16,
         //pub minorVersion: u16,
-        //pub fontRevision: u32,
-        //pub checksumAdjustment: u32,
-        //pub magicNumber: u32,
-        //pub flags: u16,
-        //pub unitsPerEm: u16,
-        //pub created: i64,
-        //pub modified: i64,
-        //pub xMin: i16,
-        //pub yMin: i16,
-        //pub xMax: i16,
-        //pub yMax: i16,
+        u32_from_u16_pair(self.majorVersion, self.minorVersion) +
+        self.fontRevision +
+        self.checksumAdjustment +
+        self.magicNumber +
+        u32_from_u16_pair(self.flags, self.unitsPerEm) +
+        u32_from_u64_hi(self.created as u64) +
+        u32_from_u64_lo(self.created as u64) +
+        u32_from_u64_hi(self.modified as u64) +
+        u32_from_u64_lo(self.modified as u64) +
+        u32_from_u16_pair(self.xMin as u16, self.yMin as u16) +
+        u32_from_u16_pair(self.xMax as u16, self.yMax as u16) +
         //pub macStyle: u16,
         //pub lowestRecPPEM: u16,
-        //pub fontDirectionHint: i16,
-        //pub indexToLocFormat: i16,
-        //pub glyphDataFormat: i16,
-        0x19283746
+        u32_from_u16_pair(self.macStyle, self.lowestRecPPEM) +
+        u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16) +
+        u32_from_u16_pair(self.glyphDataFormat as u16, 0)
     }
 
     /// Size of this table if it were serialized right now
