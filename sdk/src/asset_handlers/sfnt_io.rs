@@ -421,9 +421,9 @@ impl SfntFont {
                     let mut neo_entry = SfntTableDirEntry::new();
                     neo_entry.tag = entry.tag;
                     neo_entry.offset = ((entry.offset as i64) + td_derived_offset_bias) as u32;
-                    neo_entry.checksum = match tag {
-                        &C2PA_TABLE_TAG => table.checksum().0,
-                        &HEAD_TABLE_TAG => table.checksum().0,
+                    neo_entry.checksum = match *tag {
+                        C2PA_TABLE_TAG => table.checksum().0,
+                        HEAD_TABLE_TAG => table.checksum().0,
                         _ => entry.checksum,
                     };
                     neo_entry.length = match tag {
@@ -432,8 +432,8 @@ impl SfntFont {
                     };
                     neo_directory.entries.push(neo_entry);
                 }
-                None => match tag {
-                    &C2PA_TABLE_TAG => {
+                None => match *tag {
+                    C2PA_TABLE_TAG => {
                         // Check - this *must* be the case where we're adding
                         // a C2PA table - therefore the bias should be positive.
                         if td_derived_offset_bias <= 0 {
@@ -464,7 +464,7 @@ impl SfntFont {
             .iter_mut()
             .find(|entry| entry.tag == C2PA_TABLE_TAG)
         {
-            if let Some(&ref c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
+            if let Some(c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
                 c2pa_entry.checksum = c2pa.checksum().0;
             } else {
                 // Code smell - keeping the directory and the tables separated.
