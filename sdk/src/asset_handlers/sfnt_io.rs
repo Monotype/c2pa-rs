@@ -483,7 +483,6 @@ impl SfntFont {
         // a value of one specific unique data type (i.e, one of our Table
         // enums.)
         if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
-            println!("{}", ostensible_head.checksum());
             match ostensible_head {
                 Table::Head(head) => {
                     if let Some(head_entry) = neo_directory
@@ -520,7 +519,7 @@ impl SfntFont {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
-                    head.checksumAdjustment = HEAD_MAGIC_NUMBER - font_cksum.0;
+                    head.checksumAdjustment = (Wrapping(HEAD_MAGIC_NUMBER) - font_cksum).0;
                 }
                 _ => {
                     // Tables and directory are out-of-sync
