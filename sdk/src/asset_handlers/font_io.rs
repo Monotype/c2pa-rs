@@ -31,7 +31,7 @@ pub struct SfntTag {
     pub data: [u8; 4],
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TBD - Is creating some UTs sufficient to quicken/animate this code?
 impl SfntTag {
     /// Construct a new SfntTag with the given value.
     pub fn new(source_data: [u8; 4]) -> Self {
@@ -133,6 +133,8 @@ impl TryFrom<u32> for Magic {
 }
 
 /// Function to assemble two u16s into a u32 - useful for check summing
+// TBD - Supposedly the bytemuck crate, already in this project, can help us
+// with stuff like this.
 #[allow(dead_code)]
 pub fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
     Wrapping((hi as u32 * 65536) + lo as u32)
@@ -499,7 +501,7 @@ impl TableUnspecified {
 
     /// Compute the checksum
     pub fn checksum(&self) -> Wrapping<u32> {
-        // TBD - this should never be called though - we only need to alter C2PA and head
+        // TBD - this should never be called though - we only need to alter C2PA and head - should we panic!(), or just implement?
         Wrapping(0x19283746)
         //let mut cksum: u32 = 0;
         //let mut i = 0; // sorry Rust, .chunks_exact still doesn't quite cut it

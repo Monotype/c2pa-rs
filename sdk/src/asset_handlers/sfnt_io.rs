@@ -848,7 +848,7 @@ impl ChunkReader for SfntIO {
         for entry in sfnt_dir.physical_order().iter() {
             positions.push(ChunkPosition {
                 offset: entry.offset as u64,
-                length: entry.length, // TBD compression support
+                length: entry.length,
                 name: entry.tag.data,
                 chunk_type: ChunkType::Table,
             });
