@@ -20,7 +20,6 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use log::trace;
 
 use crate::error::{Error, Result};
 
@@ -153,7 +152,7 @@ pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
 }
 
 /// 'C2PA' font table - in storage
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C, packed(4))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 pub struct TableC2PARaw {
@@ -316,15 +315,7 @@ impl TableC2PA {
     /// Serialize this C2PA table to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
-        let mut raw_table = TableC2PARaw {
-            majorVersion: self.major_version,
-            minorVersion: self.minor_version,
-            activeManifestUriOffset: 0,
-            activeManifestUriLength: 0,
-            reserved: 0,
-            manifestStoreOffset: 0,
-            manifestStoreLength: 0,
-        };
+        let mut raw_table = TableC2PARaw::default();
         // If a remote URI is present, prepare to store it.
         if let Some(uri_string) = self.active_manifest_uri.as_ref() {
             raw_table.activeManifestUriOffset = size_of::<TableC2PARaw>() as u32;
@@ -364,7 +355,7 @@ impl Default for TableC2PA {
 
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C, packed(1))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly
 // support exotics like FIXED).
@@ -500,54 +491,9 @@ impl TableUnspecified {
 
     /// Compute the checksum
     pub fn checksum(&self) -> Wrapping<u32> {
-        // TBD - this should never be called though - we only need to alter C2PA and head - should we panic!(), or just implement?
+        // TBD - this should never be called though - we only need to alter C2PA
+        // and head - should we panic!(), or just implement?
         Wrapping(0x19283746)
-        //let mut cksum: u32 = 0;
-        //let mut i = 0; // sorry Rust, .chunks_exact still doesn't quite cut it
-        //while i < (self.data.len() & !3) {
-        //    let ckword = u32::from_be_bytes(self.data[i..i + 3].try_into());
-        //    cksum += ckword;
-        //    i += 4;
-        //}
-        //let remainder = self.data.len() - i;
-        //if remainder > 0 {
-        //    if remainder > 3 {
-        //        panic!("internal error!");
-        //    }
-        //    let mut fragbuf: [u8; 4] = [0, 0, 0, 0];
-        //    fragbuf[0..remainder].copy_from_slice(&self.data[i..self.data.len() - 1]);
-        //    let ckword = u32::from_be_bytes(fragbuf);
-        //    cksum += ckword;
-        //}
-        //let mut ckchunks = self.data.chunks_exact(4);
-        //for chunk in ckchunks.into_iter() {
-        //    let ckword = u32::from_be_bytes(chunk.try_into().unwrap());
-        //    cksum += ckword;
-        //}
-        //if ckchunks.remainder().len() > 3 {
-        //    panic!("chunks_exact lied!")
-        //}
-        //if ckchunks.remainder().len() > 0 {
-        //    let mut lastfragment: [u8; 4] = [0, 0, 0, 0];
-        //    lastfragment[0..ckchunks.remainder().len()].copy_from_slice(ckchunks.remainder());
-        //    let ckword = u32::from_be_bytes(lastfragment);
-        //    cksum += ckword;
-        //}
-        // let mut cksum: u32 = 0;
-        // while stream.get_ref().len() > 4 {
-        //     let ckword: u32 = stream.read_u32::<BigEndian>()?;
-        //     cksum += ckword;
-        // }
-        // if stream.get_ref().len() > 0 {
-        //     let mut ckfrag: u32 = 0;
-        //     let mut factor: u32 = 256 * 256 * 256;
-        //     while stream.get_ref().len() > 0 {
-        //         let ckbyte = stream.read_u8()?;
-        //         ckfrag += ckbyte as u32 * factor;
-        //         factor /= 256;
-        //     }
-        //     cksum += ckfrag;
-        // }
     }
 
     /// Size of this table if it were serialized right now
