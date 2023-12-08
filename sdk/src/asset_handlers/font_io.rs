@@ -15,6 +15,7 @@ use std::{
     convert::TryFrom,
     io::{Read, Seek, SeekFrom, Write},
     mem::size_of,
+    num::Wrapping,
     str::from_utf8,
 };
 
@@ -133,21 +134,21 @@ impl TryFrom<u32> for Magic {
 
 /// Function to assemble two u16s into a u32 - useful for check summing
 #[allow(dead_code)]
-pub fn u32_from_u16_pair(hi: u16, lo: u16) -> u32 {
-    (hi as u32 * 65536) + lo as u32
+pub fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
+    Wrapping((hi as u32 * 65536) + lo as u32)
 }
 
 /// Function to get high-order u32 from given u64
 #[allow(dead_code)]
-pub fn u32_from_u64_hi(big: u64) -> u32 {
-    ((big & 0xffffffff00000000) >> 32) as u32
+pub fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
+    Wrapping(((big & 0xffffffff00000000) >> 32) as u32)
 }
 
 /// Function to get low-order u32 from given u64
 #[allow(dead_code)]
 
-pub fn u32_from_u64_lo(big: u64) -> u32 {
-    (big & 0x00000000ffffffff) as u32
+pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
+    Wrapping((big & 0x00000000ffffffff) as u32)
 }
 
 /// 'C2PA' font table - in storage
@@ -212,7 +213,7 @@ impl TableC2PA {
     }
 
     /// Create the checksum for this table
-    pub fn checksum(&self) -> u32 {
+    pub fn checksum(&self) -> Wrapping<u32> {
         // // Serialize self to a throwaway stream
         // let mut stream = Cursor::new(Vec::new());
         // match self.write(&mut stream) {
@@ -236,7 +237,7 @@ impl TableC2PA {
         //     }
         //     cksum += ckfrag;
         // }
-        0x12345678
+        Wrapping(0x12345678)
     }
 
     /// Size of this table if it were serialized right now
@@ -363,7 +364,7 @@ impl Default for TableC2PA {
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
 #[derive(Debug)]
-#[repr(C, packed(4))]
+#[repr(C, packed(1))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 pub struct TableHead {
@@ -395,8 +396,9 @@ impl TableHead {
         size: usize,
     ) -> core::result::Result<TableHead, Error> {
         reader.seek(SeekFrom::Start(offset))?;
-        if size != size_of::<TableHead>() {
-            Err(Error::FontLoadError)?
+        let actual_size = size_of::<TableHead>();
+        if size != actual_size {
+            Err(Error::FontLoadError)
         } else {
             Ok(Self {
                 majorVersion: reader.read_u16::<BigEndian>()?,
@@ -423,26 +425,24 @@ impl TableHead {
     }
 
     /// Compute the checksum
-    pub fn checksum(&self) -> u32 {
+    pub fn checksum(&self) -> Wrapping<u32> {
         // ?? How to step over checksumAdjustment without mutating?
         //pub majorVersion: u16,
         //pub minorVersion: u16,
-        u32_from_u16_pair(self.majorVersion, self.minorVersion) +
-        self.fontRevision +
-        self.checksumAdjustment +
-        self.magicNumber +
-        u32_from_u16_pair(self.flags, self.unitsPerEm) +
-        u32_from_u64_hi(self.created as u64) +
-        u32_from_u64_lo(self.created as u64) +
-        u32_from_u64_hi(self.modified as u64) +
-        u32_from_u64_lo(self.modified as u64) +
-        u32_from_u16_pair(self.xMin as u16, self.yMin as u16) +
-        u32_from_u16_pair(self.xMax as u16, self.yMax as u16) +
-        //pub macStyle: u16,
-        //pub lowestRecPPEM: u16,
-        u32_from_u16_pair(self.macStyle, self.lowestRecPPEM) +
-        u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16) +
-        u32_from_u16_pair(self.glyphDataFormat as u16, 0)
+        u32_from_u16_pair(self.majorVersion, self.minorVersion)
+            + Wrapping(self.fontRevision)
+            + Wrapping(self.checksumAdjustment)
+            + Wrapping(self.magicNumber)
+            + u32_from_u16_pair(self.flags, self.unitsPerEm)
+            + u32_from_u64_hi(self.created as u64)
+            + u32_from_u64_lo(self.created as u64)
+            + u32_from_u64_hi(self.modified as u64)
+            + u32_from_u64_lo(self.modified as u64)
+            + u32_from_u16_pair(self.xMin as u16, self.yMin as u16)
+            + u32_from_u16_pair(self.xMax as u16, self.yMax as u16)
+            + u32_from_u16_pair(self.macStyle, self.lowestRecPPEM)
+            + u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16)
+            + u32_from_u16_pair(self.glyphDataFormat as u16, 0)
     }
 
     /// Size of this table if it were serialized right now
@@ -498,8 +498,9 @@ impl TableUnspecified {
     }
 
     /// Compute the checksum
-    pub fn checksum(&self) -> u32 {
-        0x19283746
+    pub fn checksum(&self) -> Wrapping<u32> {
+        // TBD - this should never be called though - we only need to alter C2PA and head
+        Wrapping(0x19283746)
         //let mut cksum: u32 = 0;
         //let mut i = 0; // sorry Rust, .chunks_exact still doesn't quite cut it
         //while i < (self.data.len() & !3) {
@@ -589,7 +590,7 @@ impl Table {
         }
     }
 
-    pub fn checksum(&self) -> u32 {
+    pub fn checksum(&self) -> Wrapping<u32> {
         match self {
             Table::C2PA(c2pa) => c2pa.checksum(),
             Table::Head(head) => head.checksum(),

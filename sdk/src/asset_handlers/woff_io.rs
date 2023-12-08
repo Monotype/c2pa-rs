@@ -447,7 +447,7 @@ impl WoffFont {
             offset: existing_table_data_limit + pre_padding,
             compLength: empty_table_size,
             origLength: empty_table_size,
-            origChecksum: c2pa_table.checksum(),
+            origChecksum: c2pa_table.checksum().0,
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);

@@ -16,6 +16,7 @@ use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
+    num::Wrapping, // TBD - should we be using core::num?
     path::*,
 };
 
@@ -314,10 +315,7 @@ impl SfntFont {
                         Table::C2PA(TableC2PA::make_from_reader(reader, offset, size)?)
                     }
                     HEAD_TABLE_TAG => {
-                        // Soon, Table::Head(TableHead::make_from_reader(reader, offset, size)?)
-                        Table::Unspecified(TableUnspecified::make_from_reader(
-                            reader, offset, size,
-                        )?)
+                        Table::Head(TableHead::make_from_reader(reader, offset, size)?)
                     }
                     _ => Table::Unspecified(TableUnspecified::make_from_reader(
                         reader, offset, size,
@@ -423,19 +421,19 @@ impl SfntFont {
                     let mut neo_entry = SfntTableDirEntry::new();
                     neo_entry.tag = entry.tag;
                     neo_entry.offset = ((entry.offset as i64) + td_derived_offset_bias) as u32;
-                    neo_entry.checksum = match &tag.data {
-                        b"C2PA" => table.checksum(),
-                        b"head" => table.checksum(),
+                    neo_entry.checksum = match tag {
+                        &C2PA_TABLE_TAG => table.checksum().0,
+                        &HEAD_TABLE_TAG => table.checksum().0,
                         _ => entry.checksum,
                     };
-                    neo_entry.length = match &tag.data {
-                        b"C2PA" => table.len() as u32,
+                    neo_entry.length = match tag {
+                        &C2PA_TABLE_TAG => table.len() as u32,
                         _ => entry.length,
                     };
                     neo_directory.entries.push(neo_entry);
                 }
-                None => match &tag.data {
-                    b"C2PA" => {
+                None => match tag {
+                    &C2PA_TABLE_TAG => {
                         // Check - this *must* be the case where we're adding
                         // a C2PA table - therefore the bias should be positive.
                         if td_derived_offset_bias <= 0 {
@@ -444,7 +442,7 @@ impl SfntFont {
                         let mut neo_entry = SfntTableDirEntry::new();
                         neo_entry.tag = *tag;
                         neo_entry.offset = round_up_to_four(new_data_offset) as u32;
-                        neo_entry.checksum = table.checksum();
+                        neo_entry.checksum = table.checksum().0;
                         neo_entry.length = table.len() as u32;
                         neo_directory.entries.push(neo_entry);
                         // Note - new_data_offset is never actually used after
@@ -453,7 +451,7 @@ impl SfntFont {
                         // new_data_offset =
                         //    round_up_to_four(entry.offset as usize + entry.length as usize);
                     }
-                    _unknown_tag => {
+                    _ => {
                         return Err(Error::FontSaveError);
                     }
                 },
@@ -467,7 +465,7 @@ impl SfntFont {
             .find(|entry| entry.tag == C2PA_TABLE_TAG)
         {
             if let Some(&ref c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
-                c2pa_entry.checksum = c2pa.checksum();
+                c2pa_entry.checksum = c2pa.checksum().0;
             } else {
                 // Code smell - keeping the directory and the tables separated.
                 return Err(Error::FontSaveError);
@@ -485,6 +483,7 @@ impl SfntFont {
         // a value of one specific unique data type (i.e, one of our Table
         // enums.
         if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
+            println!("{}", ostensible_head.checksum());
             match ostensible_head {
                 Table::Head(head) => {
                     if let Some(head_entry) = neo_directory
@@ -492,7 +491,7 @@ impl SfntFont {
                         .iter_mut()
                         .find(|entry| entry.tag == HEAD_TABLE_TAG)
                     {
-                        head_entry.checksum = head.checksum();
+                        head_entry.checksum = head.checksum().0;
                     }
                 }
                 _ => {
@@ -503,13 +502,17 @@ impl SfntFont {
         };
 
         // Get the checksum for the whole font, starting with the front matter...
+        // TBD note this is wasted work, if there's no head table in which to
+        // store the result.
         let font_cksum = self.header.checksum()
             + self.directory.checksum()
             + self
                 .directory
                 .physical_order()
                 .iter()
-                .fold(0u32, |tables_cksum, entry| tables_cksum + entry.checksum);
+                .fold(Wrapping(0u32), |tables_cksum, entry| {
+                    tables_cksum + Wrapping(entry.checksum)
+                });
 
         // Rewrite the head table's checksumAdjustment. (This act does *not*
         // invalidate the checksum in the TDE for the 'head' table, which is
@@ -517,7 +520,7 @@ impl SfntFont {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
-                    head.checksumAdjustment = HEAD_MAGIC_NUMBER - font_cksum;
+                    head.checksumAdjustment = HEAD_MAGIC_NUMBER - font_cksum.0;
                 }
                 _ => {
                     // Tables and directory are out-of-sync
@@ -580,7 +583,7 @@ impl SfntFont {
             tag: C2PA_TABLE_TAG,
             offset: existing_table_data_limit + pre_padding,
             length: empty_table_size,
-            checksum: c2pa_table.checksum(),
+            checksum: c2pa_table.checksum().0,
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
@@ -627,9 +630,9 @@ impl SfntHeader {
     }
 
     /// Compute the checksum
-    pub fn checksum(&self) -> u32 {
+    pub fn checksum(&self) -> Wrapping<u32> {
         // 0x00
-        self.sfntVersion
+        Wrapping(self.sfntVersion)
             // 0x04
             + u32_from_u16_pair(self.numTables, self.searchRange)
             // 0x08
@@ -675,8 +678,11 @@ impl SfntTableDirEntry {
     }
 
     /// Compute the checksum
-    pub fn checksum(&self) -> u32 {
-        u32::from_be_bytes(self.tag.data) + self.checksum + self.offset + self.length
+    pub fn checksum(&self) -> Wrapping<u32> {
+        Wrapping(u32::from_be_bytes(self.tag.data))
+            + Wrapping(self.checksum)
+            + Wrapping(self.offset)
+            + Wrapping(self.length)
     }
 }
 
@@ -742,13 +748,13 @@ impl SfntDirectory {
 
     /// Compute the checksum, which is just the sum of all our (immediately-
     /// adjacent, four-byte-aligned) elements
-    pub fn checksum(&self) -> u32 {
+    pub fn checksum(&self) -> Wrapping<u32> {
         match self.entries.is_empty() {
-            true => 0,
+            true => Wrapping(0_u32),
             false => self
                 .entries
                 .iter()
-                .fold(0u32, |cksum, entry| cksum + entry.checksum()),
+                .fold(Wrapping(0u32), |cksum, entry| cksum + entry.checksum()),
         }
     }
 }
