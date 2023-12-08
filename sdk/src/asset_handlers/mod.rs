@@ -17,8 +17,6 @@ pub mod c2pa_io;
 pub mod font_io;
 pub mod jpeg_io;
 pub mod mp3_io;
-#[cfg(feature = "otf")]
-pub mod otf_io;
 pub mod png_io;
 pub mod riff_io;
 #[cfg(feature = "sfnt")]

@@ -481,7 +481,7 @@ impl SfntFont {
         //  YOU ARE GIVING ME" so what we need instead of (or in addition to)
         // BTreeMap is a kind of hash-map where each key, if present, can have
         // a value of one specific unique data type (i.e, one of our Table
-        // enums.
+        // enums.)
         if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
             println!("{}", ostensible_head.checksum());
             match ostensible_head {
@@ -1404,9 +1404,12 @@ impl AssetIO for SfntIO {
         &[
             "application/font-sfnt",
             "application/x-font-ttf",
+            "application/x-font-opentype",
             "application/x-font-truetype",
+            "font/otf",
             "font/sfnt",
             "font/ttf",
+            "otf",
             "sfnt",
             "ttf",
         ]
@@ -1530,11 +1533,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = fixture_path("font.ttf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.ttf");
+        let output = temp_dir_path(&temp_dir, "test.otf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1577,11 +1580,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = fixture_path("font.ttf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.ttf");
+        let output = temp_dir_path(&temp_dir, "test.otf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1722,11 +1725,11 @@ pub mod tests {
     #[test]
     fn get_object_locations() {
         // Load the basic OTF test fixture
-        let source = fixture_path("font.ttf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.ttf");
+        let output = temp_dir_path(&temp_dir, "test.otf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1783,11 +1786,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = fixture_path("font.ttf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.ttf");
+        let output = temp_dir_path(&temp_dir, "test.otf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1818,11 +1821,11 @@ pub mod tests {
         let c2pa_data = "test data";
 
         // Load the basic OTF test fixture
-        let source = fixture_path("font.ttf");
+        let source = fixture_path("font.otf");
 
         // Create a temporary output for the file
         let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.ttf");
+        let output = temp_dir_path(&temp_dir, "test.otf");
 
         // Copy the source to the output
         std::fs::copy(source, &output).unwrap();
@@ -1861,11 +1864,11 @@ pub mod tests {
         #[test]
         fn add_reference_as_xmp_to_stream_with_data() {
             // Load the basic OTF test fixture
-            let source = crate::utils::test::fixture_path("font.ttf");
+            let source = crate::utils::test::fixture_path("font.otf");
 
             // Create a temporary output for the file
             let temp_dir = tempdir().unwrap();
-            let output = temp_dir_path(&temp_dir, "test.ttf");
+            let output = temp_dir_path(&temp_dir, "test.otf");
 
             // Copy the source to the output
             std::fs::copy(source, &output).unwrap();

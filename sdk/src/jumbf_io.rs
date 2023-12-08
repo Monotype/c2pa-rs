@@ -20,8 +20,6 @@ use std::{
 
 use lazy_static::lazy_static;
 
-#[cfg(feature = "otf")]
-use crate::asset_handlers::otf_io::OtfIO;
 #[cfg(feature = "pdf")]
 use crate::asset_handlers::pdf_io::PdfIO;
 #[cfg(feature = "sfnt")]
@@ -51,8 +49,6 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
-            #[cfg(feature = "otf")]
-            Box::new(OtfIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
             #[cfg(feature = "woff")]
@@ -85,8 +81,6 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
-            #[cfg(feature = "otf")]
-            Box::new(OtfIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
             #[cfg(feature = "woff")]
