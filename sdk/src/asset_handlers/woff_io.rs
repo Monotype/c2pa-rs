@@ -271,24 +271,24 @@ impl TempFile {
 }
 
 /// WOFF 1.0 WOFFHeader
-const WOFF_HEADER_CHUNK_NAME: TableTag = TableTag {
+const WOFF_HEADER_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x00\x00\x00w",
 };
 // Then SFNT header could be *b"\x00\x00\x00w", and all the "header" chunks
 // will automatically BTreeMap to start-of-file.
 
 /// Pseudo-tag for the table directory.
-const WOFF_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
+const WOFF_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x00\x00\x01D",
 }; // Sorts to just-after HEADER tag.
 
 /// WOFF 1.0 / 2.0 trailing XML metadata
-const WOFF_METADATA_CHUNK_NAME: TableTag = TableTag {
+const WOFF_METADATA_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x7F\x7F\x7FM",
 }; // Sorts to the penultimate position.
 
 /// WOFF 1.0 / 2.0 trailing private data
-const WOFF_PRIVATE_CHUNK_NAME: TableTag = TableTag {
+const WOFF_PRIVATE_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x7F\x7F\x7FP",
 }; // Sorts to the very end.
 
@@ -296,7 +296,7 @@ const WOFF_PRIVATE_CHUNK_NAME: TableTag = TableTag {
 struct WoffFont {
     header: WoffHeader,
     directory: WoffDirectory,
-    /// All the Tables in this font, keyed by TableTag.
+    /// All the Tables in this font, keyed by SfntTag.
     // TBD - WOFF2 - For this format, the Table Directory entries are not
     // sorted by tag; rather, their order determines the physical order of the
     // tables themselves. Therefore, a BTreeMap keyed by tag is not appropriate;
@@ -309,7 +309,7 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: BTreeMap<TableTag, Table>,
+    tables: BTreeMap<SfntTag, Table>,
     meta: Option<TableUnspecified>,
     private: Option<TableUnspecified>,
 }
@@ -339,10 +339,7 @@ impl WoffFont {
                         Table::C2PA(TableC2PA::make_from_reader(reader, offset, size)?)
                     }
                     HEAD_TABLE_TAG => {
-                        // Soon, Table::Head(TableHead::make_from_reader(reader, offset, size)?)
-                        Table::Unspecified(TableUnspecified::make_from_reader(
-                            reader, offset, size,
-                        )?)
+                        Table::Head(TableHead::make_from_reader(reader, offset, size)?)
                     }
                     _ => Table::Unspecified(TableUnspecified::make_from_reader(
                         reader, offset, size,
@@ -401,7 +398,7 @@ impl WoffFont {
             // Write out the (real and fake) tables.
             match &self.tables[&entry.tag] {
                 Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                //Table::Head(head_table) => head_table.write(destination)?,
+                Table::Head(head_table) => head_table.write(destination)?,
                 Table::Unspecified(un_table) => un_table.write(destination)?,
             }
         }
@@ -578,7 +575,7 @@ impl Default for WoffHeader {
 #[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffTableDirEntry {
-    tag: TableTag,
+    tag: SfntTag,
     offset: u32,
     compLength: u32,
     origLength: u32,
@@ -587,7 +584,7 @@ struct WoffTableDirEntry {
 impl WoffTableDirEntry {
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: TableTag::new_from_reader(reader)?,
+            tag: SfntTag::new_from_reader(reader)?,
             offset: reader.read_u32::<BigEndian>()?,
             compLength: reader.read_u32::<BigEndian>()?,
             origLength: reader.read_u32::<BigEndian>()?,

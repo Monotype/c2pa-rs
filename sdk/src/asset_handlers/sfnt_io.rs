@@ -272,12 +272,12 @@ impl TempFile {
 }
 
 /// Pseudo-tag for the SFNT file header
-const SFNT_HEADER_CHUNK_NAME: TableTag = TableTag {
+const SFNT_HEADER_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x00\x00\x00s",
 };
 
 /// Pseudo-tag for the table directory.
-const SFNT_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
+const SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag {
     data: *b"\x00\x00\x00d",
 }; // Sorts to just-after HEADER tag.
 
@@ -285,20 +285,8 @@ const SFNT_DIRECTORY_CHUNK_NAME: TableTag = TableTag {
 struct SfntFont {
     header: SfntHeader,
     directory: SfntDirectory,
-    /// All the Tables in this font, keyed by TableTag.
-    // TBD - WOFF2 - For this format, the Table Directory entries are not
-    // sorted by tag; rather, their order determines the physical order of the
-    // tables themselves. Therefore, a BTreeMap keyed by tag is not appropriate;
-    // we need to generalize the concept of table order across font container
-    // types. Design considerations include:
-    // - Any motivation to _not_ ensure that SFNTs/WOFF1s are sorted correctly;
-    //   if our goal is simply to describe the provenance _of an already-existing asset_,
-    //   then perhaps we need to permit incorrectly-ordered SFNTs/WOFF1s? In that
-    //   case, then perhaps the selection of BTreeMap versus Vec is done at
-    //   construction time, ensuring the desired behavior?
-    // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
-    // - Other matters?
-    tables: BTreeMap<TableTag, Table>,
+    /// All the Tables in this font, keyed by SfntTag.
+    tables: BTreeMap<SfntTag, Table>,
 }
 
 impl SfntFont {
@@ -346,6 +334,12 @@ impl SfntFont {
             directory: sfnt_dir,
             tables: sfnt_tables,
         })
+    }
+
+    /// Computes the whole-font checksum, for the 'head' table's
+    /// checksumAdjustment field
+    fn checksum(&self) -> u32 {
+        0x31249219 + self.tables.len() as u32
     }
 
     /// Writes out this font file.
@@ -432,6 +426,7 @@ impl SfntFont {
                     neo_entry.offset = ((stde.offset as i64) + td_derived_offset_bias) as u32;
                     neo_entry.checksum = match &tag.data {
                         b"C2PA" => table.checksum(),
+                        b"head" => table.checksum(),
                         _ => stde.checksum,
                     };
                     neo_entry.length = match &tag.data {
@@ -465,25 +460,58 @@ impl SfntFont {
                 },
             }
         }
-        // TBD - Fix up checkSumAdjustment
-        // Requires TBD - turn on `head` table for real
-        // With everything in sync, we can start writing; first, the header.
+        // If a 'C2PA' table is present, re-compute its directory-entry's
+        // checksum...
+        if let Some(c2pa_tde) = neo_directory
+            .entries
+            .iter_mut()
+            .find(|tde| tde.tag == C2PA_TABLE_TAG)
+        {
+            if let Some(&ref c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
+                c2pa_tde.checksum = c2pa.checksum();
+            } else {
+                // Code smell - keeping the directory and the tables separated.
+                return Err(Error::FontSaveError);
+            }
+        }
+        // ...allowing us to re-compute the whole-font checksum, if a 'head'
+        // table is present...
+        if let Some(&mut ref ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
+            match ostensible_head {
+                Table::Head(head) => {
+                    head.checksumAdjustment = 0;
+                    if let Some(&mut head_tde) = neo_directory
+                        .entries
+                        .iter_mut()
+                        .find(|tde| tde.tag == HEAD_TABLE_TAG)
+                    {
+                        head_tde.checksum = head.checksum();
+                    }
+                }
+                _ => {
+                    // Tables and directory are out-of-sync
+                    return Err(Error::FontSaveError);
+                }
+            };
+        };
+        // ...and now, with everything in sync, we can start writing; first,
+        // the header.
         neo_header.write(destination)?;
         // Then the directory.
         neo_directory.write(destination)?;
         // The above items are fixed sizes which are even multiples of four;
         // therefore we can presume our current write offset.
         for entry in neo_directory.physical_order().iter() {
-            // TBD - current-offset sanity-checking:
+            // TBD - current-offset consistency-checking:
             //  1. Did we go backwards (despite the request for physical_order)?
             //  2. Did we go more than 3 bytes forward (file has excess padding)?
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
             match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                //Table::Head(head_table) => head_table.write(destination)?,
-                Table::Unspecified(un_table) => un_table.write(destination)?,
+                Table::C2PA(c2pa) => c2pa.write(destination)?,
+                Table::Head(head) => head.write(destination)?,
+                Table::Unspecified(un) => un.write(destination)?,
             }
         }
         // If we made it here, it all worked.
@@ -527,15 +555,6 @@ impl SfntFont {
         self.header.entrySelector = 0;
         // Success at last
         Ok(())
-    }
-
-    fn _resize_c2pa_table(&mut self, _desired_new_size: u32) -> Result<()> {
-        // 1. If no table present -- create one?
-        // 2. With a table in hand:
-        //    a. Resize the table
-        //    b. Change the compSize/origSize in the directory
-        //    c. Update self.header.length and .totalSfntSize
-        todo!("When the content changes, we'll need to be invoked.")
     }
 }
 
@@ -584,7 +603,7 @@ impl SfntTableDirEntry {
 
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: TableTag::new_from_reader(reader)?,
+            tag: SfntTag::new_from_reader(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
             offset: reader.read_u32::<BigEndian>()?,
             length: reader.read_u32::<BigEndian>()?,
@@ -603,7 +622,7 @@ impl SfntTableDirEntry {
 impl Default for SfntTableDirEntry {
     fn default() -> Self {
         Self {
-            tag: TableTag::new(*b"\0\0\0\0"),
+            tag: SfntTag::new(*b"\0\0\0\0"),
             checksum: 0,
             offset: 0,
             length: 0,
@@ -681,15 +700,6 @@ pub struct ChunkPosition {
     /// Type of chunk
     pub chunk_type: ChunkType,
 }
-
-//impl PartialEq for ChunkPosition {
-//    fn eq(&self, other: &Self) -> bool {
-//        self.offset == other.offset
-//            && self.length == other.length
-//            && self.name == other.name
-//            && self.chunk_type == other.chunk_type
-//    }
-//}
 
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
 pub trait ChunkReader {
@@ -817,7 +827,8 @@ where
                     c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
                 }
                 _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                    // Non-C2PA table with C2PA tag
+                    return Err(Error::FontLoadError);
                 }
             };
         }
@@ -876,7 +887,8 @@ where
                     c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
                 }
                 _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                    // Non-C2PA table with C2PA tag
+                    return Err(Error::FontLoadError);
                 }
             };
         }
@@ -1069,7 +1081,8 @@ where
                     }
                 }
                 _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                    // Non-C2PA table with C2PA tag
+                    return Err(Error::FontLoadError);
                 }
             }
         }
@@ -1203,7 +1216,8 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
             Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
             _ => {
-                todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+                // Non-C2PA table with C2PA tag
+                return Err(Error::FontLoadError);
             }
         },
     };

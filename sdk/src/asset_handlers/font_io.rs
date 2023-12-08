@@ -25,22 +25,19 @@ use crate::error::{Error, Result};
 
 /// Types for supporting fonts in any container.
 /// Four-character tag which names a font table.
-/// TBD - Rename this type to plain `Tag`, since:
-///   A. It's safely scoped within font_io
-///   2.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct TableTag {
+pub struct SfntTag {
     pub data: [u8; 4],
 }
 
 #[allow(dead_code)]
-impl TableTag {
-    /// Construct a new TableTag with the given value.
+impl SfntTag {
+    /// Construct a new SfntTag with the given value.
     pub fn new(source_data: [u8; 4]) -> Self {
         Self { data: source_data }
     }
 
-    /// Read a new TableTag from the given source.
+    /// Read a new SfntTag from the given source.
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self::new([
             reader.read_u8()?,
@@ -57,7 +54,7 @@ impl TableTag {
     }
 }
 
-impl std::fmt::Display for TableTag {
+impl std::fmt::Display for SfntTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -67,7 +64,7 @@ impl std::fmt::Display for TableTag {
     }
 }
 
-impl std::fmt::Debug for TableTag {
+impl std::fmt::Debug for SfntTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -106,11 +103,11 @@ pub enum Magic {
 
 /// Tag for the 'C2PA' table.
 #[allow(dead_code)]
-pub const C2PA_TABLE_TAG: TableTag = TableTag { data: *b"C2PA" };
+pub const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
 
 /// Tag for the 'head' table in a font.
 #[allow(dead_code)]
-pub const HEAD_TABLE_TAG: TableTag = TableTag { data: *b"head" };
+pub const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
 
 /// Used to attempt conversion from u32 to a Magic value.
 impl TryFrom<u32> for Magic {
@@ -369,7 +366,7 @@ pub struct TableHead {
 
 impl TableHead {
     /// Creates a `head` table from the given stream.
-    pub fn _make_from_reader<T: Read + Seek + ?Sized>(
+    pub fn make_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -401,8 +398,19 @@ impl TableHead {
         }
     }
 
+    /// Compute the checksum
+    pub fn checksum(&self) -> u32 {
+        // ?? How to step over checksumAdjustment without mutating?
+        0x19283746
+    }
+
+    /// Size of this table if it were serialized right now
+    pub fn len(&self) -> usize {
+        size_of::<Self>()
+    }
+
     /// Serialize this head table to the given writer.
-    pub fn _write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.fontRevision)?;
@@ -526,8 +534,7 @@ pub enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
-    // TBD - get CRACKIN and release this KRAKEN
-    //Head(TableHead),
+    Head(TableHead),
     /// any other table
     Unspecified(TableUnspecified),
 }
@@ -536,6 +543,7 @@ impl Table {
     pub fn len(&self) -> usize {
         match self {
             Table::C2PA(c2pa) => c2pa.len(),
+            Table::Head(head) => head.len(),
             Table::Unspecified(un) => un.len(),
         }
     }
@@ -543,12 +551,13 @@ impl Table {
     pub fn checksum(&self) -> u32 {
         match self {
             Table::C2PA(c2pa) => c2pa.checksum(),
+            Table::Head(head) => head.checksum(),
             Table::Unspecified(un) => un.checksum(),
         }
     }
 }
 
-/// TBD: All the serialization structures so far have been defined using native
+/// All the serialization structures so far have been defined using native
 /// Rust types; should we go all-out in the other direction, and establish a
 /// layer of "font" types (FWORD, FIXED, etc.)?
 
@@ -575,7 +584,7 @@ pub struct SfntHeader {
 #[repr(C, packed(4))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
 pub struct SfntTableDirEntry {
-    pub tag: TableTag,
+    pub tag: SfntTag,
     pub checksum: u32,
     pub offset: u32,
     pub length: u32,
