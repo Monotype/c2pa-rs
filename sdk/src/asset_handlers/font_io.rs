@@ -109,6 +109,10 @@ pub const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
 #[allow(dead_code)]
 pub const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
 
+/// Spec-mandated value for 'head'::magicNumber
+#[allow(dead_code)]
+pub const HEAD_MAGIC_NUMBER: u32 = 0xb1b0afba;
+
 /// Used to attempt conversion from u32 to a Magic value.
 impl TryFrom<u32> for Magic {
     type Error = crate::error::Error;
@@ -380,6 +384,7 @@ impl TableHead {
                 minorVersion: reader.read_u16::<BigEndian>()?,
                 fontRevision: reader.read_u32::<BigEndian>()?,
                 checksumAdjustment: reader.read_u32::<BigEndian>()?,
+                // TBD - FontLoadError when head magic is bad?
                 magicNumber: reader.read_u32::<BigEndian>()?,
                 flags: reader.read_u16::<BigEndian>()?,
                 unitsPerEm: reader.read_u16::<BigEndian>()?,
@@ -401,6 +406,24 @@ impl TableHead {
     /// Compute the checksum
     pub fn checksum(&self) -> u32 {
         // ?? How to step over checksumAdjustment without mutating?
+        //pub majorVersion: u16,
+        //pub minorVersion: u16,
+        //pub fontRevision: u32,
+        //pub checksumAdjustment: u32,
+        //pub magicNumber: u32,
+        //pub flags: u16,
+        //pub unitsPerEm: u16,
+        //pub created: i64,
+        //pub modified: i64,
+        //pub xMin: i16,
+        //pub yMin: i16,
+        //pub xMax: i16,
+        //pub yMax: i16,
+        //pub macStyle: u16,
+        //pub lowestRecPPEM: u16,
+        //pub fontDirectionHint: i16,
+        //pub indexToLocFormat: i16,
+        //pub glyphDataFormat: i16,
         0x19283746
     }
 

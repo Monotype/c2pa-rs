@@ -336,14 +336,8 @@ impl SfntFont {
         })
     }
 
-    /// Computes the whole-font checksum, for the 'head' table's
-    /// checksumAdjustment field
-    fn checksum(&self) -> u32 {
-        0x31249219 + self.tables.len() as u32
-    }
-
     /// Writes out this font file.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         let mut neo_header = SfntHeader::new();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
@@ -400,8 +394,8 @@ impl SfntFont {
         // Figure out the size of the tables we know about already; any new
         // tables will have to follow.
         let new_data_offset = match self.directory.physical_order().last() {
-            Some(&stde) => round_up_to_four(
-                (stde.offset as i64 + stde.length as i64 + td_derived_offset_bias) as usize,
+            Some(&entry) => round_up_to_four(
+                (entry.offset as i64 + entry.length as i64 + td_derived_offset_bias) as usize,
             ),
             None => 0_usize,
         };
@@ -413,25 +407,30 @@ impl SfntFont {
             // neither) a C2PA table, and figures out the table data bias.
             //
             // As example, see the explicit error returns when td_derived_offset_bias is the "wrong" sign.
-            match self.directory.entries.iter().find(|&stde| stde.tag == *tag) {
-                Some(stde) => {
+            match self
+                .directory
+                .entries
+                .iter()
+                .find(|&entry| entry.tag == *tag)
+            {
+                Some(entry) => {
                     // Check - if this is the C2PA table, then this *must not*
                     // be the case where we're removing the C2PA table; the
                     // bias *must not* be negative.
-                    if stde.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
+                    if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
                         return Err(Error::FontSaveError);
                     }
                     let mut neo_entry = SfntTableDirEntry::new();
-                    neo_entry.tag = stde.tag;
-                    neo_entry.offset = ((stde.offset as i64) + td_derived_offset_bias) as u32;
+                    neo_entry.tag = entry.tag;
+                    neo_entry.offset = ((entry.offset as i64) + td_derived_offset_bias) as u32;
                     neo_entry.checksum = match &tag.data {
                         b"C2PA" => table.checksum(),
                         b"head" => table.checksum(),
-                        _ => stde.checksum,
+                        _ => entry.checksum,
                     };
                     neo_entry.length = match &tag.data {
                         b"C2PA" => table.len() as u32,
-                        _ => stde.length,
+                        _ => entry.length,
                     };
                     neo_directory.entries.push(neo_entry);
                 }
@@ -462,13 +461,13 @@ impl SfntFont {
         }
         // If a 'C2PA' table is present, re-compute its directory-entry's
         // checksum...
-        if let Some(c2pa_tde) = neo_directory
+        if let Some(c2pa_entry) = neo_directory
             .entries
             .iter_mut()
-            .find(|tde| tde.tag == C2PA_TABLE_TAG)
+            .find(|entry| entry.tag == C2PA_TABLE_TAG)
         {
             if let Some(&ref c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
-                c2pa_tde.checksum = c2pa.checksum();
+                c2pa_entry.checksum = c2pa.checksum();
             } else {
                 // Code smell - keeping the directory and the tables separated.
                 return Err(Error::FontSaveError);
@@ -476,16 +475,24 @@ impl SfntFont {
         }
         // ...allowing us to re-compute the whole-font checksum, if a 'head'
         // table is present...
-        if let Some(&mut ref ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
+        //
+        // TBD - This ostensible_table two-step is just the pits:
+        // "Hey, get me the barrel from the fridge marked PICKLES,
+        //  okay thanks, now let me open it and seANCHOVIES WHY ARE THERE
+        //  ANCHOVIES WHY MUST I ALWAYS DOUBLE-CHECK THE DATATYPE OF THE THINGS
+        //  YOU ARE GIVING ME" so what we need instead of (or in addition to)
+        // BTreeMap is a kind of hash-map where each key, if present, can have
+        // a value of one specific unique data type (i.e, one of our Table
+        // enums.
+        if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
-                    head.checksumAdjustment = 0;
-                    if let Some(&mut head_tde) = neo_directory
+                    if let Some(head_entry) = neo_directory
                         .entries
                         .iter_mut()
-                        .find(|tde| tde.tag == HEAD_TABLE_TAG)
+                        .find(|entry| entry.tag == HEAD_TABLE_TAG)
                     {
-                        head_tde.checksum = head.checksum();
+                        head_entry.checksum = head.checksum();
                     }
                 }
                 _ => {
@@ -494,6 +501,38 @@ impl SfntFont {
                 }
             };
         };
+
+        // Get the checksum for the whole font, starting with the front matter...
+        let font_cksum = self.header.checksum()
+            + self.directory.checksum()
+            + self
+                .directory
+                .physical_order()
+                .iter()
+                .fold(0u32, |tables_cksum, entry| tables_cksum + entry.checksum);
+
+        // Rewrite the head table's checksumAdjustment. (This act does *not*
+        // invalidate the checksum in the TDE for the 'head' table, which is
+        // always treated as zero during check summing.
+        if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
+            match ostensible_head {
+                Table::Head(head) => {
+                    head.checksumAdjustment = HEAD_MAGIC_NUMBER - font_cksum;
+                }
+                _ => {
+                    // Tables and directory are out-of-sync
+                    return Err(Error::FontSaveError);
+                }
+            };
+        };
+
+        // TBD - Debug check - does a naive checksum of the font data yield
+        // HEAD_MAGIC_NUMBER, as it should if everything is assembled as
+        // expected?
+        //
+        // That's probably a really good idea with this early implementation,
+        // since our current test matrix is rather sparse.
+
         // ...and now, with everything in sync, we can start writing; first,
         // the header.
         neo_header.write(destination)?;
@@ -561,10 +600,12 @@ impl SfntFont {
 /// Definitions for the SFNT file header and Table Directory structures are in
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
+    /// Construct default instance
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Construct instance from given stream
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
@@ -575,6 +616,7 @@ impl SfntHeader {
         })
     }
 
+    /// Serialize this header to the given writer.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
@@ -583,7 +625,20 @@ impl SfntHeader {
         destination.write_u16::<BigEndian>(self.rangeShift)?;
         Ok(())
     }
+
+    /// Compute the checksum
+    pub fn checksum(&self) -> u32 {
+        // 0x00
+        self.sfntVersion
+            // 0x04
+            + u32::from(self.numTables) * 65536
+            + self.searchRange as u32
+            // 0x08
+            + u32::from(self.entrySelector) * 65536
+            + self.rangeShift as u32
+    }
 }
+
 impl Default for SfntHeader {
     fn default() -> Self {
         Self {
@@ -597,10 +652,12 @@ impl Default for SfntHeader {
 }
 
 impl SfntTableDirEntry {
+    /// Construct default instance
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Construct instance from given stream
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             tag: SfntTag::new_from_reader(reader)?,
@@ -618,7 +675,13 @@ impl SfntTableDirEntry {
         destination.write_u32::<BigEndian>(self.length)?;
         Ok(())
     }
+
+    /// Compute the checksum
+    pub fn checksum(&self) -> u32 {
+        u32::from_be_bytes(self.tag.data) + self.checksum + self.offset + self.length
+    }
 }
+
 impl Default for SfntTableDirEntry {
     fn default() -> Self {
         Self {
@@ -631,18 +694,25 @@ impl Default for SfntTableDirEntry {
 }
 
 /// SFNT Directory is just an array of entries. Undoubtedly there exists a
-/// more-oxidized way of just using Vec directly for this...
+/// more-oxidized way of just using Vec directly for this... but maybe we
+/// don't want to? Note the choice of Vec over BTreeMap here, which lets us
+/// keep non-compliant fonts as-is...
+///
+/// TBD - SfntTableDir or Directory, in keeping with SfntTableDirEntry?
 #[derive(Debug)]
 struct SfntDirectory {
     entries: Vec<SfntTableDirEntry>,
 }
+
 impl SfntDirectory {
+    /// Construct a new empty directory
     pub fn new() -> Result<Self> {
         Ok(Self {
             entries: Vec::new(),
         })
     }
 
+    /// Construct a directory from the given stream
     pub fn make_from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
@@ -670,6 +740,18 @@ impl SfntDirectory {
         let mut physically_ordered_entries = self.entries.clone();
         physically_ordered_entries.sort_by_key(|e| e.offset);
         physically_ordered_entries
+    }
+
+    /// Compute the checksum, which is just the sum of all our (immediately-
+    /// adjacent, four-byte-aligned) elements
+    pub fn checksum(&self) -> u32 {
+        match self.entries.is_empty() {
+            true => 0,
+            false => self
+                .entries
+                .iter()
+                .fold(0u32, |cksum, entry| cksum + entry.checksum()),
+        }
     }
 }
 
@@ -747,7 +829,6 @@ impl ChunkReader for SfntIO {
 
         // Advance to the start of the table entries
         reader.seek(SeekFrom::Start(size_of::<SfntHeader>() as u64))?;
-
         // Read in the directory, and add its chunk
         let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
         positions.push(ChunkPosition {
@@ -756,6 +837,9 @@ impl ChunkReader for SfntIO {
             name: SFNT_DIRECTORY_CHUNK_NAME.data,
             chunk_type: ChunkType::Directory,
         });
+        // TBD check for well-formed - our logic presumes it
+        // TBD v. basic check for _fundamental_ (not even spec "required") tables - like, should we insist on 'head' and 'name'?
+        // TBD consolidate the chunk-add code here
 
         // Add a chunk for each table, in directory order
         for entry in sfnt_dir.physical_order().iter() {
