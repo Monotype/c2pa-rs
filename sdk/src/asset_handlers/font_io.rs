@@ -50,7 +50,7 @@ impl SfntTag {
 
     /// Serialize this tag data to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        destination.write_all(&self.data[..])?;
+        destination.write_all(&self.data)?;
         Ok(())
     }
 }
@@ -148,7 +148,6 @@ pub fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
 
 /// Function to get low-order u32 from given u64
 #[allow(dead_code)]
-
 pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
     Wrapping((big & 0x00000000ffffffff) as u32)
 }
@@ -262,7 +261,7 @@ impl TableC2PA {
         size: usize,
     ) -> core::result::Result<TableC2PA, Error> {
         if size < size_of::<TableC2PARaw>() {
-            Err(Error::FontLoadError)?
+            Err(Error::FontLoadError)
         } else {
             let mut active_manifest_uri: Option<String> = None;
             let mut manifest_store: Option<Vec<u8>> = None;
@@ -275,7 +274,7 @@ impl TableC2PA {
                     + raw_table.activeManifestUriLength as usize
                     + raw_table.manifestStoreLength as usize
             {
-                Err(Error::FontLoadError)?
+                return Err(Error::FontLoadError);
             }
             // If a remote manifest URI is present, unpack it from the remaining
             // data in the table.
@@ -367,7 +366,8 @@ impl Default for TableC2PA {
 /// byte-swapping is needed.
 #[derive(Debug)]
 #[repr(C, packed(1))]
-// As defined by Open Font Format / OpenType (though we don't as yet directly support exotics like FIXED).
+// As defined by Open Font Format / OpenType (though we don't as yet directly
+// support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 pub struct TableHead {
     pub majorVersion: u16,
@@ -463,7 +463,6 @@ impl TableHead {
         destination.write_u16::<BigEndian>(self.unitsPerEm)?;
         destination.write_i64::<BigEndian>(self.created)?;
         destination.write_i64::<BigEndian>(self.modified)?;
-        destination.write_u16::<BigEndian>(self.unitsPerEm)?;
         destination.write_i16::<BigEndian>(self.xMin)?;
         destination.write_i16::<BigEndian>(self.yMin)?;
         destination.write_i16::<BigEndian>(self.xMax)?;
@@ -632,21 +631,4 @@ pub struct SfntTableDirEntry {
     pub checksum: u32,
     pub offset: u32,
     pub length: u32,
-}
-
-#[allow(dead_code)]
-pub fn debug_cough<T, E: std::fmt::Debug>(
-    result: std::result::Result<T, E>,
-) -> std::result::Result<T, E> {
-    match result.as_ref() {
-        Err(ref e) => {
-            //println!("cough: ERROR! {:?}", e);
-            trace!("cough: ERROR! {:?}", e);
-        }
-        Ok(_) => {
-            //println!("cough: ok");
-            trace!("cough: ok");
-        }
-    }
-    result
 }
