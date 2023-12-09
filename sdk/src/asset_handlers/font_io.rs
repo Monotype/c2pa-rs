@@ -164,7 +164,16 @@ pub struct TableC2PARaw {
     pub manifestStoreOffset: u32,
     pub manifestStoreLength: u32,
 }
+
 impl TableC2PARaw {
+    pub fn new() -> Self {
+        Self {
+            majorVersion: 0,
+            minorVersion: 1,
+            ..Default::default()
+        }
+    }
+
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             majorVersion: reader.read_u16::<BigEndian>()?,
@@ -315,7 +324,7 @@ impl TableC2PA {
     /// Serialize this C2PA table to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
-        let mut raw_table = TableC2PARaw::default();
+        let mut raw_table = TableC2PARaw::new();
         // If a remote URI is present, prepare to store it.
         if let Some(uri_string) = self.active_manifest_uri.as_ref() {
             raw_table.activeManifestUriOffset = size_of::<TableC2PARaw>() as u32;
@@ -393,76 +402,129 @@ impl TableHead {
         if size != actual_size {
             Err(Error::FontLoadError)
         } else {
-            Ok(Self {
+            let head = Ok(Self {
+                // 0x00
                 majorVersion: reader.read_u16::<BigEndian>()?,
                 minorVersion: reader.read_u16::<BigEndian>()?,
+                // 0x04
                 fontRevision: reader.read_u32::<BigEndian>()?,
+                // 0x08
                 checksumAdjustment: reader.read_u32::<BigEndian>()?,
                 // TBD - FontLoadError when head magic is bad?
                 magicNumber: reader.read_u32::<BigEndian>()?,
+                // 0x10
                 flags: reader.read_u16::<BigEndian>()?,
                 unitsPerEm: reader.read_u16::<BigEndian>()?,
+                // 0x14
                 created: reader.read_i64::<BigEndian>()?,
+                // 0x1c
                 modified: reader.read_i64::<BigEndian>()?,
+                // 0x24
                 xMin: reader.read_i16::<BigEndian>()?,
                 yMin: reader.read_i16::<BigEndian>()?,
+                // 0x28
                 xMax: reader.read_i16::<BigEndian>()?,
                 yMax: reader.read_i16::<BigEndian>()?,
+                // 0x2c
                 macStyle: reader.read_u16::<BigEndian>()?,
                 lowestRecPPEM: reader.read_u16::<BigEndian>()?,
+                // 0x30
                 fontDirectionHint: reader.read_i16::<BigEndian>()?,
                 indexToLocFormat: reader.read_i16::<BigEndian>()?,
+                // 0x34
                 glyphDataFormat: reader.read_i16::<BigEndian>()?,
-            })
+                // 0x36 - 54 bytes
+                // TBD - Two bytes of padding to get to 56/0x38. Should we
+                // seek/discard two more bytes, just to leave the stream in a
+                // known state? Be nice if we didn't have to.
+                //   1. On the one hand, whoever's invoking us could more-
+                //      efficiently mess around with the offsets and padding.
+                //   B. On the other, for the .write() code, we definitely push
+                //      the "pad *yourself* up to four, impl!" approach
+                //   III. Likewise the .checksum() code (although, because this
+                //        is a simple checksum, the matter is moot; it doesn't
+                //        matter whether we add '0_u16' to the total.
+                //   IIII. (On clocks, IIII is a permissible Roman numeral) But
+                //      what about that "simple" '.len()' call? Should it
+                //      include the two pad bytes?
+                // For now, the surrounding code doesn't care how the read
+                // stream is left, so we don't do anything, since that is simplest.
+            });
+            let _two_bytes_from_54_to_56 = reader.read_i16::<BigEndian>()?;
+            head
         }
     }
 
     /// Compute the checksum
     pub fn checksum(&self) -> Wrapping<u32> {
-        // ?? How to step over checksumAdjustment without mutating?
-        //pub majorVersion: u16,
-        //pub minorVersion: u16,
+        // 0x00
         u32_from_u16_pair(self.majorVersion, self.minorVersion)
+            // 0x04
             + Wrapping(self.fontRevision)
+            // 0x08
             + Wrapping(self.checksumAdjustment)
             + Wrapping(self.magicNumber)
+            // 0x10
             + u32_from_u16_pair(self.flags, self.unitsPerEm)
+            // 0x14
             + u32_from_u64_hi(self.created as u64)
             + u32_from_u64_lo(self.created as u64)
+            // 0x1c
             + u32_from_u64_hi(self.modified as u64)
             + u32_from_u64_lo(self.modified as u64)
+            // 0x24
             + u32_from_u16_pair(self.xMin as u16, self.yMin as u16)
+            // 0x28
             + u32_from_u16_pair(self.xMax as u16, self.yMax as u16)
+            // 0x2c
             + u32_from_u16_pair(self.macStyle, self.lowestRecPPEM)
+            // 0x30
             + u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16)
-            + u32_from_u16_pair(self.glyphDataFormat as u16, 0)
+            // 0x34
+            + u32_from_u16_pair(self.glyphDataFormat as u16, 0_u16/*padpad*/)
+        // 0x38
     }
 
     /// Size of this table if it were serialized right now
     pub fn len(&self) -> usize {
+        // TBD - Is this called? Should it include the pad?
         size_of::<Self>()
     }
 
     /// Serialize this head table to the given writer.
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+        // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
+        // 0x04
         destination.write_u32::<BigEndian>(self.fontRevision)?;
+        // 0x08
         destination.write_u32::<BigEndian>(self.checksumAdjustment)?;
         destination.write_u32::<BigEndian>(self.magicNumber)?;
+        // 0x10
         destination.write_u16::<BigEndian>(self.flags)?;
         destination.write_u16::<BigEndian>(self.unitsPerEm)?;
+        // 0x14
         destination.write_i64::<BigEndian>(self.created)?;
+        // 0x1c
         destination.write_i64::<BigEndian>(self.modified)?;
+        // 0x24
         destination.write_i16::<BigEndian>(self.xMin)?;
         destination.write_i16::<BigEndian>(self.yMin)?;
+        // 0x28
         destination.write_i16::<BigEndian>(self.xMax)?;
         destination.write_i16::<BigEndian>(self.yMax)?;
+        // 0x2c
         destination.write_u16::<BigEndian>(self.macStyle)?;
         destination.write_u16::<BigEndian>(self.lowestRecPPEM)?;
+        // 0x30
         destination.write_i16::<BigEndian>(self.fontDirectionHint)?;
         destination.write_i16::<BigEndian>(self.indexToLocFormat)?;
+        // 0x34
         destination.write_i16::<BigEndian>(self.glyphDataFormat)?;
+        // 0x36
+        destination.write_u16::<BigEndian>(0_u16)?;
+        // 0x38 - two bytes to get 54-byte 'head' up to nice round 56 bytes
         Ok(())
     }
 }
