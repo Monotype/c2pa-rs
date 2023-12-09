@@ -336,7 +336,7 @@ impl SfntFont {
 
     /// Writes out this font file.
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        let mut neo_header = SfntHeader::new();
+        let mut neo_header = SfntHeader::default();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
         neo_header.sfntVersion = self.header.sfntVersion;
@@ -418,7 +418,7 @@ impl SfntFont {
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
                         return Err(Error::FontSaveError);
                     }
-                    let mut neo_entry = SfntTableDirEntry::new();
+                    let mut neo_entry = SfntTableDirEntry::default();
                     neo_entry.tag = entry.tag;
                     neo_entry.offset = ((entry.offset as i64) + td_derived_offset_bias) as u32;
                     neo_entry.checksum = match *tag {
@@ -439,7 +439,7 @@ impl SfntFont {
                         if td_derived_offset_bias <= 0 {
                             return Err(Error::FontSaveError);
                         }
-                        let mut neo_entry = SfntTableDirEntry::new();
+                        let mut neo_entry = SfntTableDirEntry::default();
                         neo_entry.tag = *tag;
                         neo_entry.offset = round_up_to_four(new_data_offset) as u32;
                         neo_entry.checksum = table.checksum().0;
@@ -602,11 +602,6 @@ impl SfntFont {
 /// Definitions for the SFNT file header and Table Directory structures are in
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
-    /// Construct default instance
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Construct instance from given stream
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -652,11 +647,6 @@ impl Default for SfntHeader {
 }
 
 impl SfntTableDirEntry {
-    /// Construct default instance
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Construct instance from given stream
     pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -810,8 +800,8 @@ impl ChunkReader for SfntIO {
         &self,
         reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
+        // Rewind to start and read the SFNT header
         reader.rewind()?;
-        // SfntHeader
         let sfnt_hdr = SfntHeader::new_from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety
