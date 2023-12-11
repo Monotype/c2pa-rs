@@ -521,7 +521,7 @@ impl SfntFont {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
-                    head.checksumAdjustment = (Wrapping(HEAD_MAGIC_NUMBER) - font_cksum).0;
+                    head.checksumAdjustment = (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum).0;
                 }
                 _ => {
                     // Tables and directory are out-of-sync

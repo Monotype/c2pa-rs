@@ -110,8 +110,12 @@ pub const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
 pub const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
 
 /// Spec-mandated value for 'head'::magicNumber
+pub const HEAD_TABLE_MAGICNUMBER: u32 = 0x5f0f3cf5;
+
+/// The 'head' table's checksumAdjustment value should be such that the whole-
+/// font checksum comes out to this value.
 #[allow(dead_code)]
-pub const HEAD_MAGIC_NUMBER: u32 = 0xb1b0afba;
+pub const SFNT_EXPECTED_CHECKSUM: u32 = 0xb1b0afba;
 
 /// Used to attempt conversion from u32 to a Magic value.
 impl TryFrom<u32> for Magic {
@@ -269,7 +273,7 @@ impl TableC2PA {
         size: usize,
     ) -> core::result::Result<TableC2PA, Error> {
         if size < size_of::<TableC2PARaw>() {
-            Err(Error::FontLoadError)
+            Err(Error::FontLoadC2PATableTruncated)
         } else {
             let mut active_manifest_uri: Option<String> = None;
             let mut manifest_store: Option<Vec<u8>> = None;
@@ -282,7 +286,7 @@ impl TableC2PA {
                     + raw_table.activeManifestUriLength as usize
                     + raw_table.manifestStoreLength as usize
             {
-                return Err(Error::FontLoadError);
+                return Err(Error::FontLoadC2PATableTruncated);
             }
             // If a remote manifest URI is present, unpack it from the remaining
             // data in the table.
@@ -294,7 +298,7 @@ impl TableC2PA {
                 reader.read_exact(&mut uri_bytes)?;
                 active_manifest_uri = Some(
                     from_utf8(&uri_bytes)
-                        .map_err(|_e| Error::FontLoadError)?
+                        .map_err(|_e| Error::FontLoadC2PATableInvalidUtf8)?
                         .to_string(),
                 );
             }
@@ -400,9 +404,9 @@ impl TableHead {
         reader.seek(SeekFrom::Start(offset))?;
         let actual_size = size_of::<TableHead>();
         if size != actual_size {
-            Err(Error::FontLoadError)
+            Err(Error::FontLoadHeadTableBadMissing)
         } else {
-            let head = Ok(Self {
+            let head = Self {
                 // 0x00
                 majorVersion: reader.read_u16::<BigEndian>()?,
                 minorVersion: reader.read_u16::<BigEndian>()?,
@@ -410,7 +414,7 @@ impl TableHead {
                 fontRevision: reader.read_u32::<BigEndian>()?,
                 // 0x08
                 checksumAdjustment: reader.read_u32::<BigEndian>()?,
-                // TBD - FontLoadError when head magic is bad?
+                // 0x0c
                 magicNumber: reader.read_u32::<BigEndian>()?,
                 // 0x10
                 flags: reader.read_u16::<BigEndian>()?,
@@ -449,9 +453,12 @@ impl TableHead {
                 //      include the two pad bytes?
                 // For now, the surrounding code doesn't care how the read
                 // stream is left, so we don't do anything, since that is simplest.
-            });
+            };
             let _two_bytes_from_54_to_56 = reader.read_i16::<BigEndian>()?;
-            head
+            if head.magicNumber != HEAD_TABLE_MAGICNUMBER {
+                return Err(Error::FontLoadHeadTableBadMissing);
+            }
+            Ok(head)
         }
     }
 
