@@ -24,6 +24,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use crate::error::{Error, Result};
 
 /// Types for supporting fonts in any container.
+
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SfntTag {
@@ -32,13 +33,29 @@ pub struct SfntTag {
 
 #[allow(dead_code)] // TBD - Is creating some UTs sufficient to quicken/animate this code?
 impl SfntTag {
-    /// Construct a new SfntTag with the given value.
+    /// Constructs a new instance with the given value.
+    ///
+    /// ### Parameters
+    ///
+    /// - `source_data` - Array of four (4) bytes to convert to a TableTag.
+    ///
+    /// ### Returns
+    ///
+    /// A new instance.
     pub fn new(source_data: [u8; 4]) -> Self {
         Self { data: source_data }
     }
 
-    /// Read a new SfntTag from the given source.
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    /// Reads a new instance from the given source.
+    ///
+    /// ### Parameters
+    ///
+    /// - `reader` - Input stream
+    ///
+    /// ### Returns
+    ///
+    /// Result containing an instance.
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self::new([
             reader.read_u8()?,
             reader.read_u8()?,
@@ -47,7 +64,15 @@ impl SfntTag {
         ]))
     }
 
-    /// Serialize this tag data to the given writer.
+    /// Serializes this tag data to the given writer.
+    ///
+    /// ### Parameters
+    ///
+    /// - `destination` - Output stream
+    ///
+    /// ### Returns
+    ///
+    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data)?;
         Ok(())
@@ -74,7 +99,21 @@ impl std::fmt::Debug for SfntTag {
     }
 }
 
-/// Font storage frequently requires padding things to four-byte boundaries.
+/// Round the given value up to the next multiple of four (4).
+///
+/// ### Parameters
+///
+/// - `size` - Value to round
+///
+/// ### Examples
+///
+/// ```ignore
+/// // Cannot work as written because font_io is private.
+/// use c2pa::asset_handlers::font_io::round_up_to_four;
+/// let forties = (round_up_to_four(36), round_up_to_four(37));
+/// assert_eq!(forties.0, 36);
+/// assert_eq!(forties.1, 40);
+/// ```
 pub fn round_up_to_four(size: usize) -> usize {
     (size + 3) & (!3)
 }
@@ -121,7 +160,15 @@ pub const SFNT_EXPECTED_CHECKSUM: u32 = 0xb1b0afba;
 impl TryFrom<u32> for Magic {
     type Error = crate::error::Error;
 
-    /// Tries to convert from u32 to a valid font version.
+    /// Try to match the given u32 value to a known font-format magic number.
+    ///
+    /// ### Parameters
+    ///
+    /// - `v` - Value to inspect.
+    ///
+    /// ### Returns
+    ///
+    /// Result containing a `Magic` value, or error if no match.
     fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
         match v {
             ot if ot == Magic::OpenType as u32 => Ok(Magic::OpenType),
@@ -135,27 +182,80 @@ impl TryFrom<u32> for Magic {
     }
 }
 
-/// Function to assemble two u16s into a u32 - useful for check summing
-// TBD - Supposedly the bytemuck crate, already in this project, can help us
-// with stuff like this.
+/// Assembles two u16 values into a u32.
+///
+/// ### Parameters
+///
+/// - `hi` - More-significant u16 halfword
+/// - `lo` - Less-significant u16 halfword
+///
+/// ### Returns
+///
+/// u32 fullword composed of the given halfwords, with `hi` in the more-
+/// significant position.
+///
+/// ### Examples
+///
+/// ```ignore
+/// // Cannot work as written because font_io is private.
+/// use c2pa::asset_handlers::font_io::u32_from_u16_pair;
+/// let full_word = u32_from_u16_pair(0x1234, 0x5678);
+/// assert_eq!(full_word, 0x12345678);
+/// ```
 #[allow(dead_code)]
 pub fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
+    // TBD - Supposedly the bytemuck crate, already in this project, can help us
+    // with stuff like this.
     Wrapping((hi as u32 * 65536) + lo as u32)
 }
 
-/// Function to get high-order u32 from given u64
+/// Gets the high-order the u32 from given u64
+///
+/// ### Parameters
+///
+/// - `big` - Unsigned 64-bit integer
+///
+/// ### Returns
+///
+/// u32 fullword extracted from the more-significant 32 bits of the given value.
+///
+/// ### Examples
+///
+/// ```ignore
+/// // Cannot work as written because font_io is private.
+/// use c2pa::asset_handlers::font_io::u32_from_u64_hi;
+/// let hi_word = u32_from_u64_hi(0x123456789abcdef0);
+/// assert_eq!(hi_word, 0x12345678);
+/// ```
 #[allow(dead_code)]
 pub fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
     Wrapping(((big & 0xffffffff00000000) >> 32) as u32)
 }
 
-/// Function to get low-order u32 from given u64
+/// Gets the low-order u32 from the given u64
+///
+/// ### Parameters
+///
+/// - `big` - Unsigned 64-bit integer
+///
+/// ### Returns
+///
+/// u32 fullword extracted from the less-significant 32 bits of the given value.
+///
+/// ### Examples
+///
+/// ```ignore
+/// // Cannot work as written because font_io is private.
+/// use c2pa::asset_handlers::font_io::u32_from_u64_lo;
+/// let lo_word = u32_from_u64_lo(0x123456789abcdef0);
+/// assert_eq!(lo_word, 0x9abcdef0);
+/// ```
 #[allow(dead_code)]
 pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
     Wrapping((big & 0x00000000ffffffff) as u32)
 }
 
-/// 'C2PA' font table - in storage
+/// 'C2PA' font table as it appears in storage
 #[derive(Debug, Default)]
 #[repr(C, packed(4))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
@@ -170,6 +270,11 @@ pub struct TableC2PARaw {
 }
 
 impl TableC2PARaw {
+    /// Constructs a new, empty, instance.
+    ///
+    /// ### Returns
+    ///
+    /// A new instance.
     pub fn new() -> Self {
         Self {
             majorVersion: 0,
@@ -178,7 +283,16 @@ impl TableC2PARaw {
         }
     }
 
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    /// Reads a new instance from the given source.
+    ///
+    /// ### Parameters
+    ///
+    /// - `reader` - Input stream
+    ///
+    /// ### Returns
+    ///
+    /// Result containing an instance.
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             majorVersion: reader.read_u16::<BigEndian>()?,
             minorVersion: reader.read_u16::<BigEndian>()?,
@@ -190,6 +304,16 @@ impl TableC2PARaw {
         })
     }
 
+    /// Serializes this instance to the given writer.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    /// - `destination` - Output stream
+    ///
+    /// ### Returns
+    ///
+    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -202,7 +326,7 @@ impl TableC2PARaw {
     }
 }
 
-/// 'C2PA' font table - after loading from storage
+/// 'C2PA' font table, fully loaded.
 #[derive(Clone, Debug)]
 pub struct TableC2PA {
     /// Major version of the C2PA table record
@@ -216,7 +340,11 @@ pub struct TableC2PA {
 }
 
 impl TableC2PA {
-    /// Creates a new C2PA table with the given values.
+    /// Constructs a new, empty, instance.
+    ///
+    /// ### Returns
+    ///
+    /// A new instance.
     pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
         Self {
             active_manifest_uri,
@@ -225,35 +353,33 @@ impl TableC2PA {
         }
     }
 
-    /// Create the checksum for this table
+    /// Computes the checksum for this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Wrapping<u32> with the checksum.
     pub fn checksum(&self) -> Wrapping<u32> {
-        // // Serialize self to a throwaway stream
-        // let mut stream = Cursor::new(Vec::new());
-        // match self.write(&mut stream) {
-        //     Ok(()) => (),
-        //     Err(error) => return Err(error),
-        // }
-        // // Compute checksum of stream
-        // stream.seek(SeekFrom::Start(0)).unwrap();
-        // let mut cksum: u32 = 0;
-        // while stream.get_ref().len() > 4 {
-        //     let ckword: u32 = stream.read_u32::<BigEndian>()?;
-        //     cksum += ckword;
-        // }
-        // if stream.get_ref().len() > 0 {
-        //     let mut ckfrag: u32 = 0;
-        //     let mut factor: u32 = 256 * 256 * 256;
-        //     while stream.get_ref().len() > 0 {
-        //         let ckbyte = stream.read_u8()?;
-        //         ckfrag += ckbyte as u32 * factor;
-        //         factor /= 256;
-        //     }
-        //     cksum += ckfrag;
-        // }
+        // TBD:
+        // 1. Set up TableC2PARaw
+        // 2. Checksum it.
+        // 3. Checksum the URI data.
+        // 4. Checksum the manifest data.
         Wrapping(0x12345678)
     }
 
-    /// Size of this table if it were serialized right now
+    /// Returns the total length in bytes of this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Total size of table data, in bytes.
     pub fn len(&self) -> usize {
         size_of::<TableC2PARaw>()
             + match &self.active_manifest_uri {
@@ -266,8 +392,18 @@ impl TableC2PA {
             }
     }
 
-    /// Creates a new C2PA table from the given stream.
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
+    /// Reads a new instance from the given source.
+    ///
+    /// ### Parameters
+    ///
+    /// - `reader` - Input stream
+    /// - `offset` - Position in stream where the table begins
+    /// - `size`   - Size of the table in bytes.
+    ///
+    /// ### Returns
+    ///
+    /// Result containing an instance.
+    pub fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -279,7 +415,7 @@ impl TableC2PA {
             let mut manifest_store: Option<Vec<u8>> = None;
             // Read the initial fixed-sized portion of the table
             reader.seek(SeekFrom::Start(offset))?;
-            let raw_table = TableC2PARaw::new_from_reader(reader)?;
+            let raw_table = TableC2PARaw::from_reader(reader)?;
             // Check parameters
             if size
                 < size_of::<TableC2PARaw>()
@@ -321,11 +457,28 @@ impl TableC2PA {
     }
 
     /// Get the manifest store data if available
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Optional u8 array with the data, if present.
     pub fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
 
-    /// Serialize this C2PA table to the given writer.
+    /// Serializes this instance to the given writer.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    /// - `destination` - Output stream
+    ///
+    /// ### Returns
+    ///
+    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let mut raw_table = TableC2PARaw::new();
@@ -395,8 +548,18 @@ pub struct TableHead {
 }
 
 impl TableHead {
-    /// Creates a `head` table from the given stream.
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
+    /// Reads a new instance from the given source.
+    ///
+    /// ### Parameters
+    ///
+    /// - `reader` - Input stream
+    /// - `offset` - Position in stream where the table begins
+    /// - `size`   - Size of the table in bytes.
+    ///
+    /// ### Returns
+    ///
+    /// Result containing an instance.
+    pub fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -462,7 +625,15 @@ impl TableHead {
         }
     }
 
-    /// Compute the checksum
+    /// Computes the checksum for this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Wrapping<u32> with the checksum.
     pub fn checksum(&self) -> Wrapping<u32> {
         // 0x00
         u32_from_u16_pair(self.majorVersion, self.minorVersion)
@@ -492,13 +663,30 @@ impl TableHead {
         // 0x38
     }
 
-    /// Size of this table if it were serialized right now
+    /// Returns the total length in bytes of this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Total size of table data, in bytes.
     pub fn len(&self) -> usize {
-        // TBD - Is this called? Should it include the pad?
+        // TBD - Is this called?
         size_of::<Self>()
     }
 
-    /// Serialize this head table to the given writer.
+    /// Serializes this instance to the given writer.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    /// - `destination` - Output stream
+    ///
+    /// ### Returns
+    ///
+    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
@@ -544,8 +732,18 @@ pub struct TableUnspecified {
 
 /// Any font table.
 impl TableUnspecified {
-    /// Creates an unspecified table from the given stream.
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
+    /// Reads a new instance from the given source.
+    ///
+    /// ### Parameters
+    ///
+    /// - `reader` - Input stream
+    /// - `offset` - Position in stream where the table begins
+    /// - `size`   - Size of the table in bytes.
+    ///
+    /// ### Returns
+    ///
+    /// Result containing an instance.
+    pub fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -558,19 +756,44 @@ impl TableUnspecified {
         })
     }
 
-    /// Compute the checksum
+    /// Computes the checksum for this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Wrapping<u32> with the checksum.
     pub fn checksum(&self) -> Wrapping<u32> {
         // TBD - this should never be called though - we only need to alter C2PA
         // and head - should we panic!(), or just implement?
         Wrapping(0x19283746)
     }
 
-    /// Size of this table if it were serialized right now
+    /// Returns the total length in bytes of this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Total size of table data, in bytes.
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    /// Serialize this table data to the given writer.
+    /// Serializes this instance to the given writer.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    /// - `destination` - Output stream
+    ///
+    /// ### Returns
+    ///
+    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
@@ -600,19 +823,37 @@ pub enum Table {
 // TBD - This looks sort of like the CRTP from C++; do we want a Trait here
 // that *both* table *and* its value-types implement?
 impl Table {
-    pub fn len(&self) -> usize {
-        match self {
-            Table::C2PA(c2pa) => c2pa.len(),
-            Table::Head(head) => head.len(),
-            Table::Unspecified(un) => un.len(),
-        }
-    }
-
+    /// Computes the checksum for this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Wrapping<u32> with the checksum.
     pub fn checksum(&self) -> Wrapping<u32> {
         match self {
             Table::C2PA(c2pa) => c2pa.checksum(),
             Table::Head(head) => head.checksum(),
             Table::Unspecified(un) => un.checksum(),
+        }
+    }
+
+    /// Returns the total length in bytes of this table.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Total size of table data, in bytes.
+    pub fn len(&self) -> usize {
+        match self {
+            Table::C2PA(c2pa) => c2pa.len(),
+            Table::Head(head) => head.len(),
+            Table::Unspecified(un) => un.len(),
         }
     }
 }

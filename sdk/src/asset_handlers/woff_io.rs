@@ -316,14 +316,14 @@ struct WoffFont {
 
 impl WoffFont {
     /// Reads in a WOFF 1 font file from the given stream.
-    fn make_from_reader<T: Read + Seek + ?Sized>(
+    fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
     ) -> core::result::Result<WoffFont, Error> {
         // Read in the WOFFHeader
-        let woff_hdr = WoffHeader::new_from_reader(reader)?;
+        let woff_hdr = WoffHeader::from_reader(reader)?;
 
         // After the header should be the directory.
-        let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
+        let woff_dir = WoffDirectory::from_reader(reader, woff_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
         let mut woff_tables = BTreeMap::new();
@@ -335,15 +335,9 @@ impl WoffFont {
             // Create a table instance for it.
             let table: Table = {
                 match entry.tag {
-                    C2PA_TABLE_TAG => {
-                        Table::C2PA(TableC2PA::make_from_reader(reader, offset, size)?)
-                    }
-                    HEAD_TABLE_TAG => {
-                        Table::Head(TableHead::make_from_reader(reader, offset, size)?)
-                    }
-                    _ => Table::Unspecified(TableUnspecified::make_from_reader(
-                        reader, offset, size,
-                    )?),
+                    C2PA_TABLE_TAG => Table::C2PA(TableC2PA::from_reader(reader, offset, size)?),
+                    HEAD_TABLE_TAG => Table::Head(TableHead::from_reader(reader, offset, size)?),
+                    _ => Table::Unspecified(TableUnspecified::from_reader(reader, offset, size)?),
                 }
             };
             // Tell it to get in the van
@@ -352,7 +346,7 @@ impl WoffFont {
 
         // Get the XML metadata if present
         let woff_meta = if woff_hdr.metaLength > 0 {
-            Some(TableUnspecified::make_from_reader(
+            Some(TableUnspecified::from_reader(
                 reader,
                 woff_hdr.metaOffset as u64,
                 woff_hdr.metaOrigLength as usize,
@@ -363,7 +357,7 @@ impl WoffFont {
 
         // Get the private data if present
         let woff_private = if woff_hdr.privLength > 0 {
-            Some(TableUnspecified::make_from_reader(
+            Some(TableUnspecified::from_reader(
                 reader,
                 woff_hdr.privOffset as u64,
                 woff_hdr.privLength as usize,
@@ -515,7 +509,7 @@ struct WoffHeader {
 }
 
 impl WoffHeader {
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             signature: reader.read_u32::<BigEndian>()?,
             flavor: reader.read_u32::<BigEndian>()?,
@@ -582,9 +576,9 @@ struct WoffTableDirEntry {
     origChecksum: u32,
 }
 impl WoffTableDirEntry {
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: SfntTag::new_from_reader(reader)?,
+            tag: SfntTag::from_reader(reader)?,
             offset: reader.read_u32::<BigEndian>()?,
             compLength: reader.read_u32::<BigEndian>()?,
             origLength: reader.read_u32::<BigEndian>()?,
@@ -616,7 +610,7 @@ impl WoffDirectory {
         })
     }
 
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
+    pub fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
     ) -> Result<Self> {
@@ -624,7 +618,7 @@ impl WoffDirectory {
         for _entry in 0..entry_count {
             the_directory
                 .entries
-                .push(WoffTableDirEntry::new_from_reader(reader)?);
+                .push(WoffTableDirEntry::from_reader(reader)?);
         }
         Ok(the_directory)
     }
@@ -713,12 +707,12 @@ impl ChunkReader for WoffIO {
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
         reader.rewind()?;
         // WOFFHeader
-        let woff_hdr = WoffHeader::new_from_reader(reader)?;
+        let woff_hdr = WoffHeader::from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety
         // check).
         //
-        // TBD - Push this into WoffHeader::new_from_reader
+        // TBD - Push this into WoffHeader::from_reader
         let _font_magic: Magic =
             <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
                 .map_err(|_err| Error::UnsupportedFontError)?;
@@ -735,7 +729,7 @@ impl ChunkReader for WoffIO {
         reader.seek(SeekFrom::Start(size_of::<WoffHeader>() as u64))?;
 
         // Read in the directory, and add its chunk
-        let woff_dir = WoffDirectory::make_from_reader(reader, woff_hdr.numTables as usize)?;
+        let woff_dir = WoffDirectory::from_reader(reader, woff_hdr.numTables as usize)?;
         positions.push(ChunkPosition {
             offset: size_of::<WoffHeader>() as u64,
             length: woff_hdr.numTables as u32 * size_of::<WoffTableDirEntry>() as u32,
@@ -814,7 +808,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -873,7 +867,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -924,7 +918,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = WoffFont::make_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -1035,7 +1029,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1066,7 +1060,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = WoffFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1213,7 +1207,7 @@ where
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let woff = WoffFont::make_from_reader(reader).map_err(|_| Error::FontLoadError)?;
+    let woff = WoffFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
         None => None,
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {

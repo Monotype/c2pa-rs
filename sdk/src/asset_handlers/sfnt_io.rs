@@ -62,7 +62,7 @@ mod font_xmp_support {
 
     /// Creates a default `XmpMeta` object for fonts
     ///
-    /// ### Arguments
+    /// ### Parameters
     ///
     /// - `document_id` - optional unique identifier for the document
     /// - `instance_id` - optional unique identifier for the instance
@@ -242,7 +242,7 @@ impl TempFile {
     /// Creates a new temporary file within the `env::temp_dir()` directory,
     /// which should be deleted once the object is dropped.
     ///
-    /// ## Arguments
+    /// ### Parameters
     ///
     /// * `base_name` - Base name to use for the temporary file name
     pub fn new(base_name: &Path) -> Result<Self> {
@@ -292,14 +292,14 @@ struct SfntFont {
 
 impl SfntFont {
     /// Reads in an SFNT file from the given stream.
-    fn make_from_reader<T: Read + Seek + ?Sized>(
+    fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
     ) -> core::result::Result<SfntFont, Error> {
         // Read in the SfntHeader
-        let sfnt_hdr = SfntHeader::new_from_reader(reader)?;
+        let sfnt_hdr = SfntHeader::from_reader(reader)?;
 
         // After the header should be the directory.
-        let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
+        let sfnt_dir = SfntDirectory::from_reader(reader, sfnt_hdr.numTables as usize)?;
 
         // With that, we can construct the tables
         let mut sfnt_tables = BTreeMap::new();
@@ -311,15 +311,9 @@ impl SfntFont {
             // Create a table instance for it.
             let table: Table = {
                 match entry.tag {
-                    C2PA_TABLE_TAG => {
-                        Table::C2PA(TableC2PA::make_from_reader(reader, offset, size)?)
-                    }
-                    HEAD_TABLE_TAG => {
-                        Table::Head(TableHead::make_from_reader(reader, offset, size)?)
-                    }
-                    _ => Table::Unspecified(TableUnspecified::make_from_reader(
-                        reader, offset, size,
-                    )?),
+                    C2PA_TABLE_TAG => Table::C2PA(TableC2PA::from_reader(reader, offset, size)?),
+                    HEAD_TABLE_TAG => Table::Head(TableHead::from_reader(reader, offset, size)?),
+                    _ => Table::Unspecified(TableUnspecified::from_reader(reader, offset, size)?),
                 }
             };
             // Tell it to get in the van
@@ -605,7 +599,7 @@ impl SfntFont {
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
     /// Construct instance from given stream
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -650,9 +644,9 @@ impl Default for SfntHeader {
 
 impl SfntTableDirEntry {
     /// Construct instance from given stream
-    pub fn new_from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
-            tag: SfntTag::new_from_reader(reader)?,
+            tag: SfntTag::from_reader(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
             offset: reader.read_u32::<BigEndian>()?,
             length: reader.read_u32::<BigEndian>()?,
@@ -708,7 +702,7 @@ impl SfntDirectory {
     }
 
     /// Construct a directory from the given stream
-    pub fn make_from_reader<T: Read + Seek + ?Sized>(
+    pub fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
     ) -> Result<Self> {
@@ -716,7 +710,7 @@ impl SfntDirectory {
         for _entry in 0..entry_count {
             the_directory
                 .entries
-                .push(SfntTableDirEntry::new_from_reader(reader)?);
+                .push(SfntTableDirEntry::from_reader(reader)?);
         }
         Ok(the_directory)
     }
@@ -783,10 +777,10 @@ pub trait ChunkReader {
     type Error;
     /// Gets a collection of positions of chunks within the font.
     ///
-    /// ## Arguments
+    /// ### Parameters
     /// * `reader` - Source stream to read data from
     ///
-    /// ## Returns
+    /// ### Returns
     /// A collection of positions/offsets and length to omit from hashing.
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
@@ -804,12 +798,12 @@ impl ChunkReader for SfntIO {
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
         // Rewind to start and read the SFNT header
         reader.rewind()?;
-        let sfnt_hdr = SfntHeader::new_from_reader(reader)?;
+        let sfnt_hdr = SfntHeader::from_reader(reader)?;
         // Verify the font has a valid version in it before assuming the rest is
         // valid (NOTE: we don't actually do anything with it, just as a safety
         // check).
         //
-        // TBD - Push this into SfntHeader::new_from_reader
+        // TBD - Push this into SfntHeader::from_reader
         let _font_magic: Magic =
             <u32 as std::convert::TryInto<Magic>>::try_into(sfnt_hdr.sfntVersion)
                 .map_err(|_err| Error::UnsupportedFontError)?;
@@ -825,7 +819,7 @@ impl ChunkReader for SfntIO {
         // Advance to the start of the table entries
         reader.seek(SeekFrom::Start(size_of::<SfntHeader>() as u64))?;
         // Read in the directory, and add its chunk
-        let sfnt_dir = SfntDirectory::make_from_reader(reader, sfnt_hdr.numTables as usize)?;
+        let sfnt_dir = SfntDirectory::from_reader(reader, sfnt_hdr.numTables as usize)?;
         positions.push(ChunkPosition {
             offset: size_of::<SfntHeader>() as u64,
             length: sfnt_hdr.numTables as u32 * size_of::<SfntTableDirEntry>() as u32,
@@ -859,7 +853,7 @@ impl ChunkReader for SfntIO {
 
 /// Adds C2PA manifest store data to a font file
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `font_path` - Path to a font file
 /// * `manifest_store_data` - C2PA manifest store data to add to the font file
@@ -872,7 +866,7 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 
 /// Adds C2PA manifest store data to a font stream
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `source` - Source stream to read initial data from
 /// * `destination` - Destination stream to write C2PA manifest store data
@@ -887,7 +881,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -918,7 +912,7 @@ where
 
 /// Adds the manifest URI reference to the font at the given path.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `font_path` - Path to a font file
 /// * `manifest_uri` - Reference URI to a manifest store
@@ -932,7 +926,7 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 
 /// Adds the specified reference to the font.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `source` - Source stream to read initial data from
 /// * `destination` - Destination stream to write data with new reference
@@ -947,7 +941,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -999,7 +993,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = SfntFont::make_from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -1013,11 +1007,11 @@ where
 
 /// Opens a BufReader for the given file path
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `file_path` - Valid path to a file to open in a buffer reader
 ///
-/// ## Returns
+/// ### Returns
 ///
 /// A BufReader<File> object
 fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
@@ -1027,7 +1021,7 @@ fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
 
 /// Processes a font file using a streams to process.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `font_path` - Path to the font file to process
 /// * `callback` - Method to process the stream
@@ -1047,11 +1041,11 @@ fn process_file_with_streams(
 
 /// Reads the C2PA manifest store reference from the font file.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `font_path` - File path to the font file to read reference from.
 ///
-/// ## Returns
+/// ### Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
@@ -1062,11 +1056,11 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 
 /// Reads the C2PA manifest store reference from the stream.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `source` - Source font stream to read reference from.
 ///
-/// ## Returns
+/// ### Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
@@ -1082,7 +1076,7 @@ where
 
 /// Remove the `C2PA` font table from the font file.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `font_path` - path to the font file to remove C2PA from
 fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
@@ -1095,7 +1089,7 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// Remove the `C2PA` font table from the font data stream, writing to the
 /// destination.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `source` - Source data stream containing font data
 /// * `destination` - Destination data stream to write new font data with the
@@ -1110,7 +1104,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1122,13 +1116,13 @@ where
 /// Removes the reference to the active manifest from the source stream, writing
 /// to the destination.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `source` - Source data stream containing font data
 /// * `destination` - Destination data stream to write new font data with the
 ///                   active manifest reference removed
 ///
-/// ## Returns
+/// ### Returns
 ///
 /// The active manifest URI reference that was removed, if there was one
 #[allow(dead_code)]
@@ -1141,7 +1135,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::make_from_reader(source).map_err(|_| Error::FontLoadError)?;
+    let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1172,11 +1166,11 @@ where
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `reader` - Reader object used to read object locations from
 ///
-/// ## Returns
+/// ### Returns
 ///
 /// A collection of positions/offsets and length to omit from hashing.
 fn get_object_locations_from_stream<T>(
@@ -1281,15 +1275,15 @@ where
 
 /// Reads the `C2PA` font table from the data stream
 ///
-/// ## Arguments
+/// ### Parameters
 ///
 /// * `reader` - data stream reader to read font data from
 ///
-/// ## Returns
+/// ### Returns
 ///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let sfnt = SfntFont::make_from_reader(reader).map_err(|_| Error::FontLoadError)?;
+    let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match sfnt.tables.get(&C2PA_TABLE_TAG) {
         None => None,
         Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
