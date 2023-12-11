@@ -260,12 +260,23 @@ pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
 #[repr(C, packed(4))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 pub struct TableC2PARaw {
+    /// Specifies the major version of the C2PA font table.
     pub majorVersion: u16,
+    /// Specifies the minor version of the C2PA font table.
     pub minorVersion: u16,
+    /// Offset from the beginning of the C2PA font table to the section
+    /// containing a URI to the active manifest. If a URI is not provided a
+    /// NULL offset = 0x0000 should be used.
     pub activeManifestUriOffset: u32,
+    /// Length of URI in bytes.
     pub activeManifestUriLength: u16,
+    /// Reserved for future use.
     pub reserved: u16,
+    /// Offset from the beginning of the C2PA font table to the section
+    /// containing a C2PA Manifest Store. If a Manifest Store is not provided a
+    /// NULL offset = 0x0000 should be used.
     pub manifestStoreOffset: u32,
+    /// Length of the C2PA Manifest Store data in bytes.
     pub manifestStoreLength: u32,
 }
 
@@ -617,7 +628,6 @@ impl TableHead {
                 // For now, the surrounding code doesn't care how the read
                 // stream is left, so we don't do anything, since that is simplest.
             };
-            let _two_bytes_from_54_to_56 = reader.read_i16::<BigEndian>()?;
             if head.magicNumber != HEAD_TABLE_MAGICNUMBER {
                 return Err(Error::FontLoadHeadTableBadMissing);
             }
