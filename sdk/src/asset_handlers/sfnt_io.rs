@@ -418,17 +418,18 @@ impl SfntFont {
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
                         return Err(Error::FontSaveError);
                     }
-                    let mut neo_entry = SfntTableDirEntry::default();
-                    neo_entry.tag = entry.tag;
-                    neo_entry.offset = ((entry.offset as i64) + td_derived_offset_bias) as u32;
-                    neo_entry.checksum = match *tag {
-                        C2PA_TABLE_TAG => table.checksum().0,
-                        HEAD_TABLE_TAG => table.checksum().0,
-                        _ => entry.checksum,
-                    };
-                    neo_entry.length = match tag {
-                        &C2PA_TABLE_TAG => table.len() as u32,
-                        _ => entry.length,
+                    let neo_entry = SfntTableDirEntry {
+                        tag: entry.tag,
+                        offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
+                        checksum: match *tag {
+                            C2PA_TABLE_TAG => table.checksum().0,
+                            HEAD_TABLE_TAG => table.checksum().0,
+                            _ => entry.checksum,
+                        },
+                        length: match tag {
+                            &C2PA_TABLE_TAG => table.len() as u32,
+                            _ => entry.length,
+                        },
                     };
                     neo_directory.entries.push(neo_entry);
                 }
@@ -439,11 +440,12 @@ impl SfntFont {
                         if td_derived_offset_bias <= 0 {
                             return Err(Error::FontSaveError);
                         }
-                        let mut neo_entry = SfntTableDirEntry::default();
-                        neo_entry.tag = *tag;
-                        neo_entry.offset = round_up_to_four(new_data_offset) as u32;
-                        neo_entry.checksum = table.checksum().0;
-                        neo_entry.length = table.len() as u32;
+                        let neo_entry = SfntTableDirEntry {
+                            tag: *tag,
+                            offset: round_up_to_four(new_data_offset) as u32,
+                            checksum: table.checksum().0,
+                            length: table.len() as u32,
+                        };
                         neo_directory.entries.push(neo_entry);
                         // Note - new_data_offset is never actually used after
                         // this point, but _if it were_, it would need to be
@@ -563,7 +565,7 @@ impl SfntFont {
     /// re-position any existing tables.
     fn append_empty_c2pa_table(&mut self) -> Result<()> {
         // Create the empty table
-        let c2pa_table = TableC2PA::new(None, None);
+        let c2pa_table = TableC2PA::default();
         // Size of the empty table in the font file
         let empty_table_size = size_of::<TableC2PARaw>() as u32;
         // Offset just past the last valid byte of font table data. This should
@@ -728,7 +730,7 @@ impl SfntDirectory {
     }
 
     /// Returns an array which contains the indices of this directory's entries,
-    /// arranged in their physical (offset+size) order.
+    /// arranged in increasing order of `offset` field.
     fn physical_order(&self) -> Vec<SfntTableDirEntry> {
         let mut physically_ordered_entries = self.entries.clone();
         physically_ordered_entries.sort_by_key(|e| e.offset);

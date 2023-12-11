@@ -299,12 +299,12 @@ impl TableC2PA {
                 );
             }
             if raw_table.manifestStoreLength > 0 {
-                let mut mani_bytes: Vec<u8> = vec![0; raw_table.manifestStoreLength as usize];
+                let mut manifest_bytes: Vec<u8> = vec![0; raw_table.manifestStoreLength as usize];
                 reader.seek(SeekFrom::Start(
                     offset + raw_table.manifestStoreOffset as u64,
                 ))?;
-                reader.read_exact(&mut mani_bytes)?;
-                manifest_store = Some(mani_bytes);
+                reader.read_exact(&mut manifest_bytes)?;
+                manifest_store = Some(manifest_bytes);
             }
             // Return our record
             Ok(TableC2PA {
