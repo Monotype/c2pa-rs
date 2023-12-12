@@ -50,7 +50,6 @@ use crate::{
 /// implementation for remote manifests.
 ///
 /// ### Remarks
-///
 /// This module depends on the `feature = "xmp_write"` to be enabled.
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
@@ -60,13 +59,11 @@ mod font_xmp_support {
 
     /// Creates a default `XmpMeta` object for fonts
     ///
-    /// ### Arguments
-    ///
+    /// ### Parameters
     /// - `document_id` - optional unique identifier for the document
     /// - `instance_id` - optional unique identifier for the instance
     ///
     /// ### Remarks
-    ///
     /// Default/random values will be used for the document/instance IDs as
     /// needed.
     fn default_font_xmp_meta(
@@ -107,11 +104,9 @@ mod font_xmp_support {
     /// Builds a `XmpMeta` element from the data within the source stream
     ///
     /// ### Parameters
-    ///
     /// - `source` - Source stream to read data from to build the `XmpMeta` object
     ///
     /// ### Returns
-    ///
     /// A new `XmpMeta` object, either based on information that already exists in
     /// the stream or using defaults
     ///
@@ -139,7 +134,6 @@ mod font_xmp_support {
     /// Maps the errors from the xmp_toolkit crate
     ///
     /// ### Parameters
-    ///
     /// - `err` - The `XmpError` to map to an internal error type
     ///
     /// ### Remarks
@@ -240,9 +234,9 @@ impl TempFile {
     /// Creates a new temporary file within the `env::temp_dir()` directory,
     /// which should be deleted once the object is dropped.
     ///
-    /// ## Arguments
+    /// ### Parameters
     ///
-    /// * `base_name` - Base name to use for the temporary file name
+    /// -`base_name` - Base name to use for the temporary file name
     pub(crate) fn new(base_name: &Path) -> Result<Self> {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
@@ -686,10 +680,10 @@ pub trait ChunkReader {
     type Error;
     /// Gets a collection of positions of chunks within the font.
     ///
-    /// ## Arguments
-    /// * `reader` - Source stream to read data from
+    /// ### Parameters
+    /// - `reader` - Source stream to read data from
     ///
-    /// ## Returns
+    /// ### Returns
     /// A collection of positions/offsets and length to omit from hashing.
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
@@ -780,10 +774,9 @@ impl ChunkReader for WoffIO {
 
 /// Adds C2PA manifest store data to a font file
 ///
-/// ## Arguments
-///
-/// * `font_path` - Path to a font file
-/// * `manifest_store_data` - C2PA manifest store data to add to the font file
+/// ### Parameters
+/// -`font_path` - Path to a font file
+/// -`manifest_store_data` - C2PA manifest store data to add to the font file
 fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Add the C2PA data to the temp file
@@ -793,11 +786,10 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 
 /// Adds C2PA manifest store data to a font stream
 ///
-/// ## Arguments
-///
-/// * `source` - Source stream to read initial data from
-/// * `destination` - Destination stream to write C2PA manifest store data
-/// * `manifest_store_data` - C2PA manifest store data to add to the font stream
+/// ### Parameters
+/// -`source` - Source stream to read initial data from
+/// -`destination` - Destination stream to write C2PA manifest store data
+/// -`manifest_store_data` - C2PA manifest store data to add to the font stream
 fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
@@ -838,10 +830,9 @@ where
 
 /// Adds the manifest URI reference to the font at the given path.
 ///
-/// ## Arguments
-///
-/// * `font_path` - Path to a font file
-/// * `manifest_uri` - Reference URI to a manifest store
+/// ### Parameters
+/// -`font_path` - Path to a font file
+/// -`manifest_uri` - Reference URI to a manifest store
 #[allow(dead_code)]
 fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
@@ -852,11 +843,10 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 
 /// Adds the specified reference to the font.
 ///
-/// ## Arguments
-///
-/// * `source` - Source stream to read initial data from
-/// * `destination` - Destination stream to write data with new reference
-/// * `manifest_uri` - Reference URI to a manifest store
+/// ### Parameters
+/// -`source` - Source stream to read initial data from
+/// -`destination` - Destination stream to write data with new reference
+/// -`manifest_uri` - Reference URI to a manifest store
 fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
@@ -932,12 +922,10 @@ where
 
 /// Opens a BufReader for the given file path
 ///
-/// ## Arguments
+/// ### Parameters
+/// -`file_path` - Valid path to a file to open in a buffer reader
 ///
-/// * `file_path` - Valid path to a file to open in a buffer reader
-///
-/// ## Returns
-///
+/// ### Returns
 /// A BufReader<File> object
 fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
     let file = File::open(file_path)?;
@@ -946,10 +934,9 @@ fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
 
 /// Processes a font file using a streams to process.
 ///
-/// ## Arguments
-///
-/// * `font_path` - Path to the font file to process
-/// * `callback` - Method to process the stream
+/// ### Parameters
+/// -`font_path` - Path to the font file to process
+/// -`callback` - Method to process the stream
 fn process_file_with_streams(
     font_path: &Path,
     callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> Result<()>,
@@ -966,11 +953,10 @@ fn process_file_with_streams(
 
 /// Reads the C2PA manifest store reference from the font file.
 ///
-/// ## Arguments
+/// ### Parameters
+/// -`font_path` - File path to the font file to read reference from.
 ///
-/// * `font_path` - File path to the font file to read reference from.
-///
-/// ## Returns
+/// ### Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
@@ -981,11 +967,10 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 
 /// Reads the C2PA manifest store reference from the stream.
 ///
-/// ## Arguments
+/// ### Parameters
+/// -`source` - Source font stream to read reference from.
 ///
-/// * `source` - Source font stream to read reference from.
-///
-/// ## Returns
+/// ### Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
@@ -1001,9 +986,8 @@ where
 
 /// Remove the `C2PA` font table from the font file.
 ///
-/// ## Arguments
-///
-/// * `font_path` - path to the font file to remove C2PA from
+/// ### Parameters
+/// -`font_path` - path to the font file to remove C2PA from
 fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Remove the C2PA manifest store from the stream
@@ -1014,10 +998,9 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// Remove the `C2PA` font table from the font data stream, writing to the
 /// destination.
 ///
-/// ## Arguments
-///
-/// * `source` - Source data stream containing font data
-/// * `destination` - Destination data stream to write new font data with the
+/// ### Parameters
+/// -`source` - Source data stream containing font data
+/// -`destination` - Destination data stream to write new font data with the
 ///                   C2PA table removed
 fn remove_c2pa_from_stream<TSource, TDest>(
     source: &mut TSource,
@@ -1041,14 +1024,12 @@ where
 /// Removes the reference to the active manifest from the source stream, writing
 /// to the destination.
 ///
-/// ## Arguments
-///
-/// * `source` - Source data stream containing font data
-/// * `destination` - Destination data stream to write new font data with the
+/// ### Parameters
+/// -`source` - Source data stream containing font data
+/// -`destination` - Destination data stream to write new font data with the
 ///                   active manifest reference removed
 ///
-/// ## Returns
-///
+/// ### Returns
 /// The active manifest URI reference that was removed, if there was one
 #[allow(dead_code)]
 fn remove_reference_from_stream<TSource, TDest>(
@@ -1090,12 +1071,10 @@ where
 
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
 ///
-/// ## Arguments
+/// ### Parameters
+/// -`reader` - Reader object used to read object locations from
 ///
-/// * `reader` - Reader object used to read object locations from
-///
-/// ## Returns
-///
+/// ### Returns
 /// A collection of positions/offsets and length to omit from hashing.
 fn get_object_locations_from_stream<T>(
     woff_io: &WoffIO,
@@ -1199,12 +1178,10 @@ where
 
 /// Reads the `C2PA` font table from the data stream
 ///
-/// ## Arguments
+/// ### Parameters
+/// -`reader` - data stream reader to read font data from
 ///
-/// * `reader` - data stream reader to read font data from
-///
-/// ## Returns
-///
+/// ### Returns
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let woff = WoffFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;

@@ -36,11 +36,9 @@ impl SfntTag {
     /// Constructs a new instance with the given value.
     ///
     /// ### Parameters
-    ///
     /// - `source_data` - Array of four (4) bytes to convert to a TableTag.
     ///
     /// ### Returns
-    ///
     /// A new instance.
     pub(crate) fn new(source_data: [u8; 4]) -> Self {
         Self { data: source_data }
@@ -49,11 +47,9 @@ impl SfntTag {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self::new([
@@ -67,7 +63,6 @@ impl SfntTag {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data)?;
@@ -98,11 +93,9 @@ impl std::fmt::Debug for SfntTag {
 /// Round the given value up to the next multiple of four (4).
 ///
 /// ### Parameters
-///
 /// - `size` - Value to round
 ///
 /// ### Examples
-///
 /// ```ignore
 /// // Cannot work as written because font_io is private.
 /// use c2pa::asset_handlers::font_io::align_to_four;
@@ -159,11 +152,9 @@ impl TryFrom<u32> for Magic {
     /// Try to match the given u32 value to a known font-format magic number.
     ///
     /// ### Parameters
-    ///
     /// - `v` - Value to inspect.
     ///
     /// ### Returns
-    ///
     /// Result containing a `Magic` value, or error if no match.
     fn try_from(v: u32) -> core::result::Result<Self, Self::Error> {
         match v {
@@ -182,11 +173,9 @@ impl TryFrom<u32> for Magic {
 /// array, which is presumed to start on a 4-byte boundary.
 ///
 /// ### Parameters
-///
 /// - `bytes` - Array of data to checksum
 ///
 /// ### Returns
-///
 /// Wrapping<u32> with the data checksum. (Note that trailing pad bytes do not
 /// affect this checksum - it's not a real CRC.)
 #[allow(dead_code)]
@@ -225,18 +214,15 @@ pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
 
 /// Assembles two u16 values into a u32.
 ///
-/// ### Parameters
-///
+/// ### Parameters///
 /// - `hi` - More-significant u16 halfword
 /// - `lo` - Less-significant u16 halfword
 ///
 /// ### Returns
-///
 /// u32 fullword composed of the given halfwords, with `hi` in the more-
 /// significant position.
 ///
 /// ### Examples
-///
 /// ```ignore
 /// // Cannot work as written because font_io is private.
 /// use c2pa::asset_handlers::font_io::u32_from_u16_pair;
@@ -253,15 +239,12 @@ pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
 /// Gets the high-order the u32 from given u64
 ///
 /// ### Parameters
-///
 /// - `big` - Unsigned 64-bit integer
 ///
 /// ### Returns
-///
 /// u32 fullword extracted from the more-significant 32 bits of the given value.
 ///
 /// ### Examples
-///
 /// ```ignore
 /// // Cannot work as written because font_io is private.
 /// use c2pa::asset_handlers::font_io::u32_from_u64_hi;
@@ -276,15 +259,12 @@ pub(crate) fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
 /// Gets the low-order u32 from the given u64
 ///
 /// ### Parameters
-///
 /// - `big` - Unsigned 64-bit integer
 ///
 /// ### Returns
-///
 /// u32 fullword extracted from the less-significant 32 bits of the given value.
 ///
 /// ### Examples
-///
 /// ```ignore
 /// // Cannot work as written because font_io is private.
 /// use c2pa::asset_handlers::font_io::u32_from_u64_lo;
@@ -325,11 +305,9 @@ impl TableC2PARaw {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -379,7 +357,6 @@ impl TableC2PARaw {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -396,11 +373,9 @@ impl TableC2PARaw {
     /// Computes the checksum for this instance.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Start with the fixed part
@@ -429,7 +404,6 @@ impl TableC2PA {
     /// Constructs a new, empty, instance.
     ///
     /// ### Returns
-    ///
     /// A new instance.
     pub(crate) fn new(
         active_manifest_uri: Option<String>,
@@ -445,11 +419,9 @@ impl TableC2PA {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Set up the structured data
@@ -477,11 +449,9 @@ impl TableC2PA {
     /// Returns the total length in bytes of this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Total size of table data, in bytes.
     pub(crate) fn len(&self) -> usize {
         size_of::<TableC2PARaw>()
@@ -497,14 +467,12 @@ impl TableC2PA {
 
     /// Reads a new instance from the given source.
     ///
-    /// ### Parameters
-    ///
+    /// ### Parameters    ///
     /// - `reader` - Input stream
     /// - `offset` - Position in stream where the table begins
     /// - `size`   - Size of the table in bytes.
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -562,11 +530,9 @@ impl TableC2PA {
     /// Get the manifest store data if available
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Optional u8 array with the data, if present.
     pub(crate) fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
@@ -575,7 +541,6 @@ impl TableC2PA {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -639,13 +604,11 @@ impl TableHead {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     /// - `offset` - Position in stream where the table begins
     /// - `size`   - Size of the table in bytes.
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -715,11 +678,9 @@ impl TableHead {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // 0x00
@@ -755,11 +716,9 @@ impl TableHead {
     /// Returns the total length in bytes of this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Total size of table data, in bytes.
     pub(crate) fn len(&self) -> usize {
         // TBD - Is this called?
@@ -769,7 +728,6 @@ impl TableHead {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -820,13 +778,11 @@ impl TableUnspecified {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     /// - `offset` - Position in stream where the table begins
     /// - `size`   - Size of the table in bytes.
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -844,11 +800,9 @@ impl TableUnspecified {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // TBD - this should never be called though - we only need to alter C2PA
@@ -859,11 +813,9 @@ impl TableUnspecified {
     /// Returns the total length in bytes of this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Total size of table data, in bytes.
     pub(crate) fn len(&self) -> usize {
         self.data.len()
@@ -872,7 +824,6 @@ impl TableUnspecified {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -907,11 +858,9 @@ impl Table {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         match self {
@@ -924,11 +873,9 @@ impl Table {
     /// Returns the total length in bytes of this table.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Total size of table data, in bytes.
     pub(crate) fn len(&self) -> usize {
         match self {

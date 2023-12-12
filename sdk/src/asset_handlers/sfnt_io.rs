@@ -51,7 +51,6 @@ use crate::{
 /// implementation for remote manifests.
 ///
 /// ### Remarks
-///
 /// This module depends on the `feature = "xmp_write"` to be enabled.
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
@@ -62,12 +61,10 @@ mod font_xmp_support {
     /// Creates a default `XmpMeta` object for fonts
     ///
     /// ### Parameters
-    ///
     /// - `document_id` - optional unique identifier for the document
     /// - `instance_id` - optional unique identifier for the instance
     ///
     /// ### Remarks
-    ///
     /// Default/random values will be used for the document/instance IDs as
     /// needed.
     fn default_font_xmp_meta(
@@ -108,11 +105,9 @@ mod font_xmp_support {
     /// Builds a `XmpMeta` element from the data within the source stream
     ///
     /// ### Parameters
-    ///
     /// - `source` - Source stream to read data from to build the `XmpMeta` object
     ///
     /// ### Returns
-    ///
     /// A new `XmpMeta` object, either based on information that already exists in
     /// the stream or using defaults
     ///
@@ -140,7 +135,6 @@ mod font_xmp_support {
     /// Maps the errors from the xmp_toolkit crate
     ///
     /// ### Parameters
-    ///
     /// - `err` - The `XmpError` to map to an internal error type
     ///
     /// ### Remarks
@@ -242,8 +236,7 @@ impl TempFile {
     /// which should be deleted once the object is dropped.
     ///
     /// ### Parameters
-    ///
-    /// * `base_name` - Base name to use for the temporary file name
+    /// - `base_name` - Base name to use for the temporary file name
     pub(crate) fn new(base_name: &Path) -> Result<Self> {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
@@ -293,11 +286,9 @@ impl SfntFont {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -338,7 +329,6 @@ impl SfntFont {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `destination` - Output stream
     fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         let mut neo_header = SfntHeader::default();
@@ -570,7 +560,6 @@ impl SfntFont {
     /// re-position any existing tables.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     fn append_empty_c2pa_table(&mut self) -> Result<()> {
         // Create the empty table
@@ -616,11 +605,9 @@ impl SfntHeader {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -635,7 +622,6 @@ impl SfntHeader {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `destination` - Output stream
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
@@ -649,11 +635,9 @@ impl SfntHeader {
     /// Computes the checksum for this font.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // 0x00
@@ -681,11 +665,9 @@ impl SfntTableDirEntry {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
@@ -699,7 +681,6 @@ impl SfntTableDirEntry {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -713,11 +694,9 @@ impl SfntTableDirEntry {
     /// Computes the checksum for this entry.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         Wrapping(u32::from_be_bytes(self.tag.data))
@@ -753,7 +732,6 @@ impl SfntDirectory {
     /// Constructs a new, empty, instance.
     ///
     /// ### Returns
-    ///
     /// A new instance.
     pub(crate) fn new() -> Result<Self> {
         Ok(Self {
@@ -764,13 +742,11 @@ impl SfntDirectory {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Input stream
     /// - `offset` - Position in stream where the table begins
     /// - `size`   - Size of the table in bytes.
     ///
     /// ### Returns
-    ///
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
@@ -788,7 +764,6 @@ impl SfntDirectory {
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `destination` - Output stream
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
@@ -802,11 +777,9 @@ impl SfntDirectory {
     /// arranged in increasing order of `offset` field.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Vector of copies of our entries, in increasing 'offset' order.
     fn physical_order(&self) -> Vec<SfntTableDirEntry> {
         let mut physically_ordered_entries = self.entries.clone();
@@ -817,11 +790,9 @@ impl SfntDirectory {
     /// Computes the checksum for this directory.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     ///
     /// ### Returns
-    ///
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         match self.entries.is_empty() {
@@ -868,11 +839,9 @@ pub trait ChunkReader {
     /// Gets a collection of positions of chunks within the font.
     ///
     /// ### Parameters
-    ///
     /// - `reader` - Source stream to read data from
     ///
     /// ### Returns
-    ///
     /// A collection of positions/offsets and length to omit from hashing.
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
@@ -887,12 +856,10 @@ impl ChunkReader for SfntIO {
     /// Get a map of all the chunks in this file.
     ///
     /// ### Parameters
-    ///
     /// - `self` - Instance
     /// - `reader` - Stream to interpret.
     ///
     /// ### Returns
-    ///
     /// Result with vector of chunks
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
         &self,
@@ -949,7 +916,6 @@ impl ChunkReader for SfntIO {
 /// Adds C2PA manifest store data to a font file
 ///
 /// ### Parameters
-///
 /// - `font_path` - Path to a font file
 /// - `manifest_store_data` - C2PA manifest store data to add to the font file
 fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
@@ -962,7 +928,6 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 /// Adds C2PA manifest store data to a font stream
 ///
 /// ### Parameters
-///
 /// - `source` - Source stream to read initial data from
 /// - `destination` - Destination stream to write C2PA manifest store data
 /// - `manifest_store_data` - C2PA manifest store data to add to the font stream
@@ -1008,7 +973,6 @@ where
 /// Adds the manifest URI reference to the font at the given path.
 ///
 /// ### Parameters
-///
 /// - `font_path` - Path to a font file
 /// - `manifest_uri` - Reference URI to a manifest store
 #[allow(dead_code)]
@@ -1022,7 +986,6 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 /// Adds the specified reference to the font.
 ///
 /// ### Parameters
-///
 /// - `source` - Source stream to read initial data from
 /// - `destination` - Destination stream to write data with new reference
 /// - `manifest_uri` - Reference URI to a manifest store
@@ -1069,18 +1032,15 @@ where
 /// already present nothing is done.
 ///
 /// ### Parameters
-///
 /// - `input_stream` - Source stream to read initial data from
 /// - `output_stream` - Destination stream to write data with the added required
 ///                     chunks
 ///
 /// ### Remarks
-///
 /// Neither streams are rewound before and/or after the operation, so it is up
 /// to the caller.
 ///
 /// ### Returns
-///
 /// A Result indicating success or failure
 fn add_required_chunks_to_stream<TReader, TWriter>(
     input_stream: &mut TReader,
@@ -1106,11 +1066,9 @@ where
 /// Opens a BufReader for the given file path
 ///
 /// ### Parameters
-///
 /// - `file_path` - Valid path to a file to open in a buffer reader
 ///
 /// ### Returns
-///
 /// A BufReader<File> object
 fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
     let file = File::open(file_path)?;
@@ -1120,7 +1078,6 @@ fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
 /// Processes a font file using a streams to process.
 ///
 /// ### Parameters
-///
 /// - `font_path` - Path to the font file to process
 /// - `callback` - Method to process the stream
 fn process_file_with_streams(
@@ -1140,11 +1097,9 @@ fn process_file_with_streams(
 /// Reads the C2PA manifest store reference from the font file.
 ///
 /// ### Parameters
-///
 /// - `font_path` - File path to the font file to read reference from.
 ///
 /// ### Returns
-///
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
@@ -1156,11 +1111,9 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 /// Reads the C2PA manifest store reference from the stream.
 ///
 /// ### Parameters
-///
 /// - `source` - Source font stream to read reference from.
 ///
 /// ### Returns
-///
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
 fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
@@ -1177,7 +1130,6 @@ where
 /// Remove the `C2PA` font table from the font file.
 ///
 /// ### Parameters
-///
 /// - `font_path` - path to the font file to remove C2PA from
 fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
@@ -1190,7 +1142,6 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// destination.
 ///
 /// ### Parameters
-///
 /// - `source` - Source data stream containing font data
 /// - `destination` - Destination data stream to write new font data with the
 ///                   C2PA table removed
@@ -1216,13 +1167,11 @@ where
 /// to the destination.
 ///
 /// ### Parameters
-///
 /// - `source` - Source data stream containing font data
 /// - `destination` - Destination data stream to write new font data with the
 ///                   active manifest reference removed
 ///
 /// ### Returns
-///
 /// Optional active manifest URI reference
 #[allow(dead_code)]
 fn remove_reference_from_stream<TSource, TDest>(
@@ -1266,11 +1215,9 @@ where
 /// Gets a collection of positions of hash objects, which are to be excluded from the hashing.
 ///
 /// ### Parameters
-///
 /// - `reader` - Reader object used to read object locations from
 ///
 /// ### Returns
-///
 /// A collection of positions/offsets and length to omit from hashing.
 fn get_object_locations_from_stream<T>(
     sfnt_io: &SfntIO,
@@ -1377,11 +1324,9 @@ where
 /// Reads the `C2PA` font table from the data stream
 ///
 /// ### Parameters
-///
 /// - `reader` - data stream reader to read font data from
 ///
 /// ### Returns
-///
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
