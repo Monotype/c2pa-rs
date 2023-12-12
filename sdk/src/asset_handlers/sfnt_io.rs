@@ -120,7 +120,7 @@ mod font_xmp_support {
     /// ### Remarks
     /// The use of this function really shouldn't be needed, but currently the SDK
     /// is tightly coupled to the use of XMP with assets.
-    pub fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<XmpMeta>
+    pub(crate) fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<XmpMeta>
     where
         TSource: Read + Seek + ?Sized,
     {
@@ -167,7 +167,7 @@ mod font_xmp_support {
     /// This method is considered a stop-gap for now until the official SDK
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
-    pub fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
+    pub(crate) fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
         process_file_with_streams(font_path, move |input_stream, temp_file| {
             // Write the manifest URI to the stream
             add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
@@ -186,7 +186,7 @@ mod font_xmp_support {
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
     #[allow(dead_code)]
-    pub fn add_reference_as_xmp_to_stream<TSource, TDest>(
+    pub(crate) fn add_reference_as_xmp_to_stream<TSource, TDest>(
         source: &mut TSource,
         destination: &mut TDest,
         manifest_uri: &str,
@@ -245,7 +245,7 @@ impl TempFile {
     /// ### Parameters
     ///
     /// * `base_name` - Base name to use for the temporary file name
-    pub fn new(base_name: &Path) -> Result<Self> {
+    pub(crate) fn new(base_name: &Path) -> Result<Self> {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
         let path = temp_dir_path.join(
@@ -262,12 +262,12 @@ impl TempFile {
     }
 
     /// Get the path of the temporary file
-    pub fn get_path(&self) -> &Path {
+    pub(crate) fn get_path(&self) -> &Path {
         self.path.as_ref()
     }
 
     /// Get a mutable reference to the temporary file
-    pub fn get_mut_file(&mut self) -> &mut File {
+    pub(crate) fn get_mut_file(&mut self) -> &mut File {
         &mut self.file
     }
 }
@@ -623,7 +623,7 @@ impl SfntHeader {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -656,7 +656,7 @@ impl SfntHeader {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // 0x00
         Wrapping(self.sfntVersion)
             // 0x04
@@ -688,7 +688,7 @@ impl SfntTableDirEntry {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             tag: SfntTag::from_reader(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
@@ -703,7 +703,7 @@ impl SfntTableDirEntry {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
@@ -720,7 +720,7 @@ impl SfntTableDirEntry {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         Wrapping(u32::from_be_bytes(self.tag.data))
             + Wrapping(self.checksum)
             + Wrapping(self.offset)
@@ -756,7 +756,7 @@ impl SfntDirectory {
     /// ### Returns
     ///
     /// A new instance.
-    pub fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         Ok(Self {
             entries: Vec::new(),
         })
@@ -773,7 +773,7 @@ impl SfntDirectory {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
     ) -> Result<Self> {
@@ -824,7 +824,7 @@ impl SfntDirectory {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         match self.entries.is_empty() {
             true => Wrapping(0_u32),
             false => self
@@ -840,7 +840,7 @@ impl SfntDirectory {
 /// of chunks (such as a series of `Table` chunks) must be preserved by some
 /// other mechanism.
 #[derive(Debug, Eq, PartialEq)]
-pub enum ChunkType {
+pub(crate) enum ChunkType {
     /// Whole-container header.
     Header,
     /// Table directory entry or entries.
@@ -852,7 +852,7 @@ pub enum ChunkType {
 /// Represents regions within a font file that may be of interest when it
 /// comes to hashing data for C2PA.
 #[derive(Debug, Eq, PartialEq)]
-pub struct ChunkPosition {
+pub(crate) struct ChunkPosition {
     /// Offset to the start of the chunk
     pub offset: u64,
     /// Length of the chunk
@@ -1405,16 +1405,16 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
 }
 
 /// Main SFNT IO feature.
-pub struct SfntIO {}
+pub(crate) struct SfntIO {}
 
 impl SfntIO {
     #[allow(dead_code)]
-    pub fn default_document_id() -> String {
+    pub(crate) fn default_document_id() -> String {
         format!("fontsoftware:did:{}", Uuid::new_v4())
     }
 
     #[allow(dead_code)]
-    pub fn default_instance_id() -> String {
+    pub(crate) fn default_instance_id() -> String {
         format!("fontsoftware:iid:{}", Uuid::new_v4())
     }
 }

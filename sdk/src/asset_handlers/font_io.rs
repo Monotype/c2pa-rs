@@ -27,7 +27,7 @@ use crate::error::{Error, Result};
 
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SfntTag {
+pub(crate) struct SfntTag {
     pub data: [u8; 4],
 }
 
@@ -42,7 +42,7 @@ impl SfntTag {
     /// ### Returns
     ///
     /// A new instance.
-    pub fn new(source_data: [u8; 4]) -> Self {
+    pub(crate) fn new(source_data: [u8; 4]) -> Self {
         Self { data: source_data }
     }
 
@@ -55,7 +55,7 @@ impl SfntTag {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self::new([
             reader.read_u8()?,
             reader.read_u8()?,
@@ -69,7 +69,7 @@ impl SfntTag {
     /// ### Parameters
     ///
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data)?;
         Ok(())
     }
@@ -110,7 +110,7 @@ impl std::fmt::Debug for SfntTag {
 /// assert_eq!(forties.0, 36);
 /// assert_eq!(forties.1, 40);
 /// ```
-pub fn align_to_four(size: usize) -> usize {
+pub(crate) fn align_to_four(size: usize) -> usize {
     (size + 3) & (!3)
 }
 
@@ -119,7 +119,7 @@ pub fn align_to_four(size: usize) -> usize {
 /// Note that Embedded OpenType and MicroType Express formats cannot be detected
 /// with a simple magic-number sniff. Conceivably, EOT could be dealt with as a
 /// variation on SFNT, but MTX will needs more exotic handling.
-pub enum Magic {
+pub(crate) enum Magic {
     /// 'OTTO' - OpenType
     OpenType = 0x4f54544f,
     /// FIXED 1.0 - TrueType (or possibly v1.0 Embedded OpenType)
@@ -190,7 +190,7 @@ impl TryFrom<u32> for Magic {
 /// Wrapping<u32> with the data checksum. (Note that trailing pad bytes do not
 /// affect this checksum - it's not a real CRC.)
 #[allow(dead_code)]
-pub fn checksum(bytes: &[u8]) -> Wrapping<u32> {
+pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
     // Cut your pie into 1x4cm pieces to serve
     let words = bytes.chunks_exact(size_of::<u32>());
     // ...and then any remainder...
@@ -244,7 +244,7 @@ pub fn checksum(bytes: &[u8]) -> Wrapping<u32> {
 /// assert_eq!(full_word, 0x12345678);
 /// ```
 #[allow(dead_code)]
-pub fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
+pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
     // TBD - Supposedly the bytemuck crate, already in this project, can help us
     // with stuff like this.
     Wrapping((hi as u32 * 65536) + lo as u32)
@@ -269,7 +269,7 @@ pub fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
 /// assert_eq!(hi_word, 0x12345678);
 /// ```
 #[allow(dead_code)]
-pub fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
+pub(crate) fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
     Wrapping(((big & 0xffffffff00000000) >> 32) as u32)
 }
 
@@ -292,7 +292,7 @@ pub fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
 /// assert_eq!(lo_word, 0x9abcdef0);
 /// ```
 #[allow(dead_code)]
-pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
+pub(crate) fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
     Wrapping((big & 0x00000000ffffffff) as u32)
 }
 
@@ -300,7 +300,7 @@ pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
 #[derive(Debug, Default)]
 #[repr(C, packed(1))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
-pub struct TableC2PARaw {
+pub(crate) struct TableC2PARaw {
     /// Specifies the major version of the C2PA font table.
     pub majorVersion: u16,
     /// Specifies the minor version of the C2PA font table.
@@ -331,7 +331,7 @@ impl TableC2PARaw {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             majorVersion: reader.read_u16::<BigEndian>()?,
             minorVersion: reader.read_u16::<BigEndian>()?,
@@ -343,7 +343,7 @@ impl TableC2PARaw {
         })
     }
 
-    pub fn from_table(c2pa: &TableC2PA) -> Self {
+    pub(crate) fn from_table(c2pa: &TableC2PA) -> Self {
         Self {
             majorVersion: c2pa.major_version,
             minorVersion: c2pa.minor_version,
@@ -382,7 +382,7 @@ impl TableC2PARaw {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
@@ -402,7 +402,7 @@ impl TableC2PARaw {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Start with the fixed part
         let mut cksum = u32_from_u16_pair(self.majorVersion, self.minorVersion);
         cksum += self.activeManifestUriOffset;
@@ -414,7 +414,7 @@ impl TableC2PARaw {
 
 /// 'C2PA' font table, fully loaded.
 #[derive(Clone, Debug)]
-pub struct TableC2PA {
+pub(crate) struct TableC2PA {
     /// Major version of the C2PA table record
     pub major_version: u16,
     /// Minor version of the C2PA table record
@@ -431,7 +431,10 @@ impl TableC2PA {
     /// ### Returns
     ///
     /// A new instance.
-    pub fn new(active_manifest_uri: Option<String>, manifest_store: Option<Vec<u8>>) -> Self {
+    pub(crate) fn new(
+        active_manifest_uri: Option<String>,
+        manifest_store: Option<Vec<u8>>,
+    ) -> Self {
         Self {
             active_manifest_uri,
             manifest_store,
@@ -448,7 +451,7 @@ impl TableC2PA {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         let mut cksum = raw_table.checksum();
@@ -480,7 +483,7 @@ impl TableC2PA {
     /// ### Returns
     ///
     /// Total size of table data, in bytes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         size_of::<TableC2PARaw>()
             + match &self.active_manifest_uri {
                 Some(uri) => uri.len(),
@@ -503,7 +506,7 @@ impl TableC2PA {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -565,7 +568,7 @@ impl TableC2PA {
     /// ### Returns
     ///
     /// Optional u8 array with the data, if present.
-    pub fn get_manifest_store(&self) -> Option<&[u8]> {
+    pub(crate) fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
 
@@ -575,7 +578,7 @@ impl TableC2PA {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
@@ -611,7 +614,7 @@ impl Default for TableC2PA {
 // As defined by Open Font Format / OpenType (though we don't as yet directly
 // support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
-pub struct TableHead {
+pub(crate) struct TableHead {
     pub majorVersion: u16,
     pub minorVersion: u16,
     pub fontRevision: u32,
@@ -644,7 +647,7 @@ impl TableHead {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -718,7 +721,7 @@ impl TableHead {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // 0x00
         u32_from_u16_pair(self.majorVersion, self.minorVersion)
             // 0x04
@@ -756,7 +759,7 @@ impl TableHead {
     /// ### Returns
     ///
     /// Total size of table data, in bytes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         // TBD - Is this called?
         size_of::<Self>()
     }
@@ -767,7 +770,7 @@ impl TableHead {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -806,7 +809,7 @@ impl TableHead {
 
 /// Generic font table with unknown contents.
 #[derive(Debug)]
-pub struct TableUnspecified {
+pub(crate) struct TableUnspecified {
     pub data: Vec<u8>,
 }
 
@@ -823,7 +826,7 @@ impl TableUnspecified {
     /// ### Returns
     ///
     /// Result containing an instance.
-    pub fn from_reader<T: Read + Seek + ?Sized>(
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         offset: u64,
         size: usize,
@@ -845,7 +848,7 @@ impl TableUnspecified {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // TBD - this should never be called though - we only need to alter C2PA
         // and head - should we panic!(), or just implement?
         Wrapping(0x19283746)
@@ -860,7 +863,7 @@ impl TableUnspecified {
     /// ### Returns
     ///
     /// Total size of table data, in bytes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.data.len()
     }
 
@@ -870,7 +873,7 @@ impl TableUnspecified {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
             .map_err(|_e| Error::FontSaveError)?;
@@ -887,7 +890,7 @@ impl TableUnspecified {
 
 /// Possible tables
 #[derive(Debug)]
-pub enum Table {
+pub(crate) enum Table {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
@@ -908,7 +911,7 @@ impl Table {
     /// ### Returns
     ///
     /// Wrapping<u32> with the checksum.
-    pub fn checksum(&self) -> Wrapping<u32> {
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         match self {
             Table::C2PA(c2pa) => c2pa.checksum(),
             Table::Head(head) => head.checksum(),
@@ -925,7 +928,7 @@ impl Table {
     /// ### Returns
     ///
     /// Total size of table data, in bytes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match self {
             Table::C2PA(c2pa) => c2pa.len(),
             Table::Head(head) => head.len(),
@@ -945,7 +948,7 @@ impl Table {
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
-pub struct SfntHeader {
+pub(crate) struct SfntHeader {
     pub sfntVersion: u32,
     pub numTables: u16,
     pub searchRange: u16,
@@ -960,7 +963,7 @@ pub struct SfntHeader {
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
-pub struct SfntTableDirEntry {
+pub(crate) struct SfntTableDirEntry {
     pub tag: SfntTag,
     pub checksum: u32,
     pub offset: u32,
