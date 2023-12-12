@@ -64,15 +64,11 @@ impl SfntTag {
         ]))
     }
 
-    /// Serializes this tag data to the given writer.
+    /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
     ///
     /// - `destination` - Output stream
-    ///
-    /// ### Returns
-    ///
-    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data)?;
         Ok(())
@@ -321,10 +317,6 @@ impl TableC2PARaw {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    ///
-    /// ### Returns
-    ///
-    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -486,10 +478,6 @@ impl TableC2PA {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    ///
-    /// ### Returns
-    ///
-    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let mut raw_table = TableC2PARaw::new();
@@ -693,10 +681,6 @@ impl TableHead {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    ///
-    /// ### Returns
-    ///
-    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
@@ -800,10 +784,6 @@ impl TableUnspecified {
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    ///
-    /// ### Returns
-    ///
-    /// Ok, or some kind of I/O error
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
