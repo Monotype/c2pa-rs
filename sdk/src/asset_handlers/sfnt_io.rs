@@ -265,14 +265,10 @@ impl TempFile {
 }
 
 /// Pseudo-tag for the SFNT file header
-const SFNT_HEADER_CHUNK_NAME: SfntTag = SfntTag {
-    data: *b"\x00\x00\x00s",
-};
+const SFNT_HEADER_CHUNK_NAME: SfntTag = SfntTag { data: *b" HDR" };
 
 /// Pseudo-tag for the table directory.
-const SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag {
-    data: *b"\x00\x00\x00d",
-}; // Sorts to just-after HEADER tag.
+const SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag { data: *b" DIR" }; // Sorts to just-after HEADER tag.
 
 /// Implementation of ye olde SFNT
 struct SfntFont {
@@ -815,8 +811,10 @@ pub(crate) enum ChunkType {
     Header,
     /// Table directory entry or entries.
     Directory,
-    /// Table data
-    Table,
+    /// Table data included in C2PA hash.
+    TableDataIncluded,
+    /// Table data excluded from C2PA hash.
+    TableDataExcluded,
 }
 
 /// Represents regions within a font file that may be of interest when it
@@ -824,9 +822,9 @@ pub(crate) enum ChunkType {
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ChunkPosition {
     /// Offset to the start of the chunk
-    pub offset: u64,
+    pub offset: usize,
     /// Length of the chunk
-    pub length: u32,
+    pub length: usize,
     /// Tag of the chunk
     pub name: [u8; 4],
     /// Type of chunk
@@ -865,50 +863,75 @@ impl ChunkReader for SfntIO {
         &self,
         reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
-        // Rewind to start and read the SFNT header
+        // Rewind to start and read the SFNT header and directory - that's
+        // really all we need in order to map the chunks.
         reader.rewind()?;
-        let sfnt_hdr = SfntHeader::from_reader(reader)?;
-        // Verify the font has a valid version in it before assuming the rest is
-        // valid (NOTE: we don't actually do anything with it, just as a safety
-        // check).
-        //
-        // TBD - Push this into SfntHeader::from_reader
-        let _font_magic: Magic =
-            <u32 as std::convert::TryInto<Magic>>::try_into(sfnt_hdr.sfntVersion)
-                .map_err(|_err| Error::UnsupportedFontError)?;
-        // Add the position of the header.
+        let header = SfntHeader::from_reader(reader)?;
+        let directory = SfntDirectory::from_reader(reader, header.numTables as usize)?;
+
+        // The first chunk excludes the header from hashing
         let mut positions: Vec<ChunkPosition> = Vec::new();
         positions.push(ChunkPosition {
             offset: 0,
-            length: size_of::<SfntHeader>() as u32,
+            length: size_of::<SfntHeader>(),
             name: SFNT_HEADER_CHUNK_NAME.data,
             chunk_type: ChunkType::Header,
         });
 
-        // Advance to the start of the table entries
-        reader.seek(SeekFrom::Start(size_of::<SfntHeader>() as u64))?;
-        // Read in the directory, and add its chunk
-        let sfnt_dir = SfntDirectory::from_reader(reader, sfnt_hdr.numTables as usize)?;
+        // The second chunk excludes the directory
         positions.push(ChunkPosition {
-            offset: size_of::<SfntHeader>() as u64,
-            length: sfnt_hdr.numTables as u32 * size_of::<SfntTableDirEntry>() as u32,
+            offset: size_of::<SfntHeader>(),
+            length: header.numTables as usize * size_of::<SfntTableDirEntry>(),
             name: SFNT_DIRECTORY_CHUNK_NAME.data,
             chunk_type: ChunkType::Directory,
         });
-        // TBD check for well-formed - our logic presumes it
-        // TBD v. basic check for _fundamental_ (not even spec "required") tables - like, should we insist on 'head' and 'name'?
-        // TBD consolidate the chunk-add code here
 
-        // Add a chunk for each table, in directory order
-        for entry in sfnt_dir.physical_order().iter() {
-            positions.push(ChunkPosition {
-                offset: entry.offset as u64,
-                length: entry.length,
-                name: entry.tag.data,
-                chunk_type: ChunkType::Table,
-            });
+        // The subsequent chunks represent the tables. All table data is hashed,
+        // with two exceptions:
+        // - The C2PA table itself.
+        // - The head table's `checksumAdjustment` field.
+        for entry in directory.physical_order() {
+            match entry.tag {
+                C2PA_TABLE_TAG => {
+                    positions.push(ChunkPosition {
+                        offset: entry.offset as usize,
+                        length: entry.length as usize,
+                        name: entry.tag.data,
+                        chunk_type: ChunkType::TableDataExcluded,
+                    });
+                }
+                HEAD_TABLE_TAG => {
+                    // TBD - These hard-coded magic numbers could be mopped up
+                    // if only we could use offset_of, see https://github.com/rust-lang/rust/issues/106655
+                    positions.push(ChunkPosition {
+                        offset: entry.offset as usize,
+                        length: 8_usize,
+                        name: entry.tag.data,
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                    positions.push(ChunkPosition {
+                        offset: entry.offset as usize + 8_usize,
+                        length: 4_usize,
+                        name: entry.tag.data,
+                        chunk_type: ChunkType::TableDataExcluded,
+                    });
+                    positions.push(ChunkPosition {
+                        offset: entry.offset as usize + 12_usize,
+                        length: 42_usize,
+                        name: entry.tag.data,
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                }
+                _ => {
+                    positions.push(ChunkPosition {
+                        offset: entry.offset as usize,
+                        length: entry.length as usize,
+                        name: entry.tag.data,
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                }
+            }
         }
-
         Ok(positions)
     }
 }
@@ -1229,96 +1252,42 @@ where
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
     // now to make sure we can parse the font.
     reader.rewind()?;
+
     // We must take into account a font that may not have a C2PA table in it at
     // this point, adding any required chunks needed for C2PA to work correctly.
     let output_vec: Vec<u8> = Vec::new();
     let mut output_stream = Cursor::new(output_vec);
+
     // NOTE - This call is pointless when we already have a C2PA table, and
     // a bit silly-seeming when we don't?
     add_required_chunks_to_stream(reader, &mut output_stream)?;
     output_stream.rewind()?;
 
     // Build up the positions we will hand back to the caller
-    let mut positions: Vec<HashObjectPositions> = Vec::new();
+    let mut locations: Vec<HashObjectPositions> = Vec::new();
 
     // Which will be built up from the different chunks from the file
-    let chunk_positions = sfnt_io.get_chunk_positions(&mut output_stream)?;
-    for chunk_position in chunk_positions {
-        let mut position_objs = match chunk_position.chunk_type {
+    for chunk in sfnt_io.get_chunk_positions(&mut output_stream)? {
+        match chunk.chunk_type {
             // The table directory, other than the table records array will be
             // added as "other"
-            ChunkType::Header => vec![HashObjectPositions {
-                offset: chunk_position.offset as usize,
-                length: chunk_position.length as usize,
-                htype: HashBlockObjectType::Other,
-            }],
-            // For the table record entries, we will specialize the C2PA table
-            // record and all others will be added as is
-            ChunkType::Directory => {
-                if chunk_position.name == C2PA_TABLE_TAG.data {
-                    vec![HashObjectPositions {
-                        offset: chunk_position.offset as usize,
-                        length: chunk_position.length as usize,
-                        htype: HashBlockObjectType::Cai,
-                    }]
-                } else {
-                    vec![HashObjectPositions {
-                        offset: chunk_position.offset as usize,
-                        length: chunk_position.length as usize,
-                        htype: HashBlockObjectType::Other,
-                    }]
-                }
+            ChunkType::Header | ChunkType::Directory | ChunkType::TableDataExcluded => {
+                locations.push(HashObjectPositions {
+                    offset: chunk.offset,
+                    length: chunk.length,
+                    htype: HashBlockObjectType::Other,
+                });
             }
-            // Similarly for the actual table data, we need to specialize C2PA
-            // and in this case the `head` table as well, to ignore the checksum
-            // adjustment.
-            //
-            // ("Other" data gets treated the same as an uninteresting table.)
-            ChunkType::Table => {
-                let mut table_positions = Vec::<HashObjectPositions>::new();
-                // We must split out the head table to ignore the checksum
-                // adjustment, because it changes after the C2PA table is
-                // written to the font
-                if chunk_position.name == HEAD_TABLE_TAG.data {
-                    let head_offset = &chunk_position.offset;
-                    let head_length = &chunk_position.length;
-                    // Include the major/minor/revision version numbers
-                    table_positions.push(HashObjectPositions {
-                        offset: *head_offset as usize,
-                        length: 8,
-                        htype: HashBlockObjectType::Other,
-                    });
-                    // Indicate the checksumAdjustment value as CAI
-                    table_positions.push(HashObjectPositions {
-                        offset: (head_offset + 8) as usize,
-                        length: 4,
-                        htype: HashBlockObjectType::Cai,
-                    });
-                    // And the remainder of the table as other
-                    table_positions.push(HashObjectPositions {
-                        offset: (head_offset + 12) as usize,
-                        length: (head_length - 12) as usize,
-                        htype: HashBlockObjectType::Other,
-                    });
-                } else if chunk_position.name == C2PA_TABLE_TAG.data {
-                    table_positions.push(HashObjectPositions {
-                        offset: chunk_position.offset as usize,
-                        length: chunk_position.length as usize,
-                        htype: HashBlockObjectType::Cai,
-                    });
-                } else {
-                    table_positions.push(HashObjectPositions {
-                        offset: chunk_position.offset as usize,
-                        length: chunk_position.length as usize,
-                        htype: HashBlockObjectType::Other,
-                    });
-                }
-                table_positions
+            ChunkType::TableDataIncluded => {
+                locations.push(HashObjectPositions {
+                    offset: chunk.offset,
+                    length: chunk.length,
+                    htype: HashBlockObjectType::Cai,
+                });
             }
-        };
-        positions.append(&mut position_objs);
+        }
     }
-    Ok(positions)
+    Ok(locations)
 }
 
 /// Reads the `C2PA` font table from the data stream
@@ -1473,17 +1442,17 @@ impl AssetIO for SfntIO {
 impl AssetBoxHash for SfntIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
         // Get the chunk positions
-        let positions = self.get_chunk_positions(input_stream)?;
+        let chunks = self.get_chunk_positions(input_stream)?;
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
-        for position in positions {
+        for chunk in chunks {
             let box_map = BoxMap {
-                names: vec![format!("{:?}", position.chunk_type)],
+                names: vec![format!("{:?}", chunk.name)],
                 alg: None,
                 hash: ByteBuf::from(Vec::new()),
                 pad: ByteBuf::from(Vec::new()),
-                range_start: position.offset as usize,
-                range_len: position.length as usize,
+                range_start: chunk.offset,
+                range_len: chunk.length,
             };
             box_maps.push(box_map);
         }
@@ -1681,8 +1650,8 @@ pub mod tests {
         assert_eq!(
             positions.first().unwrap(),
             &ChunkPosition {
-                offset: 0_u64,
-                length: 12,
+                offset: 0_usize,
+                length: 12_usize,
                 name: SFNT_HEADER_CHUNK_NAME.data,
                 chunk_type: ChunkType::Header,
             }
@@ -1691,8 +1660,8 @@ pub mod tests {
         assert_eq!(
             positions.get(1).unwrap(),
             &ChunkPosition {
-                offset: 12_u64,
-                length: 0,
+                offset: 12_usize,
+                length: 0_usize,
                 name: SFNT_DIRECTORY_CHUNK_NAME.data,
                 chunk_type: ChunkType::Directory,
             }
@@ -1725,8 +1694,8 @@ pub mod tests {
         assert_eq!(
             positions.first().unwrap(),
             &ChunkPosition {
-                offset: 0_u64,
-                length: 12,
+                offset: 0_usize,
+                length: 12_usize,
                 name: SFNT_HEADER_CHUNK_NAME.data,
                 chunk_type: ChunkType::Header,
             }
@@ -1735,8 +1704,8 @@ pub mod tests {
         assert_eq!(
             positions.get(1).unwrap(),
             &ChunkPosition {
-                offset: 12_u64,
-                length: 16,
+                offset: 12_usize,
+                length: 16_usize,
                 name: SFNT_DIRECTORY_CHUNK_NAME.data,
                 chunk_type: ChunkType::Directory,
             }
@@ -1745,10 +1714,10 @@ pub mod tests {
         assert_eq!(
             positions.get(2).unwrap(),
             &ChunkPosition {
-                offset: 28_u64,
+                offset: 28_usize,
                 length: 1,
                 name: *b"C2PB",
-                chunk_type: ChunkType::Table,
+                chunk_type: ChunkType::TableDataIncluded,
             }
         );
     }
