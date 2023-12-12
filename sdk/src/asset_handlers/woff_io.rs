@@ -676,7 +676,7 @@ pub(crate) struct ChunkPosition {
 //}
 
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
-pub trait ChunkReader {
+pub(crate) trait ChunkReader {
     type Error;
     /// Gets a collection of positions of chunks within the font.
     ///

@@ -131,19 +131,19 @@ pub(crate) enum Magic {
 
 /// Tag for the 'C2PA' table.
 #[allow(dead_code)]
-pub const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
+pub(crate) const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
 
 /// Tag for the 'head' table in a font.
 #[allow(dead_code)]
-pub const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
+pub(crate) const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
 
 /// Spec-mandated value for 'head'::magicNumber
-pub const HEAD_TABLE_MAGICNUMBER: u32 = 0x5f0f3cf5;
+pub(crate) const HEAD_TABLE_MAGICNUMBER: u32 = 0x5f0f3cf5;
 
 /// The 'head' table's checksumAdjustment value should be such that the whole-
 /// font checksum comes out to this value.
 #[allow(dead_code)]
-pub const SFNT_EXPECTED_CHECKSUM: u32 = 0xb1b0afba;
+pub(crate) const SFNT_EXPECTED_CHECKSUM: u32 = 0xb1b0afba;
 
 /// Used to attempt conversion from u32 to a Magic value.
 impl TryFrom<u32> for Magic {
