@@ -298,7 +298,7 @@ pub fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
 
 /// 'C2PA' font table as it appears in storage
 #[derive(Debug, Default)]
-#[repr(C, packed(4))] // As defined by the C2PA spec.
+#[repr(C, packed(1))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 pub struct TableC2PARaw {
     /// Specifies the major version of the C2PA font table.
@@ -943,7 +943,7 @@ impl Table {
 /// This SFNT type is also referenced by WOFF formats, so it is defined here for
 /// common use.
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
 pub struct SfntHeader {
     pub sfntVersion: u32,
@@ -958,7 +958,7 @@ pub struct SfntHeader {
 /// This SFNT type is also referenced by WOFF formats, so it is defined here for
 /// common use.
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the OpenType spec.
+#[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
 pub struct SfntTableDirEntry {
     pub tag: SfntTag,

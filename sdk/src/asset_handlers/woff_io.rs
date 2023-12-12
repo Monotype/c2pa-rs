@@ -490,7 +490,7 @@ impl WoffFont {
 /// TBD: Should this be treated as a "Table", perhaps with a magic tag value that
 /// always sorts first, for operational reasons?
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed(1))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffHeader {
     signature: u32,
@@ -566,7 +566,7 @@ impl Default for WoffHeader {
 
 /// WOFF 1.0 Table Directory Entry, from the WOFF spec.
 #[derive(Copy, Clone, Debug)]
-#[repr(C, packed(4))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
+#[repr(C, packed(1))] // As defined by the WOFF spec. (though we don't as yet directly support exotics like FIXED)
 #[allow(non_snake_case)] // As named by the WOFF spec.
 struct WoffTableDirEntry {
     tag: SfntTag,
