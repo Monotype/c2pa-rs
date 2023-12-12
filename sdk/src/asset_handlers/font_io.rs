@@ -199,7 +199,7 @@ pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
         words
             .remainder()
             .iter()
-            .fold(Wrapping(0u32), |acc, byte| {
+            .fold(Wrapping(0_u32), |acc, byte| {
                 // At some point, it should be possible to:
                 // - Remove the `Wrapping(...)` surrounding the outer expression
                 // - Get rid of `.0` and just access plain `acc`
@@ -216,7 +216,7 @@ pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
             .rotate_left(u8::BITS * (size_of::<u32>() - words.remainder().len()) as u32),
     );
     // Sum all the exact chunks...
-    let chunks_cksum: Wrapping<u32> = words.fold(Wrapping(0u32), |running_cksum, exact_chunk| {
+    let chunks_cksum: Wrapping<u32> = words.fold(Wrapping(0_u32), |running_cksum, exact_chunk| {
         running_cksum + Wrapping(BigEndian::read_u32(exact_chunk))
     });
     // Combine ingredients & serve.
@@ -727,7 +727,9 @@ impl TableHead {
             // 0x04
             + Wrapping(self.fontRevision)
             // 0x08
-            + Wrapping(self.checksumAdjustment)
+            // (Note: checksumAdjustment is treated as containing all-
+            //  zeros during this operation.)
+            // 0x0c
             + Wrapping(self.magicNumber)
             // 0x10
             + u32_from_u16_pair(self.flags, self.unitsPerEm)

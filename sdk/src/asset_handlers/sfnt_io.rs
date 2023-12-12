@@ -21,7 +21,6 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -517,7 +516,7 @@ impl SfntFont {
                 .directory
                 .physical_order()
                 .iter()
-                .fold(Wrapping(0u32), |tables_cksum, entry| {
+                .fold(Wrapping(0_u32), |tables_cksum, entry| {
                     tables_cksum + Wrapping(entry.checksum)
                 });
 
@@ -830,7 +829,7 @@ impl SfntDirectory {
             false => self
                 .entries
                 .iter()
-                .fold(Wrapping(0u32), |cksum, entry| cksum + entry.checksum()),
+                .fold(Wrapping(0_u32), |cksum, entry| cksum + entry.checksum()),
         }
     }
 }
@@ -941,13 +940,6 @@ impl ChunkReader for SfntIO {
                 name: entry.tag.data,
                 chunk_type: ChunkType::Table,
             });
-        }
-
-        // Do not iterate if the log level is not set to at least trace
-        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-            for position in positions.iter().as_ref() {
-                trace!("Position for C2PA in font: {:?}", &position);
-            }
         }
 
         Ok(positions)
@@ -1294,6 +1286,8 @@ where
     // this point, adding any required chunks needed for C2PA to work correctly.
     let output_vec: Vec<u8> = Vec::new();
     let mut output_stream = Cursor::new(output_vec);
+    // NOTE - This call is pointless when we already have a C2PA table, and
+    // a bit silly-seeming when we don't?
     add_required_chunks_to_stream(reader, &mut output_stream)?;
     output_stream.rewind()?;
 
