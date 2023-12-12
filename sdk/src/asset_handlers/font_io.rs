@@ -596,8 +596,8 @@ impl TableC2PA {
 impl Default for TableC2PA {
     fn default() -> Self {
         Self {
-            major_version: 1,
-            minor_version: 4,
+            major_version: 0,
+            minor_version: 1,
             active_manifest_uri: Default::default(),
             manifest_store: Default::default(),
         }
