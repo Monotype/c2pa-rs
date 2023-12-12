@@ -19,7 +19,7 @@ use std::{
     str::from_utf8,
 };
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
 use crate::error::{Error, Result};
 
@@ -105,12 +105,12 @@ impl std::fmt::Debug for SfntTag {
 ///
 /// ```ignore
 /// // Cannot work as written because font_io is private.
-/// use c2pa::asset_handlers::font_io::round_up_to_four;
-/// let forties = (round_up_to_four(36), round_up_to_four(37));
+/// use c2pa::asset_handlers::font_io::align_to_four;
+/// let forties = (align_to_four(36), align_to_four(37));
 /// assert_eq!(forties.0, 36);
 /// assert_eq!(forties.1, 40);
 /// ```
-pub fn round_up_to_four(size: usize) -> usize {
+pub fn align_to_four(size: usize) -> usize {
     (size + 3) & (!3)
 }
 
@@ -176,6 +176,51 @@ impl TryFrom<u32> for Magic {
             _unknown => Err(Error::FontUnknownMagic),
         }
     }
+}
+
+/// Computes a 32-bit big-endian OpenType-style checksum on the given byte
+/// array, which is presumed to start on a 4-byte boundary.
+///
+/// ### Parameters
+///
+/// - `bytes` - Array of data to checksum
+///
+/// ### Returns
+///
+/// Wrapping<u32> with the data checksum. (Note that trailing pad bytes do not
+/// affect this checksum - it's not a real CRC.)
+#[allow(dead_code)]
+pub fn checksum(bytes: &[u8]) -> Wrapping<u32> {
+    // Cut your pie into 1x4cm pieces to serve
+    let words = bytes.chunks_exact(size_of::<u32>());
+    // ...and then any remainder...
+    let frag_cksum: Wrapping<u32> = Wrapping(
+        // (away, mayhap, with issue #32463)
+        words
+            .remainder()
+            .iter()
+            .fold(Wrapping(0u32), |acc, byte| {
+                // At some point, it should be possible to:
+                // - Remove the `Wrapping(...)` surrounding the outer expression
+                // - Get rid of `.0` and just access plain `acc`
+                // - Get rid of `.0` down there getting applied to the end of
+                //   this .fold(), as well as
+                // - Get rid of the `Wrapping(...)` in this next expression
+                // but unfortunately as of this writing, attempting to call
+                // `.rotate_left` on a `Wrapping<u32>` fails:
+                //   use of unstable library feature 'wrapping_int_impl', see issue
+                //     #32463 <https://github.com/rust-lang/rust/issues/32463>
+                Wrapping(acc.0.rotate_left(u8::BITS) + *byte as u32)
+            })
+            .0 // (goes away, mayhap, when issue #32463 is done)
+            .rotate_left(u8::BITS * (size_of::<u32>() - words.remainder().len()) as u32),
+    );
+    // Sum all the exact chunks...
+    let chunks_cksum: Wrapping<u32> = words.fold(Wrapping(0u32), |running_cksum, exact_chunk| {
+        running_cksum + Wrapping(BigEndian::read_u32(exact_chunk))
+    });
+    // Combine ingredients & serve.
+    chunks_cksum + frag_cksum
 }
 
 /// Assembles two u16 values into a u32.
@@ -277,19 +322,6 @@ pub struct TableC2PARaw {
 }
 
 impl TableC2PARaw {
-    /// Constructs a new, empty, instance.
-    ///
-    /// ### Returns
-    ///
-    /// A new instance.
-    pub fn new() -> Self {
-        Self {
-            majorVersion: 0,
-            minorVersion: 1,
-            ..Default::default()
-        }
-    }
-
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
@@ -311,13 +343,46 @@ impl TableC2PARaw {
         })
     }
 
+    pub fn from_table(c2pa: &TableC2PA) -> Self {
+        Self {
+            majorVersion: c2pa.major_version,
+            minorVersion: c2pa.minor_version,
+            activeManifestUriOffset: if let Some(_uri) = &c2pa.active_manifest_uri {
+                size_of::<TableC2PARaw>() as u32
+            } else {
+                0_u32
+            },
+            activeManifestUriLength: if let Some(uri) = &c2pa.active_manifest_uri {
+                uri.len() as u16
+            } else {
+                0_u16
+            },
+            reserved: 0,
+            manifestStoreOffset: if let Some(_manifest_store) = &c2pa.manifest_store {
+                size_of::<TableC2PARaw>() as u32
+                    + if let Some(uri) = &c2pa.active_manifest_uri {
+                        uri.len() as u32
+                    } else {
+                        0_u32
+                    }
+            } else {
+                0
+            },
+            manifestStoreLength: if let Some(manifest_store) = &c2pa.manifest_store {
+                manifest_store.len() as u32
+            } else {
+                0
+            },
+        }
+    }
+
     /// Serializes this instance to the given writer.
     ///
     /// ### Parameters
     ///
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
@@ -326,6 +391,24 @@ impl TableC2PARaw {
         destination.write_u32::<BigEndian>(self.manifestStoreOffset)?;
         destination.write_u32::<BigEndian>(self.manifestStoreLength)?;
         Ok(())
+    }
+
+    /// Computes the checksum for this instance.
+    ///
+    /// ### Parameters
+    ///
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    ///
+    /// Wrapping<u32> with the checksum.
+    pub fn checksum(&self) -> Wrapping<u32> {
+        // Start with the fixed part
+        let mut cksum = u32_from_u16_pair(self.majorVersion, self.minorVersion);
+        cksum += self.activeManifestUriOffset;
+        cksum += u32_from_u16_pair(self.activeManifestUriLength, self.reserved);
+        cksum += self.manifestStoreOffset + self.manifestStoreLength;
+        cksum
     }
 }
 
@@ -366,12 +449,26 @@ impl TableC2PA {
     ///
     /// Wrapping<u32> with the checksum.
     pub fn checksum(&self) -> Wrapping<u32> {
-        // TBD:
-        // 1. Set up TableC2PARaw
-        // 2. Checksum it.
-        // 3. Checksum the URI data.
-        // 4. Checksum the manifest data.
-        Wrapping(0x12345678)
+        // Set up the structured data
+        let raw_table = TableC2PARaw::from_table(self);
+        let mut cksum = raw_table.checksum();
+        let mut _uri_len_bias = 0;
+        // Write the remote manifest URI, if present.
+        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            let uri_bytes = uri_string.as_bytes();
+            cksum += checksum(uri_bytes);
+        }
+        // TBD - handle remainder of uri_string. We could use chunks_exact,
+        // and the prepend its remainder to (a copy of? gross) the manifest_store.
+        // More efficient might be to pass a 'bias' value 0-3 around, so the
+        // checksum code can align its words...
+        if let Some(manifest_store) = self.manifest_store.as_ref() {
+            // TBD - need to use _uri_len_bias here to shift the manifest
+            // bytes rightward 8/16/24 bits, if the uri had 3/2/1 bytes of
+            // overhang...
+            cksum += checksum(manifest_store);
+        }
+        cksum
     }
 
     /// Returns the total length in bytes of this table.
@@ -480,18 +577,7 @@ impl TableC2PA {
     /// - `destination` - Output stream
     pub fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
-        let mut raw_table = TableC2PARaw::new();
-        // If a remote URI is present, prepare to store it.
-        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            raw_table.activeManifestUriOffset = size_of::<TableC2PARaw>() as u32;
-            raw_table.activeManifestUriLength = uri_string.len() as u16;
-        }
-        // If a local store is present, prepare to store it.
-        if let Some(manifest_store) = self.manifest_store.as_ref() {
-            raw_table.manifestStoreOffset =
-                size_of::<TableC2PARaw>() as u32 + raw_table.activeManifestUriLength as u32;
-            raw_table.manifestStoreLength = manifest_store.len() as u32;
-        }
+        let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
         raw_table.write(destination)?;
         // Write the remote manifest URI, if present.

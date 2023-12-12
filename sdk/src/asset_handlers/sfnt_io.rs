@@ -398,7 +398,7 @@ impl SfntFont {
         // Figure out the size of the tables we know about already; any new
         // tables will have to follow.
         let new_data_offset = match self.directory.physical_order().last() {
-            Some(&entry) => round_up_to_four(
+            Some(&entry) => align_to_four(
                 (entry.offset as i64 + entry.length as i64 + td_derived_offset_bias) as usize,
             ),
             None => 0_usize,
@@ -448,7 +448,7 @@ impl SfntFont {
                         }
                         let neo_entry = SfntTableDirEntry {
                             tag: *tag,
-                            offset: round_up_to_four(new_data_offset) as u32,
+                            offset: align_to_four(new_data_offset) as u32,
                             checksum: table.checksum().0,
                             length: table.len() as u32,
                         };
@@ -457,7 +457,7 @@ impl SfntFont {
                         // this point, but _if it were_, it would need to be
                         // mutable, and we would move it ahead like so:
                         // new_data_offset =
-                        //    round_up_to_four(entry.offset as usize + entry.length as usize);
+                        //    align_to_four(entry.offset as usize + entry.length as usize);
                     }
                     _ => {
                         return Err(Error::FontSaveError);
