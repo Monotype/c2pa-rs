@@ -805,9 +805,7 @@ impl TableUnspecified {
     /// ### Returns
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        // TBD - this should never be called though - we only need to alter C2PA
-        // and head - should we panic!(), or just implement?
-        Wrapping(0x19283746)
+        checksum(&self.data)
     }
 
     /// Returns the total length in bytes of this table.
@@ -917,4 +915,123 @@ pub(crate) struct SfntTableDirEntry {
     pub checksum: u32,
     pub offset: u32,
     pub length: u32,
+}
+
+#[cfg(test)]
+pub mod tests {
+    #![allow(clippy::unwrap_used)]
+    use std::io::Cursor;
+
+    use super::*;
+
+    /// Verifies that data with bad magic fails to produce a head table.
+    //#[test]
+    //fn head_bad_magic() {
+    //    let head_data = vec![
+    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+    //        0x12, 0x34, 0x56, 0x78, // fontRevision
+    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
+    //        0x5f, 0x0f, 0x3c, 0xf6, // magicNumber
+    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+    //        0x00, 0x00, 0x00, 0x00, // created (hi)
+    //        0x00, 0x00, 0x00, 0x00, // created (lo)
+    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
+    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
+    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
+    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
+    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
+    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
+    //        0x00, 0x00, // glyphDataFormat:
+    //    ];
+    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+    //    assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
+    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
+    //}
+
+    /// Verifies that short data fails to produce a head table.
+    //#[test]
+    //fn head_short() {
+    //    let head_data = vec![
+    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+    //        0x12, 0x34, 0x56, 0x78, // fontRevision
+    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
+    //        0x5f, 0x0f, 0x3c, 0xf5, // magicNumber
+    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+    //        0x00, 0x00, 0x00, 0x00, // created (hi)
+    //        0x00, 0x00, 0x00, 0x00, // created (lo)
+    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
+    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
+    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
+    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
+    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
+    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
+    //        0x00, // glyphDataFormat:
+    //    ];
+    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+    //    assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
+    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
+    //}
+
+    /// Verifies the head table's .checksum() method.
+    //#[test]
+    //fn head_checksum() {
+    //    let head_data = vec![
+    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+    //        0x12, 0x34, 0x56, 0x78, // fontRevision
+    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
+    //        0x5f, 0x0f, 0x3c, 0xf5, // magicNumber
+    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+    //        0x00, 0x00, 0x00, 0x00, // created (hi)
+    //        0x00, 0x00, 0x00, 0x00, // created (lo)
+    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
+    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
+    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
+    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
+    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
+    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
+    //        0x00, 0x00, // glyphDataFormat:
+    //    ];
+    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+    //    assert_eq!(size_of::<TableHead>(), head_data.len());
+    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
+    //    let table_cksum = head.checksum();
+    //    let naive_cksum = checksum(&head_data);
+    //    assert_eq!(table_cksum, naive_cksum);
+    //}
+
+    /// Verifies the adding of a remote C2PA manifest reference works as
+    /// expected.
+    #[test]
+    fn un_checksums() {
+        let un_data = vec![
+            0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x01, 0x00,
+        ];
+        let un_expecteds: [u32; 17] = [
+            0x00000000_u32,
+            0x0f000000_u32,
+            0x0f0f0000_u32,
+            0x0f0f0f00_u32,
+            0x0f0f0f0f_u32,
+            0x130f0f0f_u32,
+            0x13120f0f_u32,
+            0x1312110f_u32,
+            0x13121110_u32,
+            0x13121110_u32,
+            0x13121110_u32,
+            0x13121110_u32,
+            0x13121110_u32,
+            0x13121110_u32,
+            0x13131110_u32,
+            0x13131210_u32,
+            0x13131210_u32,
+        ];
+        let mut un_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&un_data);
+        for (n, un_expected) in un_expecteds.iter().enumerate() {
+            // Make an unspecified table from the first n bytes
+            let un = TableUnspecified::from_reader(&mut un_stream, 0, n).unwrap();
+            let un_cksum = un.checksum();
+            assert_eq!(un_expected, &(un_cksum.0));
+        }
+    }
 }
