@@ -19,6 +19,7 @@ use std::{
     str::from_utf8,
 };
 
+use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
 use crate::error::{Error, Result};
@@ -210,6 +211,27 @@ pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
     });
     // Combine ingredients & serve.
     chunks_cksum + frag_cksum
+}
+
+/// Computes a 32-bit big-endian OpenType-style checksum on the given byte
+/// array, which is presumed to start on a 4-byte boundary.
+///
+/// ### Parameters
+/// - `bytes` - Array of data to checksum
+/// - `bias`  - Starting byte offset.
+///
+/// ### Returns
+/// Wrapping<u32> with the data checksum. (Note that trailing pad bytes do not
+/// affect this checksum - it's not a real CRC.)
+#[allow(dead_code)]
+pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
+    match bias & 3 {
+        0 => checksum(bytes),
+        1 => Wrapping(BigEndian::read_u24(bytes)) + checksum(&(bytes[3..bytes.len()])),
+        2 => Wrapping(BigEndian::read_u16(bytes) as u32) + checksum(&(bytes[2..bytes.len()])),
+        3 => Wrapping(bytes[0] as u32) + checksum(&(bytes[1..bytes.len()])),
+        4_u32..=u32::MAX => todo!(),
+    }
 }
 
 /// Assembles two u16 values into a u32.
@@ -443,24 +465,22 @@ impl TableC2PA {
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
-        let mut cksum = raw_table.checksum();
-        let mut _uri_len_bias = 0;
-        // Write the remote manifest URI, if present.
-        if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            let uri_bytes = uri_string.as_bytes();
-            cksum += checksum(uri_bytes);
-        }
-        // TBD - handle remainder of uri_string. We could use chunks_exact,
-        // and the prepend its remainder to (a copy of? gross) the manifest_store.
-        // More efficient might be to pass a 'bias' value 0-3 around, so the
-        // checksum code can align its words...
-        if let Some(manifest_store) = self.manifest_store.as_ref() {
-            // TBD - need to use _uri_len_bias here to shift the manifest
-            // bytes rightward 8/16/24 bits, if the uri had 3/2/1 bytes of
-            // overhang...
-            cksum += checksum(manifest_store);
-        }
-        cksum
+        let header_cksum = raw_table.checksum();
+        // Add remote-manifest URI if present.
+        let uri_cksum = if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            checksum(uri_string.as_bytes())
+        } else {
+            Wrapping(0_u32)
+        };
+        let manifest_cksum = if let Some(manifest_store) = self.manifest_store.as_ref() {
+            checksum_biased(
+                manifest_store.as_bytes(),
+                raw_table.activeManifestUriLength as u32,
+            )
+        } else {
+            Wrapping(0_u32)
+        };
+        header_cksum + uri_cksum + manifest_cksum
     }
 
     /// Returns the total length in bytes of this table.
@@ -993,14 +1013,10 @@ pub mod tests {
         let mut c2pa_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_data);
         assert_eq!(size_of::<TableC2PARaw>() + 26 + 18, c2pa_data.len());
         let c2pa = TableC2PA::from_reader(&mut c2pa_stream, 0, c2pa_data.len()).unwrap();
-        c2pa_stream.rewind().unwrap();
-        let c2pa_raw = TableC2PARaw::from_reader(&mut c2pa_stream).unwrap();
-        let fixed_cksum = c2pa_raw.checksum().0;
         let naive_cksum = checksum(&c2pa_data).0;
         let table_cksum = c2pa.checksum().0;
-        assert_eq!(2607244407, naive_cksum);
-        assert_eq!(2607244407, table_cksum);
-        assert_eq!(0, fixed_cksum);
+        assert_eq!(2608358557, naive_cksum);
+        assert_eq!(2608358557, table_cksum);
     }
 
     #[test]
