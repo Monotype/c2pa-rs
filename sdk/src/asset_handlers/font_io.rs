@@ -920,88 +920,95 @@ pub(crate) struct SfntTableDirEntry {
 #[cfg(test)]
 pub mod tests {
     #![allow(clippy::unwrap_used)]
-    use std::io::Cursor;
+
+    use std::{any::Any, io::Cursor};
 
     use super::*;
 
+    #[test]
     /// Verifies that data with bad magic fails to produce a head table.
-    //#[test]
-    //fn head_bad_magic() {
-    //    let head_data = vec![
-    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
-    //        0x12, 0x34, 0x56, 0x78, // fontRevision
-    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
-    //        0x5f, 0x0f, 0x3c, 0xf6, // magicNumber
-    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
-    //        0x00, 0x00, 0x00, 0x00, // created (hi)
-    //        0x00, 0x00, 0x00, 0x00, // created (lo)
-    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
-    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
-    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
-    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
-    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
-    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
-    //        0x00, 0x00, // glyphDataFormat:
-    //    ];
-    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
-    //    assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
-    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
-    //}
+    fn head_bad_magic() {
+        let head_data = vec![
+            0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+            0x12, 0x34, 0x56, 0x78, // fontRevision: 305419896
+            0x81, 0x29, 0x36, 0x0f, // checksumAdjustment: 2166961679
+            0x5f, 0x0f, 0x3c, 0xf6, // magicNumber: 1594834166
+            0xc3, 0x5a, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+            0x90, 0x00, 0x00, 0x00, // created (hi) 0x90000000
+            0x81, 0x4e, 0xaf, 0x80, // created (lo) 0x814eaf80
+            0xa0, 0x00, 0x00, 0x00, // modified (hi) 0xa0000000
+            0x83, 0x39, 0x1d, 0x80, // modified (lo) 0x83391d80
+            0xff, 0xb7, 0xff, 0xb6, // xMin: -73, yMin: -72
+            0x00, 0x48, 0x00, 0x49, // xMax:  72, yMax:  73
+            0xa5, 0x3c, 0x04, 0x05, // macStyle: 0xa53c, lowestRecPPEM: 1029
+            0xff, 0xfd, 0x11, 0x11, // fontDirectionHint: -3, indexToLocFormat: 0x1111
+            0x22, 0x22, // glyphDataFormat: 0x2222
+        ];
+        let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+        assert_eq!(size_of::<TableHead>(), head_data.len());
+        let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
+        assert!(head.is_err_and(|e| e.type_id() == Error::FontLoadHeadTableBadMissing.type_id()));
+    }
 
+    #[test]
     /// Verifies that short data fails to produce a head table.
-    //#[test]
-    //fn head_short() {
-    //    let head_data = vec![
-    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
-    //        0x12, 0x34, 0x56, 0x78, // fontRevision
-    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
-    //        0x5f, 0x0f, 0x3c, 0xf5, // magicNumber
-    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
-    //        0x00, 0x00, 0x00, 0x00, // created (hi)
-    //        0x00, 0x00, 0x00, 0x00, // created (lo)
-    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
-    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
-    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
-    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
-    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
-    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
-    //        0x00, // glyphDataFormat:
-    //    ];
-    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
-    //    assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
-    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
-    //}
+    fn head_short() {
+        let head_data = vec![
+            0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+            0x12, 0x34, 0x56, 0x78, // fontRevision: 305419896
+            0x81, 0x29, 0x36, 0x0f, // checksumAdjustment: 2166961679
+            0x5f, 0x0f, 0x3c, 0xf5, // magicNumber: 1594834165
+            0xc3, 0x5a, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+            0x90, 0x00, 0x00, 0x00, // created (hi) 0x90000000
+            0x81, 0x4e, 0xaf, 0x80, // created (lo) 0x814eaf80
+            0xa0, 0x00, 0x00, 0x00, // modified (hi) 0xa0000000
+            0x83, 0x39, 0x1d, 0x80, // modified (lo) 0x83391d80
+            0xff, 0xb7, 0xff, 0xb6, // xMin: -73, yMin: -72
+            0x00, 0x48, 0x00, 0x49, // xMax:  72, yMax:  73
+            0xa5, 0x3c, 0x04, 0x05, // macStyle: 0xa53c, lowestRecPPEM: 1029
+            0xff, 0xfd, 0x11, 0x11, // fontDirectionHint: -3, indexToLocFormat: 0x1111
+            0x22, // glyphDataFormat: 0x22...yikes!
+        ];
+        let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+        assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
+        let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
+        assert!(head.is_err_and(|e| e.type_id() == Error::FontLoadHeadTableBadMissing.type_id()));
+    }
 
+    #[test]
     /// Verifies the head table's .checksum() method.
-    //#[test]
-    //fn head_checksum() {
-    //    let head_data = vec![
-    //        0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
-    //        0x12, 0x34, 0x56, 0x78, // fontRevision
-    //        0x00, 0x00, 0x00, 0x00, // checksumAdjustment
-    //        0x5f, 0x0f, 0x3c, 0xf5, // magicNumber
-    //        0xC3, 0x5A, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
-    //        0x00, 0x00, 0x00, 0x00, // created (hi)
-    //        0x00, 0x00, 0x00, 0x00, // created (lo)
-    //        0x00, 0x00, 0x00, 0x00, // modified (hi)
-    //        0x00, 0x00, 0x00, 0x00, // modified (lo)
-    //        0x00, 0x00, 0x00, 0x00, // xMin: , yMin:
-    //        0x00, 0x00, 0x00, 0x00, // xMax: , yMax:
-    //        0x00, 0x00, 0x00, 0x00, // macStyle: , lowestRecPPEM:
-    //        0x00, 0x00, 0x00, 0x00, // fontDirectionHint: , indexToLocFormat:
-    //        0x00, 0x00, // glyphDataFormat:
-    //    ];
-    //    let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
-    //    assert_eq!(size_of::<TableHead>(), head_data.len());
-    //    let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
-    //    let table_cksum = head.checksum();
-    //    let naive_cksum = checksum(&head_data);
-    //    assert_eq!(table_cksum, naive_cksum);
-    //}
+    fn head_checksum() {
+        let head_data = vec![
+            0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
+            0x12, 0x34, 0x56, 0x78, // fontRevision: 305419896
+            0x81, 0x29, 0x36, 0x0f, // checksumAdjustment: 2166961679
+            0x5f, 0x0f, 0x3c, 0xf5, // magicNumber: 1594834165
+            0xc3, 0x5a, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
+            0x90, 0x00, 0x00, 0x00, // created (hi) 0x90000000
+            0x81, 0x4e, 0xaf, 0x80, // created (lo) 0x814eaf80
+            0xa0, 0x00, 0x00, 0x00, // modified (hi) 0xa0000000
+            0x83, 0x39, 0x1d, 0x80, // modified (lo) 0x83391d80
+            0xff, 0xb7, 0xff, 0xb6, // xMin: -73, yMin: -72
+            0x00, 0x48, 0x00, 0x49, // xMax:  72, yMax:  73
+            0xa5, 0x3c, 0x04, 0x05, // macStyle: 0xa53c, lowestRecPPEM: 1029
+            0xff, 0xfd, 0x11, 0x11, // fontDirectionHint: -3, indexToLocFormat: 0x1111
+            0x22, 0x22, // glyphDataFormat: 0x2222
+        ];
+        let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
+        assert_eq!(size_of::<TableHead>(), head_data.len());
+        let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
+        let table_cksum = head.checksum();
+        let naive_cksum = checksum(&head_data);
+        // Verify that head.checksum() excluded the checksumAdjustment field.
+        assert_eq!(814184875, table_cksum.0);
+        // Verify that a naive word-wise checksum produces the well-known
+        // expected value of a valid SFNT.
+        assert_eq!(SFNT_EXPECTED_CHECKSUM, naive_cksum.0);
+    }
 
+    #[test]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
-    #[test]
     fn un_checksums() {
         let un_data = vec![
             0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
