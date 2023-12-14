@@ -1632,28 +1632,34 @@ pub mod tests {
         // Then serialize back out
         let mut test_data = Vec::new();
         sfnt.write(&mut test_data).unwrap();
-        // Should match, amirite?
+        // and read _that_ back in...
         let mut font_data = Vec::new();
         font_stream.rewind().unwrap();
         font_stream.read_to_end(&mut font_data).unwrap();
+        // data should match & checksum should be right
         assert_eq!(font_data, test_data);
+        let naive_test_cksum = checksum(&test_data).0;
+        assert_eq!(naive_test_cksum, SFNT_EXPECTED_CHECKSUM);
     }
 
     #[test]
     /// Verify read/write idempotency
     fn read_write_idempotent_yes_c2pa() {
         // Load the basic OTF test fixture
-        let mut font_stream = File::open(fixture_path("font.c2.otf")).unwrap();
+        let mut font_stream = File::open(fixture_path("font_c2pa.otf")).unwrap();
         // Read & build
         let mut sfnt = SfntFont::from_reader(&mut font_stream).unwrap();
         // Then serialize back out
         let mut test_data = Vec::new();
         sfnt.write(&mut test_data).unwrap();
-        // Should match, amirite?
+        // and read _that_ back in...
         let mut font_data = Vec::new();
         font_stream.rewind().unwrap();
         font_stream.read_to_end(&mut font_data).unwrap();
+        // data should match & checksum should be right
         assert_eq!(font_data, test_data);
+        let naive_test_cksum = checksum(&test_data).0;
+        assert_eq!(naive_test_cksum, SFNT_EXPECTED_CHECKSUM);
     }
 
     #[test]
