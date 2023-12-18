@@ -332,32 +332,15 @@ impl TableC2PARaw {
     /// ### Returns
     /// Result containing an instance.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        let maj = reader.read_u16::<BigEndian>()?;
-        let min = reader.read_u16::<BigEndian>()?;
-        let uo = reader.read_u32::<BigEndian>()?;
-        let us = reader.read_u16::<BigEndian>()?;
-        let rs = reader.read_u16::<BigEndian>()?;
-        let mo = reader.read_u32::<BigEndian>()?;
-        let ms = reader.read_u32::<BigEndian>()?;
-
         Ok(Self {
-            majorVersion: maj,
-            minorVersion: min,
-            activeManifestUriOffset: uo,
-            activeManifestUriLength: us,
-            reserved: rs,
-            manifestStoreOffset: mo,
-            manifestStoreLength: ms,
+            majorVersion: reader.read_u16::<BigEndian>()?,
+            minorVersion: reader.read_u16::<BigEndian>()?,
+            activeManifestUriOffset: reader.read_u32::<BigEndian>()?,
+            activeManifestUriLength: reader.read_u16::<BigEndian>()?,
+            reserved: reader.read_u16::<BigEndian>()?,
+            manifestStoreOffset: reader.read_u32::<BigEndian>()?,
+            manifestStoreLength: reader.read_u32::<BigEndian>()?,
         })
-        //Ok(Self {
-        //    majorVersion: reader.read_u16::<BigEndian>()?,
-        //    minorVersion: reader.read_u16::<BigEndian>()?,
-        //    activeManifestUriOffset: reader.read_u32::<BigEndian>()?,
-        //    activeManifestUriLength: reader.read_u16::<BigEndian>()?,
-        //    reserved: reader.read_u16::<BigEndian>()?,
-        //    manifestStoreOffset: reader.read_u32::<BigEndian>()?,
-        //    manifestStoreLength: reader.read_u32::<BigEndian>()?,
-        //})
     }
 
     pub(crate) fn from_table(c2pa: &TableC2PA) -> Self {

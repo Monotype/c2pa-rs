@@ -907,20 +907,20 @@ impl ChunkReader for SfntIO {
                     positions.push(ChunkPosition {
                         offset: entry.offset as usize,
                         length: 8_usize,
-                        name: entry.tag.data,
-                        chunk_type: ChunkType::TableDataIncluded,
+                        name: *b"hea0",
+                        chunk_type: ChunkType::TableDataExcluded,
                     });
                     positions.push(ChunkPosition {
                         offset: entry.offset as usize + 8_usize,
                         length: 4_usize,
-                        name: entry.tag.data,
+                        name: *b"hea1",
                         chunk_type: ChunkType::TableDataExcluded,
                     });
                     positions.push(ChunkPosition {
                         offset: entry.offset as usize + 12_usize,
                         length: 42_usize,
-                        name: entry.tag.data,
-                        chunk_type: ChunkType::TableDataIncluded,
+                        name: *b"hea2",
+                        chunk_type: ChunkType::TableDataExcluded,
                     });
                 }
                 _ => {
