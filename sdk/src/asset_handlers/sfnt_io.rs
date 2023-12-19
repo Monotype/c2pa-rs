@@ -10,17 +10,16 @@
 // implied. See the LICENSE-MIT and LICENSE-APACHE files for the
 // specific language governing permissions and limitations under
 // each license.
+use core::{cmp::Ordering, fmt, mem::size_of, num::Wrapping};
 use std::{
-    cmp::Ordering,
     collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
-    mem::size_of,
-    num::Wrapping, // TBD - should we be using core::num?
     path::*,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use log::info;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -806,7 +805,7 @@ impl SfntDirectory {
 /// values precede those with greater enum values; order within a given group
 /// of chunks (such as a series of `Table` chunks) must be preserved by some
 /// other mechanism.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub(crate) enum ChunkType {
     /// Whole-container header.
     Header,
@@ -818,9 +817,31 @@ pub(crate) enum ChunkType {
     TableDataExcluded,
 }
 
+impl std::fmt::Display for ChunkType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ChunkType::Header => write!(f, "Header"),
+            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
+            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ChunkType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ChunkType::Header => write!(f, "Header"),
+            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
+            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
+        }
+    }
+}
+
 /// Represents regions within a font file that may be of interest when it
 /// comes to hashing data for C2PA.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub(crate) struct ChunkPosition {
     /// Offset to the start of the chunk
     pub offset: usize,
@@ -846,6 +867,32 @@ pub(crate) trait ChunkReader {
         &self,
         reader: &mut T,
     ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
+}
+
+impl std::fmt::Display for ChunkPosition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}, {}, {}, {}",
+            String::from_utf8_lossy(&self.name),
+            self.offset,
+            self.length,
+            self.chunk_type
+        )
+    }
+}
+
+impl std::fmt::Debug for ChunkPosition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}, {}, {}, {}",
+            String::from_utf8_lossy(&self.name),
+            self.offset,
+            self.length,
+            self.chunk_type
+        )
+    }
 }
 
 /// Reads in chunks for an SFNT file
@@ -933,6 +980,11 @@ impl ChunkReader for SfntIO {
                 }
             }
         }
+
+        for pos in &positions {
+            info!("Position for C2PA in font: {}", pos)
+        }
+
         Ok(positions)
     }
 }

@@ -11,13 +11,8 @@
 // specific language governing permissions and limitations under
 // each license.
 
-use std::{
-    convert::TryFrom,
-    io::{Read, Seek, SeekFrom, Write},
-    mem::size_of,
-    num::Wrapping,
-    str::from_utf8,
-};
+use core::{convert::TryFrom, mem::size_of, num::Wrapping, str::from_utf8};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
@@ -73,21 +68,13 @@ impl SfntTag {
 
 impl std::fmt::Display for SfntTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}{}",
-            self.data[0], self.data[1], self.data[2], self.data[3]
-        )
+        write!(f, "{}", String::from_utf8_lossy(&self.data))
     }
 }
 
 impl std::fmt::Debug for SfntTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}{}",
-            self.data[0], self.data[1], self.data[2], self.data[3]
-        )
+        write!(f, "{}", String::from_utf8_lossy(&self.data))
     }
 }
 
