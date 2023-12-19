@@ -19,7 +19,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use log::info;
+use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -981,8 +981,14 @@ impl ChunkReader for SfntIO {
             }
         }
 
-        for pos in &positions {
-            info!("Position for C2PA in font: {}", pos)
+        // Do not iterate if the log level is not set to at least trace
+        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
+            for (i, dirent) in directory.entries.iter().enumerate() {
+                trace!("get_chunk_positions/table[{:02}]: {:?}", i, &dirent);
+            }
+            for (i, chunk) in positions.iter().enumerate() {
+                trace!("get_chunk_positions/chunk[{:02}]: {:?}", i, &chunk);
+            }
         }
 
         Ok(positions)
