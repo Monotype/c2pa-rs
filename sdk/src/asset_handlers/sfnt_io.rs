@@ -499,7 +499,7 @@ impl SfntFont {
             + self.directory.checksum()
             + self
                 .directory
-                .physical_order()
+                .physical_order() // TBD <- So, wrapping addition is non-commutative?
                 .iter()
                 .fold(Wrapping(0_u32), |tables_cksum, entry| {
                     tables_cksum + Wrapping(entry.checksum)
@@ -558,38 +558,13 @@ impl SfntFont {
     /// ### Parameters
     /// - `self` - Instance
     fn append_empty_c2pa_table(&mut self) -> Result<()> {
-        // Create the empty table
-        let c2pa_table = TableC2PA::default();
-        // Size of the empty table in the font file
-        let empty_table_size = size_of::<TableC2PARaw>() as u32;
-        // Offset just past the last valid byte of font table data. This should
-        // point to pad bytes, XML data, or private data, but nothing else.
-        let existing_table_data_limit = match self.directory.physical_order().last() {
-            Some(last_phys_entry) => last_phys_entry.offset + last_phys_entry.length,
-            None => (size_of::<SfntHeader>() + size_of::<SfntTableDirEntry>()) as u32,
-        };
-        // Padding needed before the new table.
-        let pre_padding = (4 - (existing_table_data_limit & 3)) & 3;
-        // And a directory entry for it. The easiest approach is to add the table
-        // to the end of the font; for one thing, resizing it is much simpler,
-        // since we'll just need to change some size fields (and not re-flow
-        // other tables.
-        let c2pa_entry = SfntTableDirEntry {
-            tag: C2PA_TABLE_TAG,
-            offset: existing_table_data_limit + pre_padding,
-            length: empty_table_size,
-            checksum: c2pa_table.checksum().0,
-        };
-        // Store the new directory entry & table.
-        self.directory.entries.push(c2pa_entry);
-        self.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
-        // Count the table, grow the total size, grow, the "SFNT size"
-        self.header.numTables += 1;
-        // (TBD compression - conflating comp/uncomp sizes here.)
-        // (TBD philosophy - better to just re-compute these from scratch, yeah?)
-        self.header.searchRange = 0; // TBD fix these
-        self.header.rangeShift = 0;
-        self.header.entrySelector = 0;
+        // Just add an empty table...
+        self.tables
+            .insert(C2PA_TABLE_TAG, Table::C2PA(TableC2PA::default()));
+        // ...and then later, when the .write() function is invoked, it will
+        // notice that self.tables.len() no longer matches
+        // self.header.numTables, and regenerate the header & directory.
+        //
         // Success at last
         Ok(())
     }
@@ -1344,6 +1319,16 @@ where
                     htype: HashBlockObjectType::Cai,
                 });
             }
+        }
+    }
+    // Do not iterate if the log level is not set to at least trace
+    if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
+        for (i, location) in locations.iter().enumerate() {
+            trace!(
+                "get_object_locations_from_stream/loc[{:02}]: {:?}",
+                i,
+                &location
+            );
         }
     }
     Ok(locations)
