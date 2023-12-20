@@ -1515,6 +1515,12 @@ impl AssetBoxHash for SfntIO {
             };
             box_maps.push(box_map);
         }
+        // Do not iterate if the log level is not set to at least trace
+        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
+            for (i, box_map) in box_maps.iter().enumerate() {
+                trace!("get_box_map/boxes[{:02}]: {:?}", i, &box_map);
+            }
+        }
         Ok(box_maps)
     }
 }
