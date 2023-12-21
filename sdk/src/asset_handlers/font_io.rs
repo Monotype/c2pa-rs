@@ -568,7 +568,7 @@ impl TableC2PA {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
@@ -596,7 +596,7 @@ impl Table for TableC2PA {
     }
 
     fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
-        self.serialize(destination)
+        self.write(destination)
     }
 
     fn as_any(&self) -> &dyn Any {
