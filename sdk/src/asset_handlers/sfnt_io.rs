@@ -267,7 +267,7 @@ impl TempFile {
 const SFNT_HEADER_CHUNK_NAME: SfntTag = SfntTag { data: *b" HDR" };
 
 /// Pseudo-tag for the table directory.
-const SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag { data: *b" DIR" }; // Sorts to just-after HEADER tag.
+const _SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag { data: *b" DIR" }; // Sorts to just-after HEADER tag.
 
 /// Implementation of ye olde SFNT
 struct SfntFont {
@@ -355,7 +355,7 @@ impl SfntFont {
             Ordering::Greater => {
                 if (self.tables.len() as u16) - self.header.numTables == 1 {
                     // We added exactly one table
-                    size_of::<SfntTableDirEntry>() as i64
+                    size_of::<SfntDirectoryEntry>() as i64
                 } else {
                     // We added some other number of tables
                     return Err(Error::FontSaveError);
@@ -371,7 +371,7 @@ impl SfntFont {
                         return Err(Error::FontSaveError);
                     }
                     // We removed exactly one table
-                    -(size_of::<SfntTableDirEntry>() as i64)
+                    -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
                     // We added some other number of tables. Weird, right?
                     return Err(Error::FontSaveError);
@@ -408,7 +408,7 @@ impl SfntFont {
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
                         return Err(Error::FontSaveError);
                     }
-                    let neo_entry = SfntTableDirEntry {
+                    let neo_entry = SfntDirectoryEntry {
                         tag: entry.tag,
                         offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
                         checksum: match *tag {
@@ -429,7 +429,7 @@ impl SfntFont {
                         if td_derived_offset_bias <= 0 {
                             return Err(Error::FontSaveError);
                         }
-                        let neo_entry = SfntTableDirEntry {
+                        let neo_entry = SfntDirectoryEntry {
                             tag: *tag,
                             offset: align_to_four(new_data_offset) as u32,
                             checksum: table.checksum().0,
@@ -564,7 +564,7 @@ impl Default for SfntHeader {
     }
 }
 
-impl SfntTableDirEntry {
+impl SfntDirectoryEntry {
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters
@@ -609,7 +609,7 @@ impl SfntTableDirEntry {
     }
 }
 
-impl Default for SfntTableDirEntry {
+impl Default for SfntDirectoryEntry {
     fn default() -> Self {
         Self {
             tag: SfntTag::new(*b"\0\0\0\0"),
@@ -624,11 +624,9 @@ impl Default for SfntTableDirEntry {
 /// more-oxidized way of just using Vec directly for this... but maybe we
 /// don't want to? Note the choice of Vec over BTreeMap here, which lets us
 /// keep non-compliant fonts as-is...
-///
-/// TBD - SfntTableDir or Directory, in keeping with SfntTableDirEntry?
 #[derive(Debug)]
 struct SfntDirectory {
-    entries: Vec<SfntTableDirEntry>,
+    entries: Vec<SfntDirectoryEntry>,
 }
 
 impl SfntDirectory {
@@ -659,7 +657,7 @@ impl SfntDirectory {
         for _entry in 0..entry_count {
             the_directory
                 .entries
-                .push(SfntTableDirEntry::from_reader(reader)?);
+                .push(SfntDirectoryEntry::from_reader(reader)?);
         }
         Ok(the_directory)
     }
@@ -684,7 +682,7 @@ impl SfntDirectory {
     ///
     /// ### Returns
     /// Vector of copies of our entries, in increasing 'offset' order.
-    fn physical_order(&self) -> Vec<SfntTableDirEntry> {
+    fn physical_order(&self) -> Vec<SfntDirectoryEntry> {
         let mut physically_ordered_entries = self.entries.clone();
         physically_ordered_entries.sort_by_key(|e| e.offset);
         physically_ordered_entries
@@ -717,7 +715,7 @@ pub(crate) enum ChunkType {
     /// Whole-container header.
     Header,
     /// Table directory entry or entries.
-    Directory,
+    _Directory,
     /// Table data included in C2PA hash.
     TableDataIncluded,
     /// Table data excluded from C2PA hash.
@@ -728,7 +726,7 @@ impl std::fmt::Display for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::_Directory => write!(f, "_Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -739,7 +737,7 @@ impl std::fmt::Debug for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::_Directory => write!(f, "_Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -835,17 +833,10 @@ impl ChunkReader for SfntIO {
         let mut positions: Vec<ChunkPosition> = Vec::new();
         positions.push(ChunkPosition {
             offset: 0,
-            length: size_of::<SfntHeader>(),
+            length: size_of::<SfntHeader>()
+                + header.numTables as usize * size_of::<SfntDirectoryEntry>(),
             name: SFNT_HEADER_CHUNK_NAME.data,
             chunk_type: ChunkType::Header,
-        });
-
-        // The second chunk excludes the directory
-        positions.push(ChunkPosition {
-            offset: size_of::<SfntHeader>(),
-            length: header.numTables as usize * size_of::<SfntTableDirEntry>(),
-            name: SFNT_DIRECTORY_CHUNK_NAME.data,
-            chunk_type: ChunkType::Directory,
         });
 
         // The subsequent chunks represent the tables. All table data is hashed,
@@ -948,18 +939,12 @@ where
                 Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
-        // If there is, replace its `active_manifest_uri` value with the
+        // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
-                }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
-            };
+        Some(Table::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => {
+            return Err(Error::FontLoadError);
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1008,16 +993,10 @@ where
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
-        Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
-                }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
-            };
+        Some(Table::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => {
+            return Err(Error::FontLoadError);
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1185,23 +1164,19 @@ where
         None => None,
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
-        Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    if c2pa_table.active_manifest_uri.is_none() {
-                        None
-                    } else {
-                        // TBD this cannot really be the idiomatic way, can it?
-                        let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
-                        c2pa_table.active_manifest_uri = None;
-                        old_manifest_uri
-                    }
-                }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
+        Some(Table::C2PA(c2pa)) => {
+            if c2pa.active_manifest_uri.is_none() {
+                None
+            } else {
+                // TBD this cannot really be the idiomatic way, can it?
+                let old_manifest_uri = c2pa.active_manifest_uri.clone();
+                c2pa.active_manifest_uri = None;
+                old_manifest_uri
             }
+        }
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => {
+            return Err(Error::FontLoadError);
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1244,7 +1219,7 @@ where
         match chunk.chunk_type {
             // The table directory, other than the table records array will be
             // added as "other"
-            ChunkType::Header | ChunkType::Directory | ChunkType::TableDataExcluded => {
+            ChunkType::Header | ChunkType::_Directory | ChunkType::TableDataExcluded => {
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
                     length: chunk.length,
@@ -1284,13 +1259,13 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match sfnt.tables.get(&C2PA_TABLE_TAG) {
         None => None,
-        Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
-            Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
-            _ => {
-                // Non-C2PA table with C2PA tag
-                return Err(Error::FontLoadError);
-            }
-        },
+        // If there is, replace its `manifest_store` value with the
+        // provided one.
+        Some(Table::C2PA(c2pa)) => Some(c2pa.clone()),
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => {
+            return Err(Error::FontLoadError);
+        }
     };
     c2pa_table.ok_or(Error::JumbfNotFound)
 }
@@ -1697,8 +1672,8 @@ pub mod tests {
             &ChunkPosition {
                 offset: 12_usize,
                 length: 0_usize,
-                name: SFNT_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::Directory,
+                name: _SFNT_DIRECTORY_CHUNK_NAME.data,
+                chunk_type: ChunkType::_Directory,
             }
         );
     }
@@ -1741,8 +1716,8 @@ pub mod tests {
             &ChunkPosition {
                 offset: 12_usize,
                 length: 16_usize,
-                name: SFNT_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::Directory,
+                name: _SFNT_DIRECTORY_CHUNK_NAME.data,
+                chunk_type: ChunkType::_Directory,
             }
         );
         // Third is the C2PB table

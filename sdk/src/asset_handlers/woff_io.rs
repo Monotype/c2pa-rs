@@ -458,7 +458,7 @@ impl WoffFont {
         //   First, the header, then the directory, and finally the tables
         self.header.totalSfntSize = size_of::<SfntHeader>() as u32;
         self.header.totalSfntSize +=
-            (size_of::<SfntTableDirEntry>() * self.header.numTables as usize) as u32;
+            (size_of::<SfntDirectoryEntry>() * self.header.numTables as usize) as u32;
         self.header.totalSfntSize += self
             .directory
             .entries

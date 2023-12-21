@@ -917,7 +917,7 @@ pub(crate) struct SfntHeader {
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
-pub(crate) struct SfntTableDirEntry {
+pub(crate) struct SfntDirectoryEntry {
     pub tag: SfntTag,
     pub checksum: u32,
     pub offset: u32,
