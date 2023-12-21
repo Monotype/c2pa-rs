@@ -509,6 +509,8 @@ TBD get rid of this why are we?
         // Rewrite the head table's checksumAdjustment. (This act does *not*
         // invalidate the checksum in the TDE for the 'head' table, which is
         // always treated as zero during check summing.
+
+no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
