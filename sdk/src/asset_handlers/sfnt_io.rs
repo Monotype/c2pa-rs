@@ -14,7 +14,7 @@ use std::{
     cmp::Ordering,
     collections::BTreeMap,
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
     mem::size_of,
     num::Wrapping, // TBD - should we be using core::num?
     path::*,
@@ -179,15 +179,11 @@ mod font_xmp_support {
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
     #[allow(dead_code)]
-    pub(crate) fn add_reference_as_xmp_to_stream<TSource, TDest>(
-        source: &mut TSource,
-        destination: &mut TDest,
+    pub(crate) fn add_reference_as_xmp_to_stream(
+        source: &mut dyn CAIRead,
+        destination: &mut dyn CAIReadWrite,
         manifest_uri: &str,
-    ) -> Result<()>
-    where
-        TSource: Read + Seek + ?Sized,
-        TDest: Write + ?Sized,
-    {
+    ) -> Result<()> {
         // We must register the namespace for dcterms, to be able to set the
         // provenance
         XmpMeta::register_namespace("http://purl.org/dc/terms/", "dcterms")
@@ -275,7 +271,7 @@ struct SfntFont {
     header: SfntHeader,
     directory: SfntDirectory,
     /// All the Tables in this font, keyed by SfntTag.
-    tables: BTreeMap<SfntTag, Table>,
+    tables: BTreeMap<SfntTag, Box<dyn Table>>,
 }
 
 impl SfntFont {
@@ -303,11 +299,11 @@ impl SfntFont {
             let offset: u64 = entry.offset as u64;
             let size: usize = entry.length as usize;
             // Create a table instance for it.
-            let table: Table = {
+            let table: Box<dyn Table> = {
                 match entry.tag {
-                    C2PA_TABLE_TAG => Table::C2PA(TableC2PA::from_reader(reader, offset, size)?),
-                    HEAD_TABLE_TAG => Table::Head(TableHead::from_reader(reader, offset, size)?),
-                    _ => Table::Unspecified(TableUnspecified::from_reader(reader, offset, size)?),
+                    C2PA_TABLE_TAG => Box::new(TableC2PA::from_reader(reader, offset, size)?),
+                    HEAD_TABLE_TAG => Box::new(TableHead::from_reader(reader, offset, size)?),
+                    _ => Box::new(TableUnspecified::from_reader(reader, offset, size)?),
                 }
             };
             // Tell it to get in the van
@@ -326,7 +322,7 @@ impl SfntFont {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         let mut neo_header = SfntHeader::default();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
@@ -475,23 +471,20 @@ impl SfntFont {
         // BTreeMap is a kind of hash-map where each key, if present, can have
         // a value of one specific unique data type (i.e, one of our Table
         // enums.)
-        if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
-            match ostensible_head {
-                Table::Head(head) => {
-                    if let Some(head_entry) = neo_directory
-                        .entries
-                        .iter_mut()
-                        .find(|entry| entry.tag == HEAD_TABLE_TAG)
-                    {
-                        head_entry.checksum = head.checksum().0;
-                    }
+        if let Some(table) = self.tables.get(&HEAD_TABLE_TAG) {
+            if let Some(head_table) = table.as_any().downcast_ref::<TableHead>() {
+                if let Some(head_entry) = neo_directory
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.tag == HEAD_TABLE_TAG)
+                {
+                    head_entry.checksum = head_table.checksum().0;
                 }
-                _ => {
-                    // Tables and directory are out-of-sync
-                    return Err(Error::FontSaveError);
-                }
-            };
-        };
+            } else {
+                // Tables and directory are out-of-sync
+                return Err(Error::FontSaveError);
+            }
+        }
 
         // Get the checksum for the whole font, starting with the front matter...
         // TBD note this is wasted work, if there's no head table in which to
@@ -510,16 +503,13 @@ impl SfntFont {
         // invalidate the checksum in the TDE for the 'head' table, which is
         // always treated as zero during check summing.
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
-            match ostensible_head {
-                Table::Head(head) => {
-                    head.checksumAdjustment =
-                        (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
-                }
-                _ => {
-                    // Tables and directory are out-of-sync
-                    return Err(Error::FontSaveError);
-                }
-            };
+            if let Some(head_table) = ostensible_head.as_any_mut().downcast_mut::<TableHead>() {
+                head_table.checksumAdjustment =
+                    (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
+            } else {
+                // Tables and directory are out-of-sync
+                return Err(Error::FontSaveError);
+            }
         };
 
         // TBD - Debug check - does a naive checksum of the font data yield
@@ -543,10 +533,10 @@ impl SfntFont {
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
-            match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa) => c2pa.write(destination)?,
-                Table::Head(head) => head.write(destination)?,
-                Table::Unspecified(un) => un.write(destination)?,
+            if let Some(table) = self.tables.get_mut(&entry.tag) {
+                table.write(destination)?;
+            } else {
+                return Err(Error::FontSaveError);
             }
         }
         // If we made it here, it all worked.
@@ -583,7 +573,7 @@ impl SfntFont {
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
-        self.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
+        self.tables.insert(C2PA_TABLE_TAG, Box::new(c2pa_table));
         // Count the table, grow the total size, grow, the "SFNT size"
         self.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
@@ -620,7 +610,7 @@ impl SfntHeader {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.searchRange)?;
@@ -680,7 +670,7 @@ impl SfntTableDirEntry {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
@@ -763,7 +753,7 @@ impl SfntDirectory {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
@@ -955,15 +945,11 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 /// - `source` - Source stream to read initial data from
 /// - `destination` - Destination stream to write C2PA manifest store data
 /// - `manifest_store_data` - C2PA manifest store data to add to the font stream
-fn add_c2pa_to_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn add_c2pa_to_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
     manifest_store_data: &[u8],
-) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
-{
+) -> Result<()> {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
@@ -973,21 +959,21 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+                Box::new(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
-                }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
-            };
+            if let Some(c2pa_table) = ostensible_c2pa_table
+                .as_any_mut()
+                .downcast_mut::<TableC2PA>()
+            {
+                c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
+            } else {
+                // Non-C2PA table with C2PA tag
+                return Err(Error::FontLoadError);
+            }
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1013,15 +999,11 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 /// - `source` - Source stream to read initial data from
 /// - `destination` - Destination stream to write data with new reference
 /// - `manifest_uri` - Reference URI to a manifest store
-fn add_reference_to_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn add_reference_to_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
     manifest_uri: &str,
-) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
-{
+) -> Result<()> {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
@@ -1031,21 +1013,21 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+                Box::new(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
-                }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
-            };
+            if let Some(c2pa_table) = ostensible_c2pa_table
+                .as_any_mut()
+                .downcast_mut::<TableC2PA>()
+            {
+                c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
+            } else {
+                // Non-C2PA table with C2PA tag
+                return Err(Error::FontLoadError);
+            }
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -1066,14 +1048,10 @@ where
 ///
 /// ### Returns
 /// A Result indicating success or failure
-fn add_required_chunks_to_stream<TReader, TWriter>(
-    input_stream: &mut TReader,
-    output_stream: &mut TWriter,
-) -> Result<()>
-where
-    TReader: Read + Seek + ?Sized,
-    TWriter: Read + Seek + ?Sized + Write,
-{
+fn add_required_chunks_to_stream(
+    input_stream: &mut dyn CAIRead,
+    output_stream: &mut dyn CAIReadWrite,
+) -> Result<()> {
     // Read the font from the input stream
     let mut font = SfntFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
     // If the C2PA table does not exist...
@@ -1169,14 +1147,10 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// - `source` - Source data stream containing font data
 /// - `destination` - Destination data stream to write new font data with the
 ///                   C2PA table removed
-fn remove_c2pa_from_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
-) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
-{
+fn remove_c2pa_from_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
+) -> Result<()> {
     source.rewind()?;
     // Load the font from the stream
     let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
@@ -1204,7 +1178,7 @@ fn remove_reference_from_stream<TSource, TDest>(
 ) -> Result<Option<String>>
 where
     TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
+    TDest: CAIReadWrite,
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
@@ -1214,21 +1188,22 @@ where
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    if c2pa_table.active_manifest_uri.is_none() {
-                        None
-                    } else {
-                        // TBD this cannot really be the idiomatic way, can it?
-                        let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
-                        c2pa_table.active_manifest_uri = None;
-                        old_manifest_uri
-                    }
+            if let Some(c2pa_table) = ostensible_c2pa_table
+                .as_any_mut()
+                .downcast_mut::<TableC2PA>()
+                .as_mut()
+            {
+                if c2pa_table.active_manifest_uri.is_none() {
+                    None
+                } else {
+                    // TBD this cannot really be the idiomatic way, can it?
+                    let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
+                    c2pa_table.active_manifest_uri = None;
+                    old_manifest_uri
                 }
-                _ => {
-                    // Non-C2PA table with C2PA tag
-                    return Err(Error::FontLoadError);
-                }
+            } else {
+                // Non-C2PA table with C2PA tag
+                return Err(Error::FontLoadError);
             }
         }
     };
@@ -1243,13 +1218,10 @@ where
 ///
 /// ### Returns
 /// A collection of positions/offsets and length to omit from hashing.
-fn get_object_locations_from_stream<T>(
+fn get_object_locations_from_stream(
     sfnt_io: &SfntIO,
-    reader: &mut T,
-) -> Result<Vec<HashObjectPositions>>
-where
-    T: Read + Seek + ?Sized,
-{
+    reader: &mut dyn CAIRead,
+) -> Result<Vec<HashObjectPositions>> {
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
     // now to make sure we can parse the font.
     reader.rewind()?;
@@ -1302,13 +1274,14 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match sfnt.tables.get(&C2PA_TABLE_TAG) {
         None => None,
-        Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
-            Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
-            _ => {
+        Some(ostensible_c2pa_table) => {
+            if let Some(c2pa_table) = ostensible_c2pa_table.as_any().downcast_ref::<TableC2PA>() {
+                Some(c2pa_table.clone())
+            } else {
                 // Non-C2PA table with C2PA tag
                 return Err(Error::FontLoadError);
             }
-        },
+        }
     };
     c2pa_table.ok_or(Error::JumbfNotFound)
 }

@@ -12,8 +12,9 @@
 // each license.
 
 use std::{
+    any::Any,
     convert::TryFrom,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufReader, Read, Seek, SeekFrom},
     mem::size_of,
     num::Wrapping,
     str::from_utf8,
@@ -22,10 +23,14 @@ use std::{
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    CAIRead, CAIReadWrite,
+};
+
+impl<T> CAIRead for BufReader<T> where T: Read + Send + Seek {}
 
 /// Types for supporting fonts in any container.
-
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct SfntTag {
@@ -65,7 +70,7 @@ impl SfntTag {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         destination.write_all(&self.data)?;
         Ok(())
     }
@@ -381,7 +386,7 @@ impl TableC2PARaw {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
@@ -563,7 +568,7 @@ impl TableC2PA {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
@@ -578,6 +583,28 @@ impl TableC2PA {
         }
         // Done
         Ok(())
+    }
+}
+
+impl Table for TableC2PA {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.serialize(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -750,7 +777,7 @@ impl TableHead {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -784,6 +811,28 @@ impl TableHead {
         destination.write_u16::<BigEndian>(0_u16)?;
         // 0x38 - two bytes to get 54-byte 'head' up to nice round 56 bytes
         Ok(())
+    }
+}
+
+impl Table for TableHead {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.serialize(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -844,7 +893,7 @@ impl TableUnspecified {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         destination
             .write_all(&self.data[..])
             .map_err(|_e| Error::FontSaveError)?;
@@ -859,20 +908,29 @@ impl TableUnspecified {
     }
 }
 
-/// Possible tables
-#[derive(Debug)]
-pub(crate) enum Table {
-    /// 'C2PA' table
-    C2PA(TableC2PA),
-    /// 'head' table
-    Head(TableHead),
-    /// any other table
-    Unspecified(TableUnspecified),
+impl Table for TableUnspecified {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.serialize(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
-// TBD - This looks sort of like the CRTP from C++; do we want a Trait here
-// that *both* table *and* its value-types implement?
-impl Table {
+pub(crate) trait Table {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
@@ -880,13 +938,7 @@ impl Table {
     ///
     /// ### Returns
     /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        match self {
-            Table::C2PA(c2pa) => c2pa.checksum(),
-            Table::Head(head) => head.checksum(),
-            Table::Unspecified(un) => un.checksum(),
-        }
-    }
+    fn checksum(&self) -> Wrapping<u32>;
 
     /// Returns the total length in bytes of this table.
     ///
@@ -895,13 +947,17 @@ impl Table {
     ///
     /// ### Returns
     /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Table::C2PA(c2pa) => c2pa.len(),
-            Table::Head(head) => head.len(),
-            Table::Unspecified(un) => un.len(),
-        }
-    }
+    fn len(&self) -> usize;
+
+    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()>;
+
+    /// Returns a reference to the underlying data as an Any, to
+    /// allow downcasting.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Returns a mutable reference to the underlying data as an Any, to
+    /// allow downcasting.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// All the serialization structures so far have been defined using native

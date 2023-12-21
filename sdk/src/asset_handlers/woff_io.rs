@@ -303,7 +303,7 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: BTreeMap<SfntTag, Table>,
+    tables: BTreeMap<SfntTag, Box<dyn Table>>,
     meta: Option<TableUnspecified>,
     private: Option<TableUnspecified>,
 }
@@ -327,11 +327,11 @@ impl WoffFont {
             let offset: u64 = entry.offset as u64;
             let size: usize = entry.compLength as usize;
             // Create a table instance for it.
-            let table: Table = {
+            let table: Box<dyn Table> = {
                 match entry.tag {
-                    C2PA_TABLE_TAG => Table::C2PA(TableC2PA::from_reader(reader, offset, size)?),
-                    HEAD_TABLE_TAG => Table::Head(TableHead::from_reader(reader, offset, size)?),
-                    _ => Table::Unspecified(TableUnspecified::from_reader(reader, offset, size)?),
+                    C2PA_TABLE_TAG => Box::new(TableC2PA::from_reader(reader, offset, size)?),
+                    HEAD_TABLE_TAG => Box::new(TableHead::from_reader(reader, offset, size)?),
+                    _ => Box::new(TableUnspecified::from_reader(reader, offset, size)?),
                 }
             };
             // Tell it to get in the van
@@ -384,11 +384,7 @@ impl WoffFont {
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
-            match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                Table::Head(head_table) => head_table.write(destination)?,
-                Table::Unspecified(un_table) => un_table.write(destination)?,
-            }
+            &self.tables[&entry.tag].write(destination)?;
         }
         // Then the XML meta, if present.
         match &self.meta {
@@ -1187,12 +1183,14 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
     let woff = WoffFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
         None => None,
-        Some(ostensible_c2pa_table) => match ostensible_c2pa_table {
+        Some(ostensible_c2pa_table) => Some(ostensible_c2pa_table.clone()),
+        /*match ostensible_c2pa_table {
             Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
             _ => {
                 todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
             }
         },
+        */
     };
     c2pa_table.ok_or(Error::JumbfNotFound)
 }
