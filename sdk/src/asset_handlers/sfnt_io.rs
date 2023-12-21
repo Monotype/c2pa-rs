@@ -413,7 +413,6 @@ impl SfntFont {
                         offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
                         checksum: match *tag {
                             C2PA_TABLE_TAG => table.checksum().0,
-                            HEAD_TABLE_TAG => table.checksum().0, // TBD - Remove this, no need
                             _ => entry.checksum,
                         },
                         length: match tag {
@@ -450,83 +449,38 @@ impl SfntFont {
             }
         }
 
-        // TBD remove this, no need
-        // If a 'C2PA' table is present, re-compute its directory-entry's
-        // checksum...
-        if let Some(c2pa_entry) = neo_directory
-            .entries
-            .iter_mut()
-            .find(|entry| entry.tag == C2PA_TABLE_TAG)
-        {
-            if let Some(c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
-                c2pa_entry.checksum = c2pa.checksum().0;
-            } else {
-                // Code smell - keeping the directory and the tables separated.
-                return Err(Error::FontSaveError);
-            }
-        }
-
-        // Get the checksum for the whole font, starting with the front matter...
-        // TBD note this is wasted work, if there's no head table in which to
-        // store the result.
+        // Figure the checksum for the whole font - the header, the directory,
+        // and then all the tables; we can just use the per-table checksums,
+        // since the only one we alter is C2PA, and we just refreshed it...
         let font_cksum = neo_header.checksum()
             + neo_directory.checksum()
             + neo_directory
-                .physical_order() // TBD <- So, wrapping addition is non-commutative?
+                .entries
                 .iter()
                 .fold(Wrapping(0_u32), |tables_cksum, entry| {
                     tables_cksum + Wrapping(entry.checksum)
                 });
 
         // Rewrite the head table's checksumAdjustment. (This act does *not*
-        // invalidate the checksum in the TDE for the 'head' table, which is
-        // always treated as zero during check summing).
-        // TBD - no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
-        if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
-            match ostensible_head {
-                Table::Head(head) => {
-                    head.checksumAdjustment =
-                        (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
-                }
-                _ => {
-                    // Tables and directory are out-of-sync
-                    return Err(Error::FontSaveError);
-                }
-            };
-        };
+        // invalidate the checksum in the TDE for the 'head' table, which is        // always treated as zero during check summing).
+        if let Some(Table::Head(head)) = self.tables.get_mut(&HEAD_TABLE_TAG) {
+            head.checksumAdjustment =
+                (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
+        }
 
-        // TBD - Debug check - does a naive checksum of the font data yield
-        // HEAD_MAGIC_NUMBER, as it should if everything is assembled as
-        // expected?
-        //
-        // That's probably a really good idea with this early implementation,
-        // since our current test matrix is rather sparse.
-
-        let mut destination_buf = Vec::new();
-
-        // ...and now, with everything in sync, we can start writing; first,
-        // the header.
+        // Replace our header & directory with updated editions.
         self.header = neo_header;
-        self.header.write(&mut destination_buf)?;
-        // Then the directory.
         self.directory = neo_directory;
-        self.directory.write(&mut destination_buf)?;
-        // The above items are fixed sizes which are even multiples of four;
-        // therefore we can presume our current write offset.
+        // Write everything out.
+        self.header.write(destination)?;
+        self.directory.write(destination)?;
         for entry in self.directory.physical_order().iter() {
-            // TBD - current-offset consistency-checking:
-            //  1. Did we go backwards (despite the request for physical_order)?
-            //  2. Did we go more than 3 bytes forward (file has excess padding)?
-            // destination.seek(SeekFrom::Start(entry.offset as u64))?;
-            // Note that dest stream is not seekable.
-            // Write out the (real and fake) tables.
             match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa) => c2pa.write(&mut destination_buf)?,
-                Table::Head(head) => head.write(&mut destination_buf)?,
-                Table::Unspecified(un) => un.write(&mut destination_buf)?,
+                Table::C2PA(c2pa) => c2pa.write(destination)?,
+                Table::Head(head) => head.write(destination)?,
+                Table::Unspecified(un) => un.write(destination)?,
             }
         }
-        destination.write_all(&destination_buf)?;
         Ok(())
     }
 
