@@ -533,11 +533,7 @@ impl SfntFont {
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
-            if let Some(table) = self.tables.get_mut(&entry.tag) {
-                table.write(destination)?;
-            } else {
-                return Err(Error::FontSaveError);
-            }
+            let _ = &self.tables[&entry.tag].write(destination)?;
         }
         // If we made it here, it all worked.
         Ok(())

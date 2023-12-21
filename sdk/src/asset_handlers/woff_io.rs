@@ -113,9 +113,7 @@ mod font_xmp_support {
     /// ### Remarks
     /// The use of this function really shouldn't be needed, but currently the SDK
     /// is tightly coupled to the use of XMP with assets.
-    pub(crate) fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<XmpMeta>
-    where
-        TSource: Read + Seek + ?Sized,
+    pub(crate) fn build_xmp_from_stream(source: &mut dyn CAIRead) -> Result<XmpMeta>
     {
         match read_reference_from_stream(source)? {
             // For now we pretend the reference read from the stream is really XMP
@@ -178,14 +176,11 @@ mod font_xmp_support {
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
     #[allow(dead_code)]
-    pub(crate) fn add_reference_as_xmp_to_stream<TSource, TDest>(
-        source: &mut TSource,
-        destination: &mut TDest,
+    pub(crate) fn add_reference_as_xmp_to_stream(
+        source: &mut dyn CAIRead,
+        destination: &mut dyn CAIReadWrite,
         manifest_uri: &str,
     ) -> Result<()>
-    where
-        TSource: Read + Seek + ?Sized,
-        TDest: Write + ?Sized,
     {
         // We must register the namespace for dcterms, to be able to set the
         // provenance
@@ -371,7 +366,7 @@ impl WoffFont {
     }
 
     /// Writes out this font file.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         // First the header.
         self.header.write(destination)?;
         // Then the directory.
@@ -384,7 +379,7 @@ impl WoffFont {
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
-            &self.tables[&entry.tag].write(destination)?;
+            let _ = &self.tables[&entry.tag].write(destination)?;
         }
         // Then the XML meta, if present.
         match &self.meta {
@@ -435,7 +430,7 @@ impl WoffFont {
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
-        self.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
+        self.tables.insert(C2PA_TABLE_TAG, Box::new(c2pa_table));
         // Count the table, grow the total size, grow, the "SFNT size"
         self.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
@@ -577,7 +572,7 @@ impl WoffTableDirEntry {
     }
 
     /// Serialize this directory entry to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.offset)?;
         destination.write_u32::<BigEndian>(self.compLength)?;
@@ -614,7 +609,7 @@ impl WoffDirectory {
     }
 
     /// Serialize this directory entry to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
@@ -786,14 +781,11 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 /// -`source` - Source stream to read initial data from
 /// -`destination` - Destination stream to write C2PA manifest store data
 /// -`manifest_store_data` - C2PA manifest store data to add to the font stream
-fn add_c2pa_to_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn add_c2pa_to_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
     manifest_store_data: &[u8],
 ) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
 {
     source.rewind()?;
     let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
@@ -804,20 +796,18 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+                Box::new(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
-                }
-                _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
-                }
-            };
+            if let Some(c2pa_table) = ostensible_c2pa_table.as_any_mut().downcast_mut::<TableC2PA>() {
+                c2pa_table.manifest_store = Some(manifest_store_data.to_vec());
+            }
+            else {
+               todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+            }
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -843,14 +833,11 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 /// -`source` - Source stream to read initial data from
 /// -`destination` - Destination stream to write data with new reference
 /// -`manifest_uri` - Reference URI to a manifest store
-fn add_reference_to_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn add_reference_to_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
     manifest_uri: &str,
 ) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
 {
     source.rewind()?;
     let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
@@ -861,20 +848,18 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+                Box::new(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
-                }
-                _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
-                }
-            };
+            if let Some(c2pa_table) = ostensible_c2pa_table.as_any_mut().downcast_mut::<TableC2PA>() {
+                c2pa_table.active_manifest_uri = Some(manifest_uri.to_string());
+            }
+            else {
+               todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
+            }
         }
     };
     font.write(destination).map_err(|_| Error::FontSaveError)?;
@@ -895,13 +880,10 @@ where
 ///
 /// ### Returns
 /// A Result indicating success or failure
-fn add_required_chunks_to_stream<TReader, TWriter>(
-    input_stream: &mut TReader,
-    output_stream: &mut TWriter,
+fn add_required_chunks_to_stream(
+    input_stream: &mut dyn CAIRead,
+    output_stream: &mut dyn CAIReadWrite,
 ) -> Result<()>
-where
-    TReader: Read + Seek + ?Sized,
-    TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
     let mut font = WoffFont::from_reader(input_stream).map_err(|_| Error::FontLoadError)?;
@@ -969,9 +951,7 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 /// ### Returns
 /// If a reference is available, it will be returned.
 #[allow(dead_code)]
-fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
-where
-    TSource: Read + Seek + ?Sized,
+fn read_reference_from_stream(source: &mut dyn CAIRead) -> Result<Option<String>>
 {
     match read_c2pa_from_stream(source) {
         Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri.to_owned()),
@@ -998,13 +978,10 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// -`source` - Source data stream containing font data
 /// -`destination` - Destination data stream to write new font data with the
 ///                   C2PA table removed
-fn remove_c2pa_from_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn remove_c2pa_from_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
 ) -> Result<()>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
 {
     source.rewind()?;
     // Load the font from the stream
@@ -1028,13 +1005,10 @@ where
 /// ### Returns
 /// The active manifest URI reference that was removed, if there was one
 #[allow(dead_code)]
-fn remove_reference_from_stream<TSource, TDest>(
-    source: &mut TSource,
-    destination: &mut TDest,
+fn remove_reference_from_stream(
+    source: &mut dyn CAIRead,
+    destination: &mut dyn CAIReadWrite,
 ) -> Result<Option<String>>
-where
-    TSource: Read + Seek + ?Sized,
-    TDest: Write + ?Sized,
 {
     source.rewind()?;
     let mut font = WoffFont::from_reader(source).map_err(|_| Error::FontLoadError)?;
@@ -1044,20 +1018,18 @@ where
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
         Some(ostensible_c2pa_table) => {
-            match ostensible_c2pa_table {
-                Table::C2PA(c2pa_table) => {
-                    if c2pa_table.active_manifest_uri.is_none() {
-                        None
-                    } else {
-                        // TBD this cannot really be the idiomatic way, can it?
-                        let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
-                        c2pa_table.active_manifest_uri = None;
-                        old_manifest_uri
-                    }
+            if let Some(c2pa_table) = ostensible_c2pa_table.as_any_mut().downcast_mut::<TableC2PA>() {
+                if c2pa_table.active_manifest_uri.is_none() {
+                    None
+                } else {
+                    // TBD this cannot really be the idiomatic way, can it?
+                    let old_manifest_uri = c2pa_table.active_manifest_uri.clone();
+                    c2pa_table.active_manifest_uri = None;
+                    old_manifest_uri
                 }
-                _ => {
-                    todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
-                }
+            }
+            else {
+               todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
             }
         }
     };
@@ -1072,12 +1044,10 @@ where
 ///
 /// ### Returns
 /// A collection of positions/offsets and length to omit from hashing.
-fn get_object_locations_from_stream<T>(
+fn get_object_locations_from_stream(
     woff_io: &WoffIO,
-    reader: &mut T,
+    reader: &mut dyn CAIRead,
 ) -> Result<Vec<HashObjectPositions>>
-where
-    T: Read + Seek + ?Sized,
 {
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
     // now to make sure we can parse the font.
@@ -1179,18 +1149,18 @@ where
 ///
 /// ### Returns
 /// A result containing the `C2PA` font table data
-fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
+fn read_c2pa_from_stream(reader: &mut dyn CAIRead) -> Result<TableC2PA> {
     let woff = WoffFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
         None => None,
-        Some(ostensible_c2pa_table) => Some(ostensible_c2pa_table.clone()),
-        /*match ostensible_c2pa_table {
-            Table::C2PA(bonafied_c2pa_table) => Some(bonafied_c2pa_table.clone()),
-            _ => {
+        Some(ostensible_c2pa_table) => {
+            if let Some(c2pa_table) =  ostensible_c2pa_table.as_any().downcast_ref::<TableC2PA>() {
+                Some(c2pa_table.clone())
+            }
+            else {
                 todo!("A non-C2PA table was found with the C2PA tag. We should report this as if it were an error, which it most certainly is.");
             }
-        },
-        */
+        }
     };
     c2pa_table.ok_or(Error::JumbfNotFound)
 }

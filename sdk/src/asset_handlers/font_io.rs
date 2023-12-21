@@ -595,7 +595,7 @@ impl Table for TableC2PA {
         self.len()
     }
 
-    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         self.serialize(destination)
     }
 
@@ -823,7 +823,7 @@ impl Table for TableHead {
         self.len()
     }
 
-    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         self.serialize(destination)
     }
 
@@ -917,7 +917,7 @@ impl Table for TableUnspecified {
         self.len()
     }
 
-    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
         self.serialize(destination)
     }
 
@@ -948,7 +948,7 @@ pub(crate) trait Table {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()>;
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()>;
 
     /// Returns a reference to the underlying data as an Any, to
     /// allow down casting.
