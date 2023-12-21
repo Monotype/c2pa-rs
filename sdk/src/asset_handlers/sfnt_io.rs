@@ -482,6 +482,7 @@ impl SfntFont {
                         .iter_mut()
                         .find(|entry| entry.tag == HEAD_TABLE_TAG)
                     {
+TBD get rid of this why are we?
                         head_entry.checksum = head.checksum().0;
                     }
                 }
@@ -530,12 +531,14 @@ impl SfntFont {
 
         // ...and now, with everything in sync, we can start writing; first,
         // the header.
-        neo_header.write(destination)?;
+        self.header = neo_header;
+        self.header.write(destination)?;
         // Then the directory.
-        neo_directory.write(destination)?;
+        self.directory = neo_directory;
+        self.directory.write(destination)?;
         // The above items are fixed sizes which are even multiples of four;
         // therefore we can presume our current write offset.
-        for entry in neo_directory.physical_order().iter() {
+        for entry in self.directory.physical_order().iter() {
             // TBD - current-offset consistency-checking:
             //  1. Did we go backwards (despite the request for physical_order)?
             //  2. Did we go more than 3 bytes forward (file has excess padding)?
@@ -546,6 +549,16 @@ impl SfntFont {
                 Table::C2PA(c2pa) => c2pa.write(destination)?,
                 Table::Head(head) => head.write(destination)?,
                 Table::Unspecified(un) => un.write(destination)?,
+            }
+        }
+        // Check everything again
+        for entry in &self.directory.entries {
+            if let Some(table) = self.tables.get(&entry.tag) {
+                if table.checksum().0 != entry.checksum {
+                    panic!("checksum mismatch!");
+                }
+            } else {
+                panic!("Missing table!")
             }
         }
         // If we made it here, it all worked.
@@ -891,6 +904,13 @@ impl ChunkReader for SfntIO {
         reader.rewind()?;
         let header = SfntHeader::from_reader(reader)?;
         let directory = SfntDirectory::from_reader(reader, header.numTables as usize)?;
+
+        // TBD - Streamlined approach:
+        // - FNT0 - Header + directory
+        // - FNT
+
+also per-table, and then... is there like a chunked-table way?
+
 
         // The first chunk excludes the header from hashing
         let mut positions: Vec<ChunkPosition> = Vec::new();
