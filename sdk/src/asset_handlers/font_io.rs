@@ -930,11 +930,9 @@ impl Table for TableUnspecified {
     }
 }
 
+/// Represents a font table.
 pub(crate) trait Table {
     /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
     ///
     /// ### Returns
     /// Wrapping<u32> with the checksum.
@@ -942,21 +940,22 @@ pub(crate) trait Table {
 
     /// Returns the total length in bytes of this table.
     ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
     /// ### Returns
     /// Total size of table data, in bytes.
     fn len(&self) -> usize;
 
+    /// Write the table to the given destination.
+    ///
+    /// ### Parameters
+    /// - `destination` - Output stream
     fn write(&mut self, destination: &mut dyn CAIReadWrite) -> Result<()>;
 
     /// Returns a reference to the underlying data as an Any, to
-    /// allow downcasting.
+    /// allow down casting.
     fn as_any(&self) -> &dyn Any;
 
     /// Returns a mutable reference to the underlying data as an Any, to
-    /// allow downcasting.
+    /// allow down casting.
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
