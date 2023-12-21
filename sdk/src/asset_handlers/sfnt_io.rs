@@ -1654,9 +1654,8 @@ pub mod tests {
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
         let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have two positions reported:
-        assert_eq!(2, positions.len());
-        // First is the header
+        // Should have one positions reported, for a header and no dir entries
+        assert_eq!(1, positions.len());
         assert_eq!(
             positions.first().unwrap(),
             &ChunkPosition {
@@ -1664,16 +1663,6 @@ pub mod tests {
                 length: 12_usize,
                 name: SFNT_HEADER_CHUNK_NAME.data,
                 chunk_type: ChunkType::Header,
-            }
-        );
-        // Second is an empty table directory
-        assert_eq!(
-            positions.get(1).unwrap(),
-            &ChunkPosition {
-                offset: 12_usize,
-                length: 0_usize,
-                name: _SFNT_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::_Directory,
             }
         );
     }
@@ -1697,32 +1686,21 @@ pub mod tests {
         let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
         let sfnt_io = SfntIO {};
         let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have 3 positions reported for the table directory, table
-        // record, and the table data
-        assert_eq!(3, positions.len());
+        // Should have 2 positions reported for the header and the table data
+        assert_eq!(2, positions.len());
         // First is the header
         assert_eq!(
             positions.first().unwrap(),
             &ChunkPosition {
                 offset: 0_usize,
-                length: 12_usize,
+                length: 28_usize,
                 name: SFNT_HEADER_CHUNK_NAME.data,
                 chunk_type: ChunkType::Header,
             }
         );
-        // Second is a single-entry table directory
+        // Second is the C2PB table
         assert_eq!(
             positions.get(1).unwrap(),
-            &ChunkPosition {
-                offset: 12_usize,
-                length: 16_usize,
-                name: _SFNT_DIRECTORY_CHUNK_NAME.data,
-                chunk_type: ChunkType::_Directory,
-            }
-        );
-        // Third is the C2PB table
-        assert_eq!(
-            positions.get(2).unwrap(),
             &ChunkPosition {
                 offset: 28_usize,
                 length: 1,
@@ -1751,7 +1729,7 @@ pub mod tests {
         // but the head table will expand from 1 to 3 positions bringing it to 25
         // And then the required C2PA chunks will be added, bringing it to 27
         let positions = sfnt_io.get_object_locations(&output).unwrap();
-        assert_eq!(16, positions.len());
+        assert_eq!(15, positions.len());
     }
 
     #[test]
