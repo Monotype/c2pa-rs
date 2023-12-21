@@ -777,7 +777,7 @@ impl TableHead {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -824,7 +824,7 @@ impl Table for TableHead {
     }
 
     fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
-        self.serialize(destination)
+        self.write(destination)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -893,7 +893,7 @@ impl TableUnspecified {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
             .map_err(|_e| Error::FontSaveError)?;
@@ -918,7 +918,7 @@ impl Table for TableUnspecified {
     }
 
     fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
-        self.serialize(destination)
+        self.write(destination)
     }
 
     fn as_any(&self) -> &dyn Any {

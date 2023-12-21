@@ -14,7 +14,7 @@ use std::{
     cmp::Ordering,
     collections::BTreeMap,
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
     mem::size_of,
     num::Wrapping, // TBD - should we be using core::num?
     path::*,
@@ -606,7 +606,7 @@ impl SfntHeader {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.searchRange)?;
@@ -666,7 +666,7 @@ impl SfntTableDirEntry {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
@@ -749,7 +749,7 @@ impl SfntDirectory {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
@@ -1119,7 +1119,7 @@ where
     TSource: Read + Seek + ?Sized,
 {
     match read_c2pa_from_stream(source) {
-        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri.to_owned()),
+        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
         Err(Error::JumbfNotFound) => Ok(None),
         Err(_) => Err(Error::DeserializationError),
     }

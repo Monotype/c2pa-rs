@@ -570,7 +570,7 @@ impl WoffTableDirEntry {
     }
 
     /// Serialize this directory entry to the given writer.
-    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.offset)?;
         destination.write_u32::<BigEndian>(self.compLength)?;
@@ -607,7 +607,7 @@ impl WoffDirectory {
     }
 
     /// Serialize this directory entry to the given writer.
-    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
