@@ -1599,15 +1599,15 @@ pub mod tests {
         // Read & build
         let mut sfnt = SfntFont::from_reader(&mut font_stream).unwrap();
         // Then serialize back out
-        let mut test_data = Vec::new();
+        let mut test_data = Cursor::new(Vec::new());
         sfnt.write(&mut test_data).unwrap();
         // and read _that_ back in...
         let mut font_data = Vec::new();
         font_stream.rewind().unwrap();
         font_stream.read_to_end(&mut font_data).unwrap();
         // data should match & checksum should be right
-        assert_eq!(font_data, test_data);
-        let naive_test_cksum = checksum(&test_data).0;
+        assert_eq!(&font_data, test_data.get_ref());
+        let naive_test_cksum = checksum(test_data.get_ref()).0;
         assert_eq!(naive_test_cksum, SFNT_EXPECTED_CHECKSUM);
     }
 
@@ -1619,15 +1619,15 @@ pub mod tests {
         // Read & build
         let mut sfnt = SfntFont::from_reader(&mut font_stream).unwrap();
         // Then serialize back out
-        let mut test_data = Vec::new();
+        let mut test_data = Cursor::new(Vec::new());
         sfnt.write(&mut test_data).unwrap();
         // and read _that_ back in...
         let mut font_data = Vec::new();
         font_stream.rewind().unwrap();
         font_stream.read_to_end(&mut font_data).unwrap();
         // data should match & checksum should be right
-        assert_eq!(font_data, test_data);
-        let naive_test_cksum = checksum(&test_data).0;
+        assert_eq!(&font_data, test_data.get_ref());
+        let naive_test_cksum = checksum(test_data.get_ref()).0;
         assert_eq!(naive_test_cksum, SFNT_EXPECTED_CHECKSUM);
     }
 
