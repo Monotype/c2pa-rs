@@ -413,7 +413,7 @@ impl SfntFont {
                         offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
                         checksum: match *tag {
                             C2PA_TABLE_TAG => table.checksum().0,
-                            HEAD_TABLE_TAG => table.checksum().0,
+                            HEAD_TABLE_TAG => table.checksum().0, // TBD - Remove this, no need
                             _ => entry.checksum,
                         },
                         length: match tag {
@@ -449,6 +449,8 @@ impl SfntFont {
                 },
             }
         }
+
+        // TBD remove this, no need
         // If a 'C2PA' table is present, re-compute its directory-entry's
         // checksum...
         if let Some(c2pa_entry) = neo_directory
@@ -463,43 +465,13 @@ impl SfntFont {
                 return Err(Error::FontSaveError);
             }
         }
-        // ...allowing us to re-compute the whole-font checksum, if a 'head'
-        // table is present...
-        //
-        // TBD - This ostensible_table two-step is just the pits:
-        // "Hey, get me the barrel from the fridge marked PICKLES,
-        //  okay thanks, now let me open it and seANCHOVIES WHY ARE THERE
-        //  ANCHOVIES WHY MUST I ALWAYS DOUBLE-CHECK THE DATATYPE OF THE THINGS
-        //  YOU ARE GIVING ME" so what we need instead of (or in addition to)
-        // BTreeMap is a kind of hash-map where each key, if present, can have
-        // a value of one specific unique data type (i.e, one of our Table
-        // enums.)
-        if let Some(ostensible_head) = self.tables.get(&HEAD_TABLE_TAG) {
-            match ostensible_head {
-                Table::Head(head) => {
-                    if let Some(head_entry) = neo_directory
-                        .entries
-                        .iter_mut()
-                        .find(|entry| entry.tag == HEAD_TABLE_TAG)
-                    {
-TBD get rid of this why are we?
-                        head_entry.checksum = head.checksum().0;
-                    }
-                }
-                _ => {
-                    // Tables and directory are out-of-sync
-                    return Err(Error::FontSaveError);
-                }
-            };
-        };
 
         // Get the checksum for the whole font, starting with the front matter...
         // TBD note this is wasted work, if there's no head table in which to
         // store the result.
-        let font_cksum = self.header.checksum()
-            + self.directory.checksum()
-            + self
-                .directory
+        let font_cksum = neo_header.checksum()
+            + neo_directory.checksum()
+            + neo_directory
                 .physical_order() // TBD <- So, wrapping addition is non-commutative?
                 .iter()
                 .fold(Wrapping(0_u32), |tables_cksum, entry| {
@@ -509,8 +481,7 @@ TBD get rid of this why are we?
         // Rewrite the head table's checksumAdjustment. (This act does *not*
         // invalidate the checksum in the TDE for the 'head' table, which is
         // always treated as zero during check summing.
-
-no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
+        // TBD - no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
                 Table::Head(head) => {
@@ -531,13 +502,15 @@ no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
         // That's probably a really good idea with this early implementation,
         // since our current test matrix is rather sparse.
 
+        let mut destination_buf = Vec::new();
+
         // ...and now, with everything in sync, we can start writing; first,
         // the header.
         self.header = neo_header;
-        self.header.write(destination)?;
+        self.header.write(&mut destination_buf)?;
         // Then the directory.
         self.directory = neo_directory;
-        self.directory.write(destination)?;
+        self.directory.write(&mut destination_buf)?;
         // The above items are fixed sizes which are even multiples of four;
         // therefore we can presume our current write offset.
         for entry in self.directory.physical_order().iter() {
@@ -548,9 +521,9 @@ no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
             match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa) => c2pa.write(destination)?,
-                Table::Head(head) => head.write(destination)?,
-                Table::Unspecified(un) => un.write(destination)?,
+                Table::C2PA(c2pa) => c2pa.write(&mut destination_buf)?,
+                Table::Head(head) => head.write(&mut destination_buf)?,
+                Table::Unspecified(un) => un.write(&mut destination_buf)?,
             }
         }
         // Check everything again
@@ -563,7 +536,20 @@ no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
                 panic!("Missing table!")
             }
         }
-        // If we made it here, it all worked.
+        let font_cksum2 = self.header.checksum()
+            + self.directory.checksum()
+            + self
+                .directory
+                .physical_order() // TBD <- So, wrapping addition is non-commutative?
+                .iter()
+                .fold(Wrapping(0_u32), |tables_cksum, entry| {
+                    tables_cksum + Wrapping(entry.checksum)
+                }); // If we made it here, it all worked.
+        let _font_cksum3 = checksum(&destination_buf);
+        if font_cksum != font_cksum2 {
+            panic!("Panic one!")
+        }
+        destination.write_all(&destination_buf)?;
         Ok(())
     }
 
@@ -908,13 +894,13 @@ impl ChunkReader for SfntIO {
         let directory = SfntDirectory::from_reader(reader, header.numTables as usize)?;
 
         // TBD - Streamlined approach:
-        // - FNT0 - Header + directory
-        // - FNT
+        // 1 - Header + directory
+        // 2 - Data from start to head::checksumAdjustment
+        // 3 - head::checksumAdjustment
+        // 4 - Data from head::checksumAdjustment through penultimate table
+        // 5 - The C2PA table
 
-also per-table, and then... is there like a chunked-table way?
-
-
-        // The first chunk excludes the header from hashing
+        // The first chunk excludes the header & directory from hashing
         let mut positions: Vec<ChunkPosition> = Vec::new();
         positions.push(ChunkPosition {
             offset: 0,
