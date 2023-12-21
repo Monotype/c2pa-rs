@@ -14,7 +14,7 @@
 use std::{
     any::Any,
     convert::TryFrom,
-    io::{BufReader, Read, Seek, SeekFrom},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     mem::size_of,
     num::Wrapping,
     str::from_utf8,
@@ -70,7 +70,7 @@ impl SfntTag {
     ///
     /// ### Parameters
     /// - `destination` - Output stream
-    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_all(&self.data)?;
         Ok(())
     }
@@ -386,7 +386,7 @@ impl TableC2PARaw {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
         destination.write_u32::<BigEndian>(self.activeManifestUriOffset)?;
@@ -568,7 +568,7 @@ impl TableC2PA {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
@@ -777,7 +777,7 @@ impl TableHead {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -893,7 +893,7 @@ impl TableUnspecified {
     /// ### Parameters
     /// - `self` - Instance
     /// - `destination` - Output stream
-    pub(crate) fn serialize(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+    pub(crate) fn serialize<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
             .map_err(|_e| Error::FontSaveError)?;
