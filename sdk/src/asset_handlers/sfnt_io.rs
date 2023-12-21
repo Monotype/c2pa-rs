@@ -480,7 +480,7 @@ impl SfntFont {
 
         // Rewrite the head table's checksumAdjustment. (This act does *not*
         // invalidate the checksum in the TDE for the 'head' table, which is
-        // always treated as zero during check summing.
+        // always treated as zero during check summing).
         // TBD - no like this if let Some(Table::Head(head)) = self.tables.get(&HEAD_TABLE_TAG) {
         if let Some(ostensible_head) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             match ostensible_head {
@@ -525,29 +525,6 @@ impl SfntFont {
                 Table::Head(head) => head.write(&mut destination_buf)?,
                 Table::Unspecified(un) => un.write(&mut destination_buf)?,
             }
-        }
-        // Check everything again
-        for entry in &self.directory.entries {
-            if let Some(table) = self.tables.get(&entry.tag) {
-                if table.checksum().0 != entry.checksum {
-                    panic!("checksum mismatch!");
-                }
-            } else {
-                panic!("Missing table!")
-            }
-        }
-        let font_cksum2 = self.header.checksum()
-            + self.directory.checksum()
-            + self
-                .directory
-                .physical_order() // TBD <- So, wrapping addition is non-commutative?
-                .iter()
-                .fold(Wrapping(0_u32), |tables_cksum, entry| {
-                    tables_cksum + Wrapping(entry.checksum)
-                }); // If we made it here, it all worked.
-        let _font_cksum3 = checksum(&destination_buf);
-        if font_cksum != font_cksum2 {
-            panic!("Panic one!")
         }
         destination.write_all(&destination_buf)?;
         Ok(())
@@ -1624,6 +1601,9 @@ pub mod tests {
             Ok(Some(manifest_uri)) => assert_eq!(expected_manifest_uri, manifest_uri),
             _ => panic!("Expected to read a reference from the font file"),
         };
+
+        let output_data = std::fs::read(&output).unwrap();
+        assert_eq!(checksum(&output_data).0, SFNT_EXPECTED_CHECKSUM);
     }
 
     #[test]
@@ -1677,6 +1657,9 @@ pub mod tests {
             }
             _ => panic!("Expected to read a reference from the font file"),
         };
+
+        let output_data = std::fs::read(&output).unwrap();
+        assert_eq!(checksum(&output_data).0, SFNT_EXPECTED_CHECKSUM);
     }
 
     #[test]
