@@ -930,7 +930,7 @@ impl ChunkReader for SfntIO {
                         offset: entry.offset as usize,
                         length: 8_usize,
                         name: *b"hea0",
-                        chunk_type: ChunkType::TableDataExcluded,
+                        chunk_type: ChunkType::TableDataIncluded,
                     });
                     positions.push(ChunkPosition {
                         offset: entry.offset as usize + 8_usize,
@@ -942,7 +942,7 @@ impl ChunkReader for SfntIO {
                         offset: entry.offset as usize + 12_usize,
                         length: 42_usize,
                         name: *b"hea2",
-                        chunk_type: ChunkType::TableDataExcluded,
+                        chunk_type: ChunkType::TableDataIncluded,
                     });
                 }
                 _ => {
@@ -1309,14 +1309,14 @@ where
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
                     length: chunk.length,
-                    htype: HashBlockObjectType::Other,
+                    htype: HashBlockObjectType::Cai,
                 });
             }
             ChunkType::TableDataIncluded => {
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
                     length: chunk.length,
-                    htype: HashBlockObjectType::Cai,
+                    htype: HashBlockObjectType::Other,
                 });
             }
         }
