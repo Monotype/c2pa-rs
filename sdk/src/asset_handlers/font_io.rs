@@ -587,11 +587,11 @@ impl Default for TableC2PA {
 // support exotics like FIXED).
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 pub(crate) struct TableHead {
-    pub majorVersion: u16,
-    pub minorVersion: u16,
-    pub fontRevision: u32,
-    pub checksumAdjustment: u32,
-    pub magicNumber: u32,
+    pub majorVersion: u16,       // Note - Since we only modify checksumAdjustment,
+    pub minorVersion: u16,       // we might just as well define this struct as
+    pub fontRevision: u32,       //    version_stuff: u8[8],
+    pub checksumAdjustment: u32, //    checksumAdjustment: u32,
+    pub magicNumber: u32,        //    rest_of_stuff: u8[42],
     pub flags: u16,
     pub unitsPerEm: u16,
     pub created: i64,
