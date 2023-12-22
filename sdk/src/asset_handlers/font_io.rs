@@ -12,8 +12,9 @@
 // each license.
 
 use std::{
+    any::Any,
     convert::TryFrom,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     mem::size_of,
     num::Wrapping,
     str::from_utf8,
@@ -22,9 +23,12 @@ use std::{
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    CAIRead, CAIReadWrite,
+};
 
-/// Types for supporting fonts in any container.
+impl<T> CAIRead for BufReader<T> where T: Read + Send + Seek {}
 
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -581,6 +585,28 @@ impl TableC2PA {
     }
 }
 
+impl Table for TableC2PA {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.write(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 impl Default for TableC2PA {
     fn default() -> Self {
         Self {
@@ -787,6 +813,28 @@ impl TableHead {
     }
 }
 
+impl Table for TableHead {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.write(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 /// Generic font table with unknown contents.
 #[derive(Debug)]
 pub(crate) struct TableUnspecified {
@@ -859,49 +907,55 @@ impl TableUnspecified {
     }
 }
 
-/// Possible tables
-#[derive(Debug)]
-pub(crate) enum Table {
-    /// 'C2PA' table
-    C2PA(TableC2PA),
-    /// 'head' table
-    Head(TableHead),
-    /// any other table
-    Unspecified(TableUnspecified),
+impl Table for TableUnspecified {
+    fn checksum(&self) -> Wrapping<u32> {
+        self.checksum()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()> {
+        self.write(destination)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
-// TBD - This looks sort of like the CRTP from C++; do we want a Trait here
-// that *both* table *and* its value-types implement?
-impl Table {
+/// Represents a font table.
+pub(crate) trait Table {
     /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
     ///
     /// ### Returns
     /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        match self {
-            Table::C2PA(c2pa) => c2pa.checksum(),
-            Table::Head(head) => head.checksum(),
-            Table::Unspecified(un) => un.checksum(),
-        }
-    }
+    fn checksum(&self) -> Wrapping<u32>;
 
     /// Returns the total length in bytes of this table.
     ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
     /// ### Returns
     /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Table::C2PA(c2pa) => c2pa.len(),
-            Table::Head(head) => head.len(),
-            Table::Unspecified(un) => un.len(),
-        }
-    }
+    fn len(&self) -> usize;
+
+    /// Write the table to the given destination.
+    ///
+    /// ### Parameters
+    /// - `destination` - Output stream
+    fn write(&self, destination: &mut dyn CAIReadWrite) -> Result<()>;
+
+    /// Returns a reference to the underlying data as an Any, to
+    /// allow down casting.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Returns a mutable reference to the underlying data as an Any, to
+    /// allow down casting.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// All the serialization structures so far have been defined using native
