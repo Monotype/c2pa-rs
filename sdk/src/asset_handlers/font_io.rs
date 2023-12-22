@@ -30,7 +30,6 @@ use crate::{
 
 impl<T> CAIRead for BufReader<T> where T: Read + Send + Seek {}
 
-/// Types for supporting fonts in any container.
 /// Four-character tag which names a font table.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct SfntTag {
