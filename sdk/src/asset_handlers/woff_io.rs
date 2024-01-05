@@ -390,11 +390,7 @@ impl WoffFont {
             // destination.seek(SeekFrom::Start(entry.offset as u64))?;
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
-            match &self.tables[&entry.tag] {
-                NamedTable::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                NamedTable::Head(head_table) => head_table.write(destination)?,
-                NamedTable::Unspecified(un_table) => un_table.write(destination)?,
-            }
+            self.tables[&entry.tag].write(destination)?;
         }
         // Then the XML meta, if present.
         match &self.meta {
@@ -973,7 +969,7 @@ where
     TSource: Read + Seek + ?Sized,
 {
     match read_c2pa_from_stream(source) {
-        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri.to_owned()),
+        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
         Err(Error::JumbfNotFound) => Ok(None),
         Err(_) => Err(Error::DeserializationError),
     }

@@ -835,15 +835,8 @@ pub(crate) enum NamedTable {
 
 // TBD - This looks sort of like the CRTP from C++; do we want a Trait here
 // that *both* table *and* its value-types implement?
-impl NamedTable {
-    /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
+impl Table for NamedTable {
+    fn checksum(&self) -> Wrapping<u32> {
         match self {
             NamedTable::C2PA(c2pa) => c2pa.checksum(),
             NamedTable::Head(head) => head.checksum(),
@@ -851,18 +844,19 @@ impl NamedTable {
         }
     }
 
-    /// Returns the total length in bytes of this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         match self {
             NamedTable::C2PA(c2pa) => c2pa.len(),
             NamedTable::Head(head) => head.len(),
             NamedTable::Unspecified(un) => un.len(),
+        }
+    }
+
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+        match self {
+            NamedTable::C2PA(c2pa) => c2pa.write(destination),
+            NamedTable::Head(head) => head.write(destination),
+            NamedTable::Unspecified(un) => un.write(destination),
         }
     }
 }

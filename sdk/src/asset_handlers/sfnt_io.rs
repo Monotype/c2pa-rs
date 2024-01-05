@@ -481,11 +481,7 @@ impl SfntFont {
         self.header.write(destination)?;
         self.directory.write(destination)?;
         for entry in self.directory.physical_order().iter() {
-            match &self.tables[&entry.tag] {
-                NamedTable::C2PA(c2pa) => c2pa.write(destination)?,
-                NamedTable::Head(head) => head.write(destination)?,
-                NamedTable::Unspecified(un) => un.write(destination)?,
-            }
+            self.tables[&entry.tag].write(destination)?;
         }
         Ok(())
     }
@@ -1102,7 +1098,7 @@ where
     TSource: Read + Seek + ?Sized,
 {
     match read_c2pa_from_stream(source) {
-        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri.to_owned()),
+        Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
         Err(Error::JumbfNotFound) => Ok(None),
         Err(_) => Err(Error::DeserializationError),
     }
