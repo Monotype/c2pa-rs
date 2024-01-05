@@ -303,7 +303,7 @@ struct WoffFont {
     //   construction time, ensuring the desired behavior?
     // - Otherwise, we could just use BTreeMap for SFNT/WOFF1 and Vec for WOFF2
     // - Other matters?
-    tables: BTreeMap<SfntTag, Table>,
+    tables: BTreeMap<SfntTag, NamedTable>,
     meta: Option<TableUnspecified>,
     private: Option<TableUnspecified>,
 }
@@ -327,11 +327,17 @@ impl WoffFont {
             let offset: u64 = entry.offset as u64;
             let size: usize = entry.compLength as usize;
             // Create a table instance for it.
-            let table: Table = {
+            let table: NamedTable = {
                 match entry.tag {
-                    C2PA_TABLE_TAG => Table::C2PA(TableC2PA::from_reader(reader, offset, size)?),
-                    HEAD_TABLE_TAG => Table::Head(TableHead::from_reader(reader, offset, size)?),
-                    _ => Table::Unspecified(TableUnspecified::from_reader(reader, offset, size)?),
+                    C2PA_TABLE_TAG => {
+                        NamedTable::C2PA(TableC2PA::from_reader(reader, offset, size)?)
+                    }
+                    HEAD_TABLE_TAG => {
+                        NamedTable::Head(TableHead::from_reader(reader, offset, size)?)
+                    }
+                    _ => NamedTable::Unspecified(TableUnspecified::from_reader(
+                        reader, offset, size,
+                    )?),
                 }
             };
             // Tell it to get in the van
@@ -385,9 +391,9 @@ impl WoffFont {
             // Note that dest stream is not seekable.
             // Write out the (real and fake) tables.
             match &self.tables[&entry.tag] {
-                Table::C2PA(c2pa_table) => c2pa_table.write(destination)?,
-                Table::Head(head_table) => head_table.write(destination)?,
-                Table::Unspecified(un_table) => un_table.write(destination)?,
+                NamedTable::C2PA(c2pa_table) => c2pa_table.write(destination)?,
+                NamedTable::Head(head_table) => head_table.write(destination)?,
+                NamedTable::Unspecified(un_table) => un_table.write(destination)?,
             }
         }
         // Then the XML meta, if present.
@@ -439,7 +445,8 @@ impl WoffFont {
         };
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
-        self.tables.insert(C2PA_TABLE_TAG, Table::C2PA(c2pa_table));
+        self.tables
+            .insert(C2PA_TABLE_TAG, NamedTable::C2PA(c2pa_table));
         // Count the table, grow the total size, grow, the "SFNT size"
         self.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
@@ -808,10 +815,10 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+                NamedTable::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
-        Some(Table::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
+        Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(Error::FontLoadError);
@@ -858,12 +865,12 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                Table::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+                NamedTable::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
-        Some(Table::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
+        Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(Error::FontLoadError);
@@ -1035,7 +1042,7 @@ where
         None => None,
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
-        Some(Table::C2PA(c2pa)) => {
+        Some(NamedTable::C2PA(c2pa)) => {
             if c2pa.active_manifest_uri.is_none() {
                 None
             } else {
@@ -1174,7 +1181,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         None => None,
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(Table::C2PA(c2pa)) => Some(c2pa.clone()),
+        Some(NamedTable::C2PA(c2pa)) => Some(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(Error::FontLoadError);
