@@ -285,6 +285,33 @@ pub(crate) fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
     Wrapping((big & 0x00000000ffffffff) as u32)
 }
 
+pub(crate) trait Table {
+    /// Computes the checksum for this table.
+    ///
+    /// ### Parameters
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    /// Wrapping<u32> with the checksum.
+    fn checksum(&self) -> Wrapping<u32>;
+
+    /// Returns the total length in bytes of this table.
+    ///
+    /// ### Parameters
+    /// - `self` - Instance
+    ///
+    /// ### Returns
+    /// Total size of table data, in bytes.
+    fn len(&self) -> usize;
+
+    /// Serializes this instance to the given writer.
+    ///
+    /// ### Parameters
+    /// - `self` - Instance
+    /// - `destination` - Output stream
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()>;
+}
+
 /// 'C2PA' font table as it appears in storage
 #[derive(Debug, Default)]
 #[repr(C, packed(1))] // As defined by the C2PA spec.
@@ -425,53 +452,6 @@ impl TableC2PA {
         }
     }
 
-    /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        // Set up the structured data
-        let raw_table = TableC2PARaw::from_table(self);
-        let header_cksum = raw_table.checksum();
-        // Add remote-manifest URI if present.
-        let uri_cksum = if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            checksum(uri_string.as_bytes())
-        } else {
-            Wrapping(0_u32)
-        };
-        let manifest_cksum = if let Some(manifest_store) = self.manifest_store.as_ref() {
-            checksum_biased(
-                manifest_store.as_bytes(),
-                raw_table.activeManifestUriLength as u32,
-            )
-        } else {
-            Wrapping(0_u32)
-        };
-        header_cksum + uri_cksum + manifest_cksum
-    }
-
-    /// Returns the total length in bytes of this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
-        size_of::<TableC2PARaw>()
-            + match &self.active_manifest_uri {
-                Some(uri) => uri.len(),
-                None => 0,
-            }
-            + match &self.manifest_store {
-                Some(store) => store.len(),
-                None => 0,
-            }
-    }
-
     /// Reads a new instance from the given source.
     ///
     /// ### Parameters    ///
@@ -544,13 +524,43 @@ impl TableC2PA {
     pub(crate) fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
+}
 
-    /// Serializes this instance to the given writer.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+impl Table for TableC2PA {
+    fn checksum(&self) -> Wrapping<u32> {
+        // Set up the structured data
+        let raw_table = TableC2PARaw::from_table(self);
+        let header_cksum = raw_table.checksum();
+        // Add remote-manifest URI if present.
+        let uri_cksum = if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            checksum(uri_string.as_bytes())
+        } else {
+            Wrapping(0_u32)
+        };
+        let manifest_cksum = if let Some(manifest_store) = self.manifest_store.as_ref() {
+            checksum_biased(
+                manifest_store.as_bytes(),
+                raw_table.activeManifestUriLength as u32,
+            )
+        } else {
+            Wrapping(0_u32)
+        };
+        header_cksum + uri_cksum + manifest_cksum
+    }
+
+    fn len(&self) -> usize {
+        size_of::<TableC2PARaw>()
+            + match &self.active_manifest_uri {
+                Some(uri) => uri.len(),
+                None => 0,
+            }
+            + match &self.manifest_store {
+                Some(store) => store.len(),
+                None => 0,
+            }
+    }
+
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         // Write the table data
@@ -681,63 +691,46 @@ impl TableHead {
             Ok(head)
         }
     }
+}
 
-    /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
+impl Table for TableHead {
+    fn checksum(&self) -> Wrapping<u32> {
         // 0x00
         u32_from_u16_pair(self.majorVersion, self.minorVersion)
-            // 0x04
-            + Wrapping(self.fontRevision)
-            // 0x08
-            // (Note: checksumAdjustment is treated as containing all-
-            //  zeros during this operation.)
-            // 0x0c
-            + Wrapping(self.magicNumber)
-            // 0x10
-            + u32_from_u16_pair(self.flags, self.unitsPerEm)
-            // 0x14
-            + u32_from_u64_hi(self.created as u64)
-            + u32_from_u64_lo(self.created as u64)
-            // 0x1c
-            + u32_from_u64_hi(self.modified as u64)
-            + u32_from_u64_lo(self.modified as u64)
-            // 0x24
-            + u32_from_u16_pair(self.xMin as u16, self.yMin as u16)
-            // 0x28
-            + u32_from_u16_pair(self.xMax as u16, self.yMax as u16)
-            // 0x2c
-            + u32_from_u16_pair(self.macStyle, self.lowestRecPPEM)
-            // 0x30
-            + u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16)
-            // 0x34
-            + u32_from_u16_pair(self.glyphDataFormat as u16, 0_u16/*padpad*/)
+          // 0x04
+          + Wrapping(self.fontRevision)
+          // 0x08
+          // (Note: checksumAdjustment is treated as containing all-
+          //  zeros during this operation.)
+          // 0x0c
+          + Wrapping(self.magicNumber)
+          // 0x10
+          + u32_from_u16_pair(self.flags, self.unitsPerEm)
+          // 0x14
+          + u32_from_u64_hi(self.created as u64)
+          + u32_from_u64_lo(self.created as u64)
+          // 0x1c
+          + u32_from_u64_hi(self.modified as u64)
+          + u32_from_u64_lo(self.modified as u64)
+          // 0x24
+          + u32_from_u16_pair(self.xMin as u16, self.yMin as u16)
+          // 0x28
+          + u32_from_u16_pair(self.xMax as u16, self.yMax as u16)
+          // 0x2c
+          + u32_from_u16_pair(self.macStyle, self.lowestRecPPEM)
+          // 0x30
+          + u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16)
+          // 0x34
+          + u32_from_u16_pair(self.glyphDataFormat as u16, 0_u16/*padpad*/)
         // 0x38
     }
 
-    /// Returns the total length in bytes of this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         // TBD - Is this called?
         size_of::<Self>()
     }
 
-    /// Serializes this instance to the given writer.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
         destination.write_u16::<BigEndian>(self.minorVersion)?;
@@ -803,35 +796,18 @@ impl TableUnspecified {
             data: raw_table_data,
         })
     }
+}
 
-    /// Computes the checksum for this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Wrapping<u32> with the checksum.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
+impl Table for TableUnspecified {
+    fn checksum(&self) -> Wrapping<u32> {
         checksum(&self.data)
     }
 
-    /// Returns the total length in bytes of this table.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    ///
-    /// ### Returns
-    /// Total size of table data, in bytes.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.data.len()
     }
 
-    /// Serializes this instance to the given writer.
-    ///
-    /// ### Parameters
-    /// - `self` - Instance
-    /// - `destination` - Output stream
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
             .map_err(|_e| Error::FontSaveError)?;
@@ -848,7 +824,7 @@ impl TableUnspecified {
 
 /// Possible tables
 #[derive(Debug)]
-pub(crate) enum Table {
+pub(crate) enum NamedTable {
     /// 'C2PA' table
     C2PA(TableC2PA),
     /// 'head' table
@@ -859,7 +835,7 @@ pub(crate) enum Table {
 
 // TBD - This looks sort of like the CRTP from C++; do we want a Trait here
 // that *both* table *and* its value-types implement?
-impl Table {
+impl NamedTable {
     /// Computes the checksum for this table.
     ///
     /// ### Parameters
@@ -869,9 +845,9 @@ impl Table {
     /// Wrapping<u32> with the checksum.
     pub(crate) fn checksum(&self) -> Wrapping<u32> {
         match self {
-            Table::C2PA(c2pa) => c2pa.checksum(),
-            Table::Head(head) => head.checksum(),
-            Table::Unspecified(un) => un.checksum(),
+            NamedTable::C2PA(c2pa) => c2pa.checksum(),
+            NamedTable::Head(head) => head.checksum(),
+            NamedTable::Unspecified(un) => un.checksum(),
         }
     }
 
@@ -884,9 +860,9 @@ impl Table {
     /// Total size of table data, in bytes.
     pub(crate) fn len(&self) -> usize {
         match self {
-            Table::C2PA(c2pa) => c2pa.len(),
-            Table::Head(head) => head.len(),
-            Table::Unspecified(un) => un.len(),
+            NamedTable::C2PA(c2pa) => c2pa.len(),
+            NamedTable::Head(head) => head.len(),
+            NamedTable::Unspecified(un) => un.len(),
         }
     }
 }
