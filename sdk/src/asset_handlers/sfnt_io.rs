@@ -715,7 +715,7 @@ pub(crate) enum ChunkType {
     /// Whole-container header.
     Header,
     /// Table directory entry or entries.
-    Directory,
+    _Directory,
     /// Table data included in C2PA hash.
     TableDataIncluded,
     /// Table data excluded from C2PA hash.
@@ -726,7 +726,7 @@ impl std::fmt::Display for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::_Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -737,7 +737,7 @@ impl std::fmt::Debug for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::Directory => write!(f, "Directory"),
+            ChunkType::_Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -1219,7 +1219,7 @@ where
         match chunk.chunk_type {
             // The table directory, other than the table records array will be
             // added as "Cai" -- metadata to be excluded from hashing.
-            ChunkType::Header | ChunkType::Directory | ChunkType::TableDataExcluded => {
+            ChunkType::Header | ChunkType::_Directory | ChunkType::TableDataExcluded => {
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
                     length: chunk.length,
