@@ -715,7 +715,7 @@ pub(crate) enum ChunkType {
     /// Whole-container header.
     Header,
     /// Table directory entry or entries.
-    _Directory,
+    Directory,
     /// Table data included in C2PA hash.
     TableDataIncluded,
     /// Table data excluded from C2PA hash.
@@ -726,7 +726,7 @@ impl std::fmt::Display for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "_Directory"),
+            ChunkType::Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -737,7 +737,7 @@ impl std::fmt::Debug for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "_Directory"),
+            ChunkType::Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -1218,14 +1218,15 @@ where
     for chunk in sfnt_io.get_chunk_positions(&mut output_stream)? {
         match chunk.chunk_type {
             // The table directory, other than the table records array will be
-            // added as "other"
-            ChunkType::Header | ChunkType::_Directory | ChunkType::TableDataExcluded => {
+            // added as "Cai" -- metadata to be excluded from hashing.
+            ChunkType::Header | ChunkType::Directory | ChunkType::TableDataExcluded => {
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
                     length: chunk.length,
                     htype: HashBlockObjectType::Cai,
                 });
             }
+            // All else is treated as "Other" -- content to be hashed.
             ChunkType::TableDataIncluded => {
                 locations.push(HashObjectPositions {
                     offset: chunk.offset,
@@ -1257,17 +1258,16 @@ where
 /// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
-    let c2pa_table: Option<TableC2PA> = match sfnt.tables.get(&C2PA_TABLE_TAG) {
-        None => None,
+    match sfnt.tables.get(&C2PA_TABLE_TAG) {
+        None => Err(Error::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(Table::C2PA(c2pa)) => Some(c2pa.clone()),
+        Some(Table::C2PA(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(Error::FontLoadError);
         }
-    };
-    c2pa_table.ok_or(Error::JumbfNotFound)
+    }
 }
 
 /// Main SFNT IO feature.
