@@ -1264,9 +1264,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         // provided one.
         Some(Table::C2PA(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => {
-            return Err(Error::FontLoadError);
-        }
+        Some(_) => Err(Error::FontLoadError),
     }
 }
 
