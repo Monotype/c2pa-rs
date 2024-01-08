@@ -728,7 +728,7 @@ impl std::fmt::Display for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "_Directory"),
+            ChunkType::_Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
@@ -739,7 +739,7 @@ impl std::fmt::Debug for ChunkType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "_Directory"),
+            ChunkType::_Directory => write!(f, "Directory"),
             ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
             ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
         }
