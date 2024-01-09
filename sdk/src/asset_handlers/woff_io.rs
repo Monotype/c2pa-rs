@@ -327,19 +327,7 @@ impl WoffFont {
             let offset: u64 = entry.offset as u64;
             let size: usize = entry.compLength as usize;
             // Create a table instance for it.
-            let table: NamedTable = {
-                match entry.tag {
-                    C2PA_TABLE_TAG => {
-                        NamedTable::C2PA(TableC2PA::from_reader(reader, offset, size)?)
-                    }
-                    HEAD_TABLE_TAG => {
-                        NamedTable::Head(TableHead::from_reader(reader, offset, size)?)
-                    }
-                    _ => NamedTable::Unspecified(TableUnspecified::from_reader(
-                        reader, offset, size,
-                    )?),
-                }
-            };
+            let table = NamedTable::from_reader(&entry.tag, reader, offset, size)?;
             // Tell it to get in the van
             woff_tables.insert(entry.tag, table);
         }
