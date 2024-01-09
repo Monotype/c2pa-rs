@@ -98,7 +98,8 @@ mod font_xmp_support {
         Ok(xmp_meta)
     }
 
-    /// Builds a `XmpMeta` element from the data within the source stream
+    /// Builds a `XmpMeta` element from the data within the source stream, based
+    /// on either the information already in the stream or default values.
     ///
     /// # Remarks
     /// The use of this function really shouldn't be needed, but currently the SDK
@@ -136,8 +137,8 @@ mod font_xmp_support {
         }
     }
 
-    /// Adds a C2PA manifest reference (specified by URI) as XMP data to a font
-    /// file (specified by path).
+    /// Adds a C2PA manifest reference (specified by URI, JUMBF or URL based) as
+    /// XMP data to a font file (specified by path).
     ///
     /// # Remarks
     /// This method is considered a stop-gap for now until the official SDK
@@ -1072,8 +1073,8 @@ where
     Ok(locations)
 }
 
-/// Reads the `C2PA` font table from the data stream
-/// A result containing the `C2PA` font table data
+/// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
+/// table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     match sfnt.tables.get(&C2PA_TABLE_TAG) {

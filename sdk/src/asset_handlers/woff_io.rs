@@ -98,7 +98,8 @@ mod font_xmp_support {
         Ok(xmp_meta)
     }
 
-    /// Builds a `XmpMeta` element from the data within the source stream
+    /// Builds a `XmpMeta` element from the data within the source stream, based
+    /// on either the information already in the stream or default values.
     ///
     /// # Remarks
     /// The use of this function really shouldn't be needed, but currently the SDK
@@ -136,8 +137,8 @@ mod font_xmp_support {
         }
     }
 
-    /// Adds a C2PA manifest reference (specified by URI) as XMP data to a font
-    /// file (specified by path).
+    /// Adds a C2PA manifest reference (specified by URI, JUMBF or URL based) as
+    /// XMP data to a font file (specified by path).
     ///
     /// # Remarks
     /// This method is considered a stop-gap for now until the official SDK
