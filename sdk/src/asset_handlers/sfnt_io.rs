@@ -974,7 +974,8 @@ where
 }
 
 /// Removes the reference to the active manifest from the source stream, writing
-/// to the destination.  Returns an optional active manifest URI reference.
+/// to the destination.  Returns an optional active manifest URI reference, if
+/// there was one.
 #[allow(dead_code)]
 fn remove_reference_from_stream<TSource, TDest>(
     source: &mut TSource,
@@ -1072,6 +1073,7 @@ where
 }
 
 /// Reads the `C2PA` font table from the data stream
+/// A result containing the `C2PA` font table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     let sfnt = SfntFont::from_reader(reader).map_err(|_| Error::FontLoadError)?;
     match sfnt.tables.get(&C2PA_TABLE_TAG) {
