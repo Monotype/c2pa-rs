@@ -210,7 +210,7 @@ pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
     Wrapping((hi as u32 * 65536) + lo as u32)
 }
 
-/// Gets the high-order the u32 from given u64 (extracted from the
+/// Gets the high-order u32 from the given u64 (extracted from the
 /// more-significant 32 bits of the given value).
 ///
 /// # Examples
@@ -728,7 +728,7 @@ pub(crate) enum NamedTable {
 
 impl NamedTable {
     /// Creates a new instance, reading from the provided source at a specific
-    /// offset.
+    /// offset and created the type specific to the given tag.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         tag: &SfntTag,
         reader: &mut T,
