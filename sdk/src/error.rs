@@ -150,6 +150,7 @@ pub enum Error {
     #[error("COSE Signature too big for JUMBF box")]
     CoseSigboxTooSmall,
 
+    #[cfg(feature = "font")]
     #[error("Font error: {0}")]
     FontError(#[from] crate::asset_handlers::font_io::FontError),
 
