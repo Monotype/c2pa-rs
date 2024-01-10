@@ -780,8 +780,7 @@ where
             return Err(wrap_font_err(FontError::LoadError));
         }
     };
-    font.write(destination)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(destination).map_err(|_| FontError::SaveError)?;
     Ok(())
 }
 
@@ -825,8 +824,7 @@ where
             return Err(wrap_font_err(FontError::LoadError));
         }
     };
-    font.write(destination)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(destination).map_err(|_| FontError::SaveError)?;
     Ok(())
 }
 
@@ -925,8 +923,7 @@ where
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
-    font.write(destination)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(destination).map_err(|_| FontError::SaveError)?;
 
     Ok(())
 }
@@ -965,8 +962,7 @@ where
             return Err(wrap_font_err(FontError::LoadError));
         }
     };
-    font.write(destination)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(destination).map_err(|_| FontError::SaveError)?;
     Ok(old_manifest_uri_maybe)
 }
 
