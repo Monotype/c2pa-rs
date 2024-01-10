@@ -16,17 +16,33 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+use xmp_toolkit::XmpError;
 
-use crate::error::{Error, Result};
+use crate::error::Error;
+
+/// Result type for font operations.
+pub(crate) type Result<T> = core::result::Result<T, FontError>;
 
 // Types for supporting fonts in any container.
 
 /// Errors that can occur when working with fonts.
 #[derive(Debug, thiserror::Error)]
 pub enum FontError {
+    /// Bad parameter
+    #[error("Bad parameter: {0}")]
+    BadParam(String),
+
     /// Failed to parse or de-serialize font data
     #[error("Failed to de-serialize data")]
     DeserializationError,
+
+    /// IO error while dealing with a potentially font-related file/stream.
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+
+    //// The JUMBF data was not found.
+    #[error("The JUMBF data was not found.")]
+    JumbfNotFound,
 
     /// Failed to load a font.
     #[error("Failed to load font")]
@@ -64,6 +80,26 @@ pub enum FontError {
     /// Invalid or unsupported font format
     #[error("Invalid or unsupported font format")]
     Unsupported,
+
+    /// XMP data was not found.
+    #[cfg(feature = "xmp_write")]
+    #[error("XMP data was not found in the font.")]
+    XmpNotFound,
+
+    /// [`XmpError::ErrorType::NoFile`] error from the XMP toolkit.
+    #[cfg(feature = "xmp_write")]
+    #[error("XMP write error, no file; {0}")]
+    XmpNoFile(XmpError),
+
+    /// [`XmpError::ErrorType::UnsupportedType`] error from the XMP toolkit.
+    #[cfg(feature = "xmp_write")]
+    #[error("XMP write error, unsupported type: {0}")]
+    XmpUnsupportedType(XmpError),
+
+    /// XMP write error
+    #[cfg(feature = "xmp_write")]
+    #[error(transparent)]
+    XmpWriteError(#[from] XmpError),
 }
 
 /// Helper method for wrapping a FontError into a crate level error.
@@ -433,7 +469,7 @@ impl TableC2PA {
         size: usize,
     ) -> Result<TableC2PA> {
         if size < size_of::<TableC2PARaw>() {
-            Err(wrap_font_err(FontError::LoadC2PATableTruncated))
+            Err(FontError::LoadC2PATableTruncated)
         } else {
             let mut active_manifest_uri: Option<String> = None;
             let mut manifest_store: Option<Vec<u8>> = None;
@@ -446,7 +482,7 @@ impl TableC2PA {
                     + raw_table.activeManifestUriLength as usize
                     + raw_table.manifestStoreLength as usize
             {
-                return Err(wrap_font_err(FontError::LoadC2PATableTruncated));
+                return Err(FontError::LoadC2PATableTruncated);
             }
             // If a remote manifest URI is present, unpack it from the remaining
             // data in the table.
@@ -584,11 +620,11 @@ impl TableHead {
         reader: &mut T,
         offset: u64,
         size: usize,
-    ) -> core::result::Result<TableHead, Error> {
+    ) -> Result<TableHead> {
         reader.seek(SeekFrom::Start(offset))?;
         let actual_size = size_of::<TableHead>();
         if size != actual_size {
-            Err(wrap_font_err(FontError::LoadHeadTableBadMissing))
+            Err(FontError::LoadHeadTableBadMissing)
         } else {
             let head = Self {
                 // 0x00
@@ -639,7 +675,7 @@ impl TableHead {
                 // stream is left, so we don't do anything, since that is simplest.
             };
             if head.magicNumber != HEAD_TABLE_MAGICNUMBER {
-                return Err(wrap_font_err(FontError::LoadHeadTableBadMissing));
+                return Err(FontError::LoadHeadTableBadMissing);
             }
             Ok(head)
         }
@@ -1048,10 +1084,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len());
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        assert_matches!(
-            head,
-            Err(Error::FontError(FontError::LoadHeadTableBadMissing))
-        );
+        assert_matches!(head, Err(FontError::LoadHeadTableBadMissing));
     }
 
     #[test]
@@ -1076,10 +1109,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        assert_matches!(
-            head,
-            Err(Error::FontError(FontError::LoadHeadTableBadMissing))
-        );
+        assert_matches!(head, Err(FontError::LoadHeadTableBadMissing));
     }
 
     #[test]
