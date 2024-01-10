@@ -1136,11 +1136,9 @@ impl SfntIO {
 /// SFNT implementation of the CAILoader trait.
 impl CAIReader for SfntIO {
     fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
-        let c2pa_table = read_c2pa_from_stream(asset_reader).map_err(|e|{
-            match e {
-                FontError::JumbfNotFound => Error::JumbfNotFound,
-                _ => wrap_font_err(e),
-            }
+        let c2pa_table = read_c2pa_from_stream(asset_reader).map_err(|e| match e {
+            FontError::JumbfNotFound => Error::JumbfNotFound,
+            _ => wrap_font_err(e),
         })?;
         match c2pa_table.get_manifest_store() {
             Some(manifest_store) => Ok(manifest_store.to_vec()),
