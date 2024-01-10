@@ -31,7 +31,7 @@ use crate::{
         AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
     },
-    error::{Error, Result},
+    error::Error,
 };
 
 /// This module is a temporary implementation of a very basic support for XMP in
@@ -118,7 +118,7 @@ mod font_xmp_support {
                     .map_err(xmp_write_err)
             }
             // Mention there is no data representing XMP found
-            None => Err(Error::NotFound),
+            None => Err(FontError::XmpNotFound),
         }
     }
 
@@ -127,13 +127,15 @@ mod font_xmp_support {
     /// # Remarks
     /// This is nearly a copy/paste from `embedded_xmp` crate, we should clean this
     /// up at some point
-    fn xmp_write_err(err: XmpError) -> crate::Error {
+    fn xmp_write_err(err: XmpError) -> FontError {
         match err.error_type {
             // convert to OS permission error code so we can detect it correctly upstream
-            XmpErrorType::FilePermission => Error::IoError(std::io::Error::from_raw_os_error(13)),
-            XmpErrorType::NoFile => Error::NotFound,
-            XmpErrorType::NoFileHandler => Error::UnsupportedType,
-            _ => Error::XmpWriteError,
+            XmpErrorType::FilePermission => {
+                FontError::IoError(std::io::Error::from_raw_os_error(13))
+            }
+            XmpErrorType::NoFile => FontError::XmpNoFile(err),
+            XmpErrorType::NoFileHandler => FontError::XmpUnsupportedType(err),
+            _ => FontError::XmpWriteError(err),
         }
     }
 
@@ -144,7 +146,10 @@ mod font_xmp_support {
     /// This method is considered a stop-gap for now until the official SDK
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
-    pub(crate) fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
+    pub(crate) fn add_reference_as_xmp_to_font(
+        font_path: &Path,
+        manifest_uri: &str,
+    ) -> core::result::Result<(), FontError> {
         process_file_with_streams(font_path, move |input_stream, temp_file| {
             // Write the manifest URI to the stream
             add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
@@ -163,7 +168,7 @@ mod font_xmp_support {
         source: &mut TSource,
         destination: &mut TDest,
         manifest_uri: &str,
-    ) -> Result<()>
+    ) -> core::result::Result<(), FontError>
     where
         TSource: Read + Seek + ?Sized,
         TDest: Write + ?Sized,
@@ -178,7 +183,7 @@ mod font_xmp_support {
             Ok(meta) => meta,
             // If data was not found for building out the XMP, we will default
             // to some good starting points
-            Err(Error::NotFound) => default_font_xmp_meta(None, None)?,
+            Err(FontError::XmpNotFound) => default_font_xmp_meta(None, None)?,
             // At this point, the font is considered to be invalid possibly
             Err(error) => return Err(error),
         };
@@ -215,13 +220,13 @@ impl TempFile {
     /// Creates a new temporary file within the `env::temp_dir()` directory,
     /// which should be deleted once the object is dropped.  Uses the specified
     /// base name for the temporary file.
-    pub(crate) fn new(base_name: &Path) -> Result<Self> {
+    pub(crate) fn new(base_name: &Path) -> core::result::Result<Self, FontError> {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
         let path = temp_dir_path.join(
             base_name
                 .file_name()
-                .ok_or_else(|| Error::BadParam("Invalid file name".to_string()))?,
+                .ok_or_else(|| FontError::BadParam("Invalid file name".to_string()))?,
         );
         let file = File::create(&path)?;
         Ok(Self {
@@ -260,7 +265,7 @@ impl SfntFont {
     /// Reads a new instance from the given source.
     fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
-    ) -> core::result::Result<SfntFont, Error> {
+    ) -> core::result::Result<SfntFont, FontError> {
         // Read in the SfntHeader
         let sfnt_hdr = SfntHeader::from_reader(reader)?;
 
@@ -289,7 +294,10 @@ impl SfntFont {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(
+        &mut self,
+        destination: &mut TDest,
+    ) -> core::result::Result<(), FontError> {
         let mut neo_header = SfntHeader::default();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
@@ -322,7 +330,7 @@ impl SfntFont {
                     size_of::<SfntDirectoryEntry>() as i64
                 } else {
                     // We added some other number of tables
-                    return Err(wrap_font_err(FontError::SaveError));
+                    return Err(FontError::SaveError);
                 }
             }
             Ordering::Equal => 0,
@@ -332,13 +340,13 @@ impl SfntFont {
                     // the C2PA table - that's the only one we should ever
                     // be removing.
                     if self.tables.contains_key(&C2PA_TABLE_TAG) {
-                        return Err(wrap_font_err(FontError::SaveError));
+                        return Err(FontError::SaveError);
                     }
                     // We removed exactly one table
                     -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
                     // We added some other number of tables. Weird, right?
-                    return Err(wrap_font_err(FontError::SaveError));
+                    return Err(FontError::SaveError);
                 }
             }
         };
@@ -370,7 +378,7 @@ impl SfntFont {
                     // be the case where we're removing the C2PA table; the
                     // bias *must not* be negative.
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
-                        return Err(wrap_font_err(FontError::SaveError));
+                        return Err(FontError::SaveError);
                     }
                     let neo_entry = SfntDirectoryEntry {
                         tag: entry.tag,
@@ -391,7 +399,7 @@ impl SfntFont {
                         // Check - this *must* be the case where we're adding
                         // a C2PA table - therefore the bias should be positive.
                         if td_derived_offset_bias <= 0 {
-                            return Err(wrap_font_err(FontError::SaveError));
+                            return Err(FontError::SaveError);
                         }
                         let neo_entry = SfntDirectoryEntry {
                             tag: *tag,
@@ -407,7 +415,7 @@ impl SfntFont {
                         //    align_to_four(entry.offset as usize + entry.length as usize);
                     }
                     _ => {
-                        return Err(wrap_font_err(FontError::SaveError));
+                        return Err(FontError::SaveError);
                     }
                 },
             }
@@ -463,7 +471,9 @@ impl SfntFont {
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
     /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Self, FontError> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -474,7 +484,10 @@ impl SfntHeader {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(
+        &self,
+        destination: &mut TDest,
+    ) -> core::result::Result<(), FontError> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.searchRange)?;
@@ -508,7 +521,9 @@ impl Default for SfntHeader {
 
 impl SfntDirectoryEntry {
     /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Self, FontError> {
         Ok(Self {
             tag: SfntTag::from_reader(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
@@ -518,7 +533,10 @@ impl SfntDirectoryEntry {
     }
 
     /// Serializes this instance to the given writer.
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    pub(crate) fn write<TDest: Write + ?Sized>(
+        &self,
+        destination: &mut TDest,
+    ) -> core::result::Result<(), FontError> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
@@ -557,7 +575,7 @@ struct SfntDirectory {
 
 impl SfntDirectory {
     /// Constructs a new, empty, instance.
-    pub(crate) fn new() -> Result<Self> {
+    pub(crate) fn new() -> core::result::Result<Self, FontError> {
         Ok(Self {
             entries: Vec::new(),
         })
@@ -568,7 +586,7 @@ impl SfntDirectory {
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
-    ) -> Result<Self> {
+    ) -> core::result::Result<Self, FontError> {
         let mut the_directory = SfntDirectory::new()?;
         for _entry in 0..entry_count {
             the_directory
@@ -579,7 +597,10 @@ impl SfntDirectory {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+    fn write<TDest: Write + ?Sized>(
+        &self,
+        destination: &mut TDest,
+    ) -> core::result::Result<(), FontError> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
@@ -697,7 +718,7 @@ impl std::fmt::Debug for ChunkPosition {
 
 /// Reads in chunks for an SFNT file
 impl ChunkReader for SfntIO {
-    type Error = crate::error::Error;
+    type Error = FontError;
 
     /// Get a map of all the chunks in the given source stream.
     fn get_chunk_positions<T: Read + Seek + ?Sized>(
@@ -789,7 +810,10 @@ impl ChunkReader for SfntIO {
 }
 
 /// Adds C2PA manifest store data to a font file (specified by path).
-fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
+fn add_c2pa_to_font(
+    font_path: &Path,
+    manifest_store_data: &[u8],
+) -> core::result::Result<(), FontError> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Add the C2PA data to the temp file
         add_c2pa_to_stream(input_stream, temp_file.get_mut_file(), manifest_store_data)
@@ -802,13 +826,13 @@ fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
     manifest_store_data: &[u8],
-) -> Result<()>
+) -> core::result::Result<(), FontError>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::from_reader(source).map_err(|_| FontError::LoadError)?;
+    let mut font = SfntFont::from_reader(source)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -824,16 +848,19 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(wrap_font_err(FontError::LoadError));
+            return Err(FontError::LoadError);
         }
     };
-    font.write(destination).map_err(|_| FontError::SaveError)?;
+    font.write(destination)?;
     Ok(())
 }
 
 /// Adds the manifest URI reference to the font at the given path.
 #[allow(dead_code)]
-fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
+fn add_reference_to_font(
+    font_path: &Path,
+    manifest_uri: &str,
+) -> core::result::Result<(), FontError> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Write the manifest URI to the stream
         add_reference_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
@@ -846,13 +873,13 @@ fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
     manifest_uri: &str,
-) -> Result<()>
+) -> core::result::Result<(), FontError>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::from_reader(source).map_err(|_| FontError::LoadError)?;
+    let mut font = SfntFont::from_reader(source)?;
     // Install the provide active_manifest_uri in this font's C2PA table, adding
     // that table if needed.
     match font.tables.get_mut(&C2PA_TABLE_TAG) {
@@ -868,7 +895,7 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(wrap_font_err(FontError::LoadError));
+            return Err(FontError::LoadError);
         }
     };
     font.write(destination).map_err(|_| FontError::SaveError)?;
@@ -885,7 +912,7 @@ where
 fn add_required_chunks_to_stream<TReader, TWriter>(
     input_stream: &mut TReader,
     output_stream: &mut TWriter,
-) -> Result<()>
+) -> core::result::Result<(), FontError>
 where
     TReader: Read + Seek + ?Sized,
     TWriter: Read + Seek + ?Sized + Write,
@@ -904,7 +931,7 @@ where
 }
 
 /// Opens a BufReader for the given file path
-fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
+fn open_bufreader_for_file(file_path: &Path) -> core::result::Result<BufReader<File>, FontError> {
     let file = File::open(file_path)?;
     Ok(BufReader::new(file))
 }
@@ -912,8 +939,8 @@ fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
 /// Processes a font file (specified by path) by stream with the given callback.
 fn process_file_with_streams(
     font_path: &Path,
-    callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> Result<()>,
-) -> Result<()> {
+    callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> core::result::Result<(), FontError>,
+) -> core::result::Result<(), FontError> {
     // Open the font source for a buffer read
     let mut font_buffer = open_bufreader_for_file(font_path)?;
     // Open a temporary file, which will be deleted after destroyed
@@ -927,7 +954,7 @@ fn process_file_with_streams(
 /// Reads the C2PA manifest store reference from the font file (specified by
 /// path).
 #[allow(dead_code)]
-fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
+fn read_reference_from_font(font_path: &Path) -> core::result::Result<Option<String>, FontError> {
     // open the font source
     let mut font_stream = open_bufreader_for_file(font_path)?;
     read_reference_from_stream(&mut font_stream)
@@ -935,19 +962,21 @@ fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
 
 /// Reads the C2PA manifest store reference from the stream.
 #[allow(dead_code)]
-fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
+fn read_reference_from_stream<TSource>(
+    source: &mut TSource,
+) -> core::result::Result<Option<String>, FontError>
 where
     TSource: Read + Seek + ?Sized,
 {
     match read_c2pa_from_stream(source) {
         Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
-        Err(Error::JumbfNotFound) => Ok(None),
-        Err(_) => Err(wrap_font_err(FontError::DeserializationError)),
+        Err(FontError::JumbfNotFound) => Ok(None),
+        Err(_) => Err(FontError::DeserializationError),
     }
 }
 
 /// Remove the `C2PA` font table from the font file (specified by path).
-fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
+fn remove_c2pa_from_font(font_path: &Path) -> core::result::Result<(), FontError> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Remove the C2PA manifest store from the stream
         remove_c2pa_from_stream(input_stream, temp_file.get_mut_file())
@@ -959,18 +988,18 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 fn remove_c2pa_from_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-) -> Result<()>
+) -> core::result::Result<(), FontError>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = SfntFont::from_reader(source).map_err(|_| FontError::LoadError)?;
+    let mut font = SfntFont::from_reader(source)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
-    font.write(destination).map_err(|_| FontError::SaveError)?;
+    font.write(destination)?;
     Ok(())
 }
 
@@ -987,7 +1016,7 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    let mut font = SfntFont::from_reader(source).map_err(|_| FontError::LoadError)?;
+    let mut font = SfntFont::from_reader(source)?;
     let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
@@ -1005,10 +1034,10 @@ where
         }
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(wrap_font_err(FontError::LoadError));
+            return Err(FontError::LoadError);
         }
     };
-    font.write(destination).map_err(|_| FontError::SaveError)?;
+    font.write(destination)?;
     Ok(old_manifest_uri_maybe)
 }
 
@@ -1075,15 +1104,17 @@ where
 
 /// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
 /// table data
-fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let sfnt = SfntFont::from_reader(reader).map_err(|_| FontError::LoadError)?;
+fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(
+    reader: &mut T,
+) -> core::result::Result<TableC2PA, FontError> {
+    let sfnt = SfntFont::from_reader(reader)?;
     match sfnt.tables.get(&C2PA_TABLE_TAG) {
-        None => Err(Error::JumbfNotFound),
+        None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
         Some(NamedTable::C2PA(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => Err(wrap_font_err(FontError::LoadError)),
+        Some(_) => Err(FontError::LoadError),
     }
 }
 
@@ -1104,8 +1135,13 @@ impl SfntIO {
 
 /// SFNT implementation of the CAILoader trait.
 impl CAIReader for SfntIO {
-    fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
-        let c2pa_table = read_c2pa_from_stream(asset_reader)?;
+    fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
+        let c2pa_table = read_c2pa_from_stream(asset_reader).map_err(|e|{
+            match e {
+                FontError::JumbfNotFound => Error::JumbfNotFound,
+                _ => wrap_font_err(e),
+            }
+        })?;
         match c2pa_table.get_manifest_store() {
             Some(manifest_store) => Ok(manifest_store.to_vec()),
             _ => Err(Error::JumbfNotFound),
@@ -1129,23 +1165,27 @@ impl CAIWriter for SfntIO {
         input_stream: &mut dyn CAIRead,
         output_stream: &mut dyn CAIReadWrite,
         store_bytes: &[u8],
-    ) -> Result<()> {
-        add_c2pa_to_stream(input_stream, output_stream, store_bytes)
+    ) -> crate::error::Result<()> {
+        Ok(add_c2pa_to_stream(
+            input_stream,
+            output_stream,
+            store_bytes,
+        )?)
     }
 
     fn get_object_locations_from_stream(
         &self,
         input_stream: &mut dyn CAIRead,
-    ) -> Result<Vec<HashObjectPositions>> {
-        get_object_locations_from_stream(self, input_stream)
+    ) -> crate::error::Result<Vec<HashObjectPositions>> {
+        Ok(get_object_locations_from_stream(self, input_stream)?)
     }
 
     fn remove_cai_store_from_stream(
         &self,
         input_stream: &mut dyn CAIRead,
         output_stream: &mut dyn CAIReadWrite,
-    ) -> Result<()> {
-        remove_c2pa_from_stream(input_stream, output_stream)
+    ) -> crate::error::Result<()> {
+        Ok(remove_c2pa_from_stream(input_stream, output_stream)?)
     }
 }
 
@@ -1190,22 +1230,25 @@ impl AssetIO for SfntIO {
         ]
     }
 
-    fn read_cai_store(&self, asset_path: &Path) -> Result<Vec<u8>> {
+    fn read_cai_store(&self, asset_path: &Path) -> crate::error::Result<Vec<u8>> {
         let mut f: File = File::open(asset_path)?;
         self.read_cai(&mut f)
     }
 
-    fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> Result<()> {
-        add_c2pa_to_font(asset_path, store_bytes)
+    fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> crate::error::Result<()> {
+        Ok(add_c2pa_to_font(asset_path, store_bytes)?)
     }
 
-    fn get_object_locations(&self, asset_path: &Path) -> Result<Vec<HashObjectPositions>> {
+    fn get_object_locations(
+        &self,
+        asset_path: &Path,
+    ) -> crate::error::Result<Vec<HashObjectPositions>> {
         let mut buf_reader = open_bufreader_for_file(asset_path)?;
-        get_object_locations_from_stream(self, &mut buf_reader)
+        Ok(get_object_locations_from_stream(self, &mut buf_reader)?)
     }
 
-    fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
-        remove_c2pa_from_font(asset_path)
+    fn remove_cai_store(&self, asset_path: &Path) -> crate::error::Result<()> {
+        Ok(remove_c2pa_from_font(asset_path)?)
     }
 
     fn asset_box_hash_ref(&self) -> Option<&dyn AssetBoxHash> {
@@ -1215,7 +1258,7 @@ impl AssetIO for SfntIO {
 
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for SfntIO {
-    fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
+    fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
         // Get the chunk positions
         let chunks = self.get_chunk_positions(input_stream)?;
         // Create a box map vector to map the chunk positions to
@@ -1247,16 +1290,19 @@ impl RemoteRefEmbed for SfntIO {
         &self,
         asset_path: &Path,
         embed_ref: crate::asset_io::RemoteRefEmbedType,
-    ) -> Result<()> {
+    ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
                 #[cfg(feature = "xmp_write")]
                 {
-                    font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
+                    Ok(font_xmp_support::add_reference_as_xmp_to_font(
+                        asset_path,
+                        &manifest_uri,
+                    )?)
                 }
                 #[cfg(not(feature = "xmp_write"))]
                 {
-                    add_reference_to_font(asset_path, &manifest_uri)
+                    Ok(add_reference_to_font(asset_path, &manifest_uri)?)
                 }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
@@ -1270,20 +1316,24 @@ impl RemoteRefEmbed for SfntIO {
         reader: &mut dyn CAIRead,
         output_stream: &mut dyn CAIReadWrite,
         embed_ref: RemoteRefEmbedType,
-    ) -> Result<()> {
+    ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
                 #[cfg(feature = "xmp_write")]
                 {
-                    font_xmp_support::add_reference_as_xmp_to_stream(
+                    Ok(font_xmp_support::add_reference_as_xmp_to_stream(
                         reader,
                         output_stream,
                         &manifest_uri,
-                    )
+                    )?)
                 }
                 #[cfg(not(feature = "xmp_write"))]
                 {
-                    add_reference_to_stream(reader, output_stream, &manifest_uri)
+                    Ok(add_reference_to_stream(
+                        reader,
+                        output_stream,
+                        &manifest_uri,
+                    )?)
                 }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
@@ -1657,10 +1707,12 @@ pub mod tests {
         use xmp_toolkit::XmpMeta;
 
         use crate::{
-            asset_handlers::sfnt_io::{font_xmp_support, SfntIO},
+            asset_handlers::{
+                font_io::FontError,
+                sfnt_io::{font_xmp_support, SfntIO},
+            },
             asset_io::CAIReader,
             utils::test::temp_dir_path,
-            Error,
         };
 
         #[test]
@@ -1724,7 +1776,7 @@ pub mod tests {
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
                 Ok(_) => panic!("Did not expect an OK result, as data is missing"),
-                Err(Error::NotFound) => {}
+                Err(FontError::XmpNotFound) => {}
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
         }
