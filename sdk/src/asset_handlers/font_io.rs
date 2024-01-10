@@ -61,8 +61,8 @@ pub enum FontError {
     #[error("Unknown font format, the 'magic' number is not recognized.")]
     UnknownMagic,
 
-    /// Invalid font format
-    #[error("Failed to load font")]
+    /// Invalid or unsupported font format
+    #[error("Invalid or unsupported font format")]
     Unsupported,
 }
 
