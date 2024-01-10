@@ -1048,7 +1048,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len());
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        matches!(
+        assert_matches!(
             head,
             Err(Error::FontError(FontError::FontLoadHeadTableBadMissing))
         );
@@ -1076,7 +1076,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        matches!(
+        assert_matches!(
             head,
             Err(Error::FontError(FontError::FontLoadHeadTableBadMissing))
         );
