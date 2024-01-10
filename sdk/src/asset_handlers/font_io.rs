@@ -30,32 +30,32 @@ pub enum FontError {
 
     /// Failed to load a font.
     #[error("Failed to load font")]
-    FontLoadError,
+    LoadError,
 
     /// Failed to load the font's 'C2PA' table, either because it was missing or
     /// because it was truncated/bad.
     #[error("C2PA table bad or missing")]
-    FontLoadC2PATableBadMissing,
+    LoadC2PATableBadMissing,
 
     /// The font's 'C2PA' table contains invalid UTF-8 data.
     #[error("C2PA table manifest data is not valid UTF-8")]
-    FontLoadC2PATableInvalidUtf8,
+    LoadC2PATableInvalidUtf8,
 
     /// The font's 'C2PA' table is truncated.
     #[error("C2PA table claimed sizes exceed actual")]
-    FontLoadC2PATableTruncated,
+    LoadC2PATableTruncated,
 
     /// The font's 'head' table is bad or missing.
     #[error("head table bad or missing")]
-    FontLoadHeadTableBadMissing,
+    LoadHeadTableBadMissing,
 
     /// The font's SFNT header is bad or missing.
     #[error("SFNT header bad or missing")]
-    FontLoadSfntHeaderBadMissing,
+    LoadSfntHeaderBadMissing,
 
     /// Failed to save the font.
     #[error("Failed to save font")]
-    FontSaveError,
+    SaveError,
 
     /// The font is missing a valid 'magic' number, therefore an unknown font type.
     #[error("Unknown font format, the 'magic' number is not recognized.")]
@@ -63,7 +63,7 @@ pub enum FontError {
 
     /// Invalid font format
     #[error("Failed to load font")]
-    UnsupportedFont,
+    Unsupported,
 }
 
 /// Helper method for wrapping a FontError into a crate level error.
@@ -433,7 +433,7 @@ impl TableC2PA {
         size: usize,
     ) -> Result<TableC2PA> {
         if size < size_of::<TableC2PARaw>() {
-            Err(wrap_font_err(FontError::FontLoadC2PATableTruncated))
+            Err(wrap_font_err(FontError::LoadC2PATableTruncated))
         } else {
             let mut active_manifest_uri: Option<String> = None;
             let mut manifest_store: Option<Vec<u8>> = None;
@@ -446,7 +446,7 @@ impl TableC2PA {
                     + raw_table.activeManifestUriLength as usize
                     + raw_table.manifestStoreLength as usize
             {
-                return Err(wrap_font_err(FontError::FontLoadC2PATableTruncated));
+                return Err(wrap_font_err(FontError::LoadC2PATableTruncated));
             }
             // If a remote manifest URI is present, unpack it from the remaining
             // data in the table.
@@ -458,7 +458,7 @@ impl TableC2PA {
                 reader.read_exact(&mut uri_bytes)?;
                 active_manifest_uri = Some(
                     from_utf8(&uri_bytes)
-                        .map_err(|_e| FontError::FontLoadC2PATableInvalidUtf8)?
+                        .map_err(|_e| FontError::LoadC2PATableInvalidUtf8)?
                         .to_string(),
                 );
             }
@@ -588,7 +588,7 @@ impl TableHead {
         reader.seek(SeekFrom::Start(offset))?;
         let actual_size = size_of::<TableHead>();
         if size != actual_size {
-            Err(wrap_font_err(FontError::FontLoadHeadTableBadMissing))
+            Err(wrap_font_err(FontError::LoadHeadTableBadMissing))
         } else {
             let head = Self {
                 // 0x00
@@ -639,7 +639,7 @@ impl TableHead {
                 // stream is left, so we don't do anything, since that is simplest.
             };
             if head.magicNumber != HEAD_TABLE_MAGICNUMBER {
-                return Err(wrap_font_err(FontError::FontLoadHeadTableBadMissing));
+                return Err(wrap_font_err(FontError::LoadHeadTableBadMissing));
             }
             Ok(head)
         }
@@ -756,13 +756,13 @@ impl Table for TableUnspecified {
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
-            .map_err(|_e| FontError::FontSaveError)?;
+            .map_err(|_e| FontError::SaveError)?;
         let limit = self.data.len() % 4;
         if limit > 0 {
             let pad: [u8; 3] = [0, 0, 0];
             destination
                 .write_all(&pad[0..(4 - limit)])
-                .map_err(|_e| FontError::FontSaveError)?;
+                .map_err(|_e| FontError::SaveError)?;
         }
         Ok(())
     }
@@ -1050,7 +1050,7 @@ pub mod tests {
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
         assert_matches!(
             head,
-            Err(Error::FontError(FontError::FontLoadHeadTableBadMissing))
+            Err(Error::FontError(FontError::LoadHeadTableBadMissing))
         );
     }
 
@@ -1078,7 +1078,7 @@ pub mod tests {
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
         assert_matches!(
             head,
-            Err(Error::FontError(FontError::FontLoadHeadTableBadMissing))
+            Err(Error::FontError(FontError::LoadHeadTableBadMissing))
         );
     }
 
