@@ -63,7 +63,7 @@ pub enum FontError {
 
     /// Invalid font format
     #[error("Failed to load font")]
-    UnsupportedFontError,
+    UnsupportedFont,
 }
 
 /// Helper method for wrapping a FontError into a crate level error.

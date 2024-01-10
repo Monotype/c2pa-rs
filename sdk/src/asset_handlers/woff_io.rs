@@ -680,7 +680,7 @@ impl ChunkReader for WoffIO {
         // TBD - Push this into WoffHeader::from_reader
         let _font_magic: Magic =
             <u32 as std::convert::TryInto<Magic>>::try_into(woff_hdr.signature)
-                .map_err(|_err| FontError::UnsupportedFontError)?;
+                .map_err(|_err| FontError::UnsupportedFont)?;
         // Add the position of the header.
         let mut positions: Vec<ChunkPosition> = Vec::new();
         positions.push(ChunkPosition {
