@@ -40,10 +40,6 @@ pub enum FontError {
     #[error("Failed to de-serialize data")]
     DeserializationError,
 
-    /// The font's 'head' table is bad or missing.
-    #[error("head table bad or missing")]
-    HeadTableMissing,
-
     /// IO error while dealing with a potentially font-related file/stream.
     #[error(transparent)]
     IoError(#[from] std::io::Error),
@@ -56,11 +52,6 @@ pub enum FontError {
     #[error("The JUMBF data was not found.")]
     JumbfNotFound,
 
-    /// Failed to load the font's 'C2PA' table, either because it was missing or
-    /// because it was truncated/bad.
-    #[error("C2PA table bad or missing")]
-    LoadC2PATableBadMissing,
-
     /// The font's 'C2PA' table contains invalid UTF-8 data.
     #[error("C2PA table manifest data is not valid UTF-8")]
     LoadC2PATableInvalidUtf8,
@@ -69,13 +60,16 @@ pub enum FontError {
     #[error("C2PA table claimed sizes exceed actual")]
     LoadC2PATableTruncated,
 
-    /// The font's SFNT header is bad or missing.
-    #[error("SFNT header bad or missing")]
-    LoadSfntHeaderBadMissing,
+    /// The font's 'head' table is truncated.
+    #[error("head table claimed sizes exceed actual")]
+    LoadHeadTableTruncated,
 
     /// Failed to save the font.
     #[error("Failed to save font")]
     SaveError,
+
+    #[error("Failed to save font: {0}")]
+    SavveeError(#[from] FontSaveError),
 
     /// The font is missing a valid 'magic' number, therefore an unknown font type.
     #[error("Unknown font format, the 'magic' number is not recognized.")]
@@ -104,6 +98,29 @@ pub enum FontError {
     #[cfg(feature = "xmp_write")]
     #[error(transparent)]
     XmpWriteError(#[from] XmpError),
+}
+
+/// Errors that can occur when saving a font.
+#[derive(Debug, thiserror::Error)]
+pub enum FontSaveError {
+    /// Failed to save a font file with an invalid table directory.
+    #[error("Invalid derived table offset bias, an unexpected state.")]
+    InvalidDerivedTableOffsetBias,
+
+    /// Failed to save a font file due to the fact the write operation
+    /// failed.
+    #[error("Failed to save font because the write operation failed.")]
+    FailedToWrite(std::io::Error),
+
+    /// Failed to save a font file with an unexpected number of tables
+    /// found in the font.
+    #[error("Unexpected number of tables.")]
+    UnexpectedNumberOfTables,
+
+    /// Failed to save a font file with an unexpected table found in the
+    /// table directory.
+    #[error("Unexpected table found in the table directory: {0}")]
+    UnexpectedTable(String),
 }
 
 /// Helper method for wrapping a FontError into a crate level error.
@@ -628,7 +645,7 @@ impl TableHead {
         reader.seek(SeekFrom::Start(offset))?;
         let actual_size = size_of::<TableHead>();
         if size != actual_size {
-            Err(FontError::HeadTableMissing)
+            Err(FontError::LoadHeadTableTruncated)
         } else {
             let head = Self {
                 // 0x00
@@ -796,13 +813,13 @@ impl Table for TableUnspecified {
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
-            .map_err(|_e| FontError::SaveError)?;
+            .map_err(FontSaveError::FailedToWrite)?;
         let limit = self.data.len() % 4;
         if limit > 0 {
             let pad: [u8; 3] = [0, 0, 0];
             destination
                 .write_all(&pad[0..(4 - limit)])
-                .map_err(|_e| FontError::SaveError)?;
+                .map_err(FontSaveError::FailedToWrite)?;
         }
         Ok(())
     }
@@ -1113,7 +1130,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        assert_matches!(head, Err(FontError::HeadTableMissing));
+        assert_matches!(head, Err(FontError::LoadHeadTableTruncated));
     }
 
     #[test]

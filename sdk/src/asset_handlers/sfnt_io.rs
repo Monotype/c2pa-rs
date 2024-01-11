@@ -330,7 +330,9 @@ impl SfntFont {
                     size_of::<SfntDirectoryEntry>() as i64
                 } else {
                     // We added some other number of tables
-                    return Err(FontError::SaveError);
+                    return Err(FontError::SavveeError(
+                        FontSaveError::UnexpectedNumberOfTables,
+                    ));
                 }
             }
             Ordering::Equal => 0,
@@ -340,13 +342,17 @@ impl SfntFont {
                     // the C2PA table - that's the only one we should ever
                     // be removing.
                     if self.tables.contains_key(&C2PA_TABLE_TAG) {
-                        return Err(FontError::SaveError);
+                        return Err(FontError::SavveeError(FontSaveError::UnexpectedTable(
+                            format!("{:?}", C2PA_TABLE_TAG),
+                        )));
                     }
                     // We removed exactly one table
                     -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
                     // We added some other number of tables. Weird, right?
-                    return Err(FontError::SaveError);
+                    return Err(FontError::SavveeError(
+                        FontSaveError::UnexpectedNumberOfTables,
+                    ));
                 }
             }
         };
@@ -378,7 +384,9 @@ impl SfntFont {
                     // be the case where we're removing the C2PA table; the
                     // bias *must not* be negative.
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
-                        return Err(FontError::SaveError);
+                        return Err(FontError::SavveeError(
+                            FontSaveError::InvalidDerivedTableOffsetBias,
+                        ));
                     }
                     let neo_entry = SfntDirectoryEntry {
                         tag: entry.tag,
@@ -399,7 +407,9 @@ impl SfntFont {
                         // Check - this *must* be the case where we're adding
                         // a C2PA table - therefore the bias should be positive.
                         if td_derived_offset_bias <= 0 {
-                            return Err(FontError::SaveError);
+                            return Err(FontError::SavveeError(
+                                FontSaveError::InvalidDerivedTableOffsetBias,
+                            ));
                         }
                         let neo_entry = SfntDirectoryEntry {
                             tag: *tag,
@@ -415,7 +425,9 @@ impl SfntFont {
                         //    align_to_four(entry.offset as usize + entry.length as usize);
                     }
                     _ => {
-                        return Err(FontError::SaveError);
+                        return Err(FontError::SavveeError(FontSaveError::UnexpectedTable(
+                            format!("{:?}", tag),
+                        )))
                     }
                 },
             }
@@ -898,7 +910,7 @@ where
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
-    font.write(destination).map_err(|_| FontError::SaveError)?;
+    font.write(destination)?;
     Ok(())
 }
 
@@ -926,8 +938,7 @@ where
         font.append_empty_c2pa_table()?;
     }
     // Write the font to the output stream
-    font.write(output_stream)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(output_stream)?;
     Ok(())
 }
 
