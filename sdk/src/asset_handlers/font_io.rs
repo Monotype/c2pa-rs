@@ -16,6 +16,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+#[cfg(feature = "xmp_write")]
 use xmp_toolkit::XmpError;
 
 use crate::error::Error;

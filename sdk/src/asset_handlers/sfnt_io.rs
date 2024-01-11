@@ -146,10 +146,7 @@ mod font_xmp_support {
     /// This method is considered a stop-gap for now until the official SDK
     /// offers a more generic method to indicate a document ID, instance ID,
     /// and a reference to the a remote manifest.
-    pub(crate) fn add_reference_as_xmp_to_font(
-        font_path: &Path,
-        manifest_uri: &str,
-    ) -> core::result::Result<(), FontError> {
+    pub(crate) fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
         process_file_with_streams(font_path, move |input_stream, temp_file| {
             // Write the manifest URI to the stream
             add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
@@ -168,7 +165,7 @@ mod font_xmp_support {
         source: &mut TSource,
         destination: &mut TDest,
         manifest_uri: &str,
-    ) -> core::result::Result<(), FontError>
+    ) -> Result<()>
     where
         TSource: Read + Seek + ?Sized,
         TDest: Write + ?Sized,
@@ -220,7 +217,7 @@ impl TempFile {
     /// Creates a new temporary file within the `env::temp_dir()` directory,
     /// which should be deleted once the object is dropped.  Uses the specified
     /// base name for the temporary file.
-    pub(crate) fn new(base_name: &Path) -> core::result::Result<Self, FontError> {
+    pub(crate) fn new(base_name: &Path) -> Result<Self> {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
         let path = temp_dir_path.join(
@@ -263,9 +260,7 @@ struct SfntFont {
 
 impl SfntFont {
     /// Reads a new instance from the given source.
-    fn from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<SfntFont, FontError> {
+    fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<SfntFont> {
         // Read in the SfntHeader
         let sfnt_hdr = SfntHeader::from_reader(reader)?;
 
@@ -294,10 +289,7 @@ impl SfntFont {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(
-        &mut self,
-        destination: &mut TDest,
-    ) -> core::result::Result<(), FontError> {
+    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
         let mut neo_header = SfntHeader::default();
         let mut neo_directory = SfntDirectory::new()?;
         // Re-synthesize the file header based on the actual table count
@@ -483,9 +475,7 @@ impl SfntFont {
 /// the font_io module, because WOFF support needs to use them as well.
 impl SfntHeader {
     /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<Self, FontError> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -496,10 +486,7 @@ impl SfntHeader {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(
-        &self,
-        destination: &mut TDest,
-    ) -> core::result::Result<(), FontError> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination.write_u32::<BigEndian>(self.sfntVersion)?;
         destination.write_u16::<BigEndian>(self.numTables)?;
         destination.write_u16::<BigEndian>(self.searchRange)?;
@@ -533,9 +520,7 @@ impl Default for SfntHeader {
 
 impl SfntDirectoryEntry {
     /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<Self, FontError> {
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         Ok(Self {
             tag: SfntTag::from_reader(reader)?,
             checksum: reader.read_u32::<BigEndian>()?,
@@ -545,10 +530,7 @@ impl SfntDirectoryEntry {
     }
 
     /// Serializes this instance to the given writer.
-    pub(crate) fn write<TDest: Write + ?Sized>(
-        &self,
-        destination: &mut TDest,
-    ) -> core::result::Result<(), FontError> {
+    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         self.tag.write(destination)?;
         destination.write_u32::<BigEndian>(self.checksum)?;
         destination.write_u32::<BigEndian>(self.offset)?;
@@ -587,7 +569,7 @@ struct SfntDirectory {
 
 impl SfntDirectory {
     /// Constructs a new, empty, instance.
-    pub(crate) fn new() -> core::result::Result<Self, FontError> {
+    pub(crate) fn new() -> Result<Self> {
         Ok(Self {
             entries: Vec::new(),
         })
@@ -598,7 +580,7 @@ impl SfntDirectory {
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
         reader: &mut T,
         entry_count: usize,
-    ) -> core::result::Result<Self, FontError> {
+    ) -> Result<Self> {
         let mut the_directory = SfntDirectory::new()?;
         for _entry in 0..entry_count {
             the_directory
@@ -609,10 +591,7 @@ impl SfntDirectory {
     }
 
     /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(
-        &self,
-        destination: &mut TDest,
-    ) -> core::result::Result<(), FontError> {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         for entry in self.entries.iter() {
             entry.write(destination)?;
         }
@@ -822,10 +801,7 @@ impl ChunkReader for SfntIO {
 }
 
 /// Adds C2PA manifest store data to a font file (specified by path).
-fn add_c2pa_to_font(
-    font_path: &Path,
-    manifest_store_data: &[u8],
-) -> core::result::Result<(), FontError> {
+fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Add the C2PA data to the temp file
         add_c2pa_to_stream(input_stream, temp_file.get_mut_file(), manifest_store_data)
@@ -838,7 +814,7 @@ fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
     manifest_store_data: &[u8],
-) -> core::result::Result<(), FontError>
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
@@ -869,10 +845,7 @@ where
 
 /// Adds the manifest URI reference to the font at the given path.
 #[allow(dead_code)]
-fn add_reference_to_font(
-    font_path: &Path,
-    manifest_uri: &str,
-) -> core::result::Result<(), FontError> {
+fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Write the manifest URI to the stream
         add_reference_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
@@ -885,7 +858,7 @@ fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
     manifest_uri: &str,
-) -> core::result::Result<(), FontError>
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
@@ -924,7 +897,7 @@ where
 fn add_required_chunks_to_stream<TReader, TWriter>(
     input_stream: &mut TReader,
     output_stream: &mut TWriter,
-) -> core::result::Result<(), FontError>
+) -> Result<()>
 where
     TReader: Read + Seek + ?Sized,
     TWriter: Read + Seek + ?Sized + Write,
@@ -943,7 +916,7 @@ where
 }
 
 /// Opens a BufReader for the given file path
-fn open_bufreader_for_file(file_path: &Path) -> core::result::Result<BufReader<File>, FontError> {
+fn open_bufreader_for_file(file_path: &Path) -> Result<BufReader<File>> {
     let file = File::open(file_path)?;
     Ok(BufReader::new(file))
 }
@@ -951,8 +924,8 @@ fn open_bufreader_for_file(file_path: &Path) -> core::result::Result<BufReader<F
 /// Processes a font file (specified by path) by stream with the given callback.
 fn process_file_with_streams(
     font_path: &Path,
-    callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> core::result::Result<(), FontError>,
-) -> core::result::Result<(), FontError> {
+    callback: impl Fn(&mut BufReader<File>, &mut TempFile) -> Result<()>,
+) -> Result<()> {
     // Open the font source for a buffer read
     let mut font_buffer = open_bufreader_for_file(font_path)?;
     // Open a temporary file, which will be deleted after destroyed
@@ -966,7 +939,7 @@ fn process_file_with_streams(
 /// Reads the C2PA manifest store reference from the font file (specified by
 /// path).
 #[allow(dead_code)]
-fn read_reference_from_font(font_path: &Path) -> core::result::Result<Option<String>, FontError> {
+fn read_reference_from_font(font_path: &Path) -> Result<Option<String>> {
     // open the font source
     let mut font_stream = open_bufreader_for_file(font_path)?;
     read_reference_from_stream(&mut font_stream)
@@ -974,9 +947,7 @@ fn read_reference_from_font(font_path: &Path) -> core::result::Result<Option<Str
 
 /// Reads the C2PA manifest store reference from the stream.
 #[allow(dead_code)]
-fn read_reference_from_stream<TSource>(
-    source: &mut TSource,
-) -> core::result::Result<Option<String>, FontError>
+fn read_reference_from_stream<TSource>(source: &mut TSource) -> Result<Option<String>>
 where
     TSource: Read + Seek + ?Sized,
 {
@@ -988,7 +959,7 @@ where
 }
 
 /// Remove the `C2PA` font table from the font file (specified by path).
-fn remove_c2pa_from_font(font_path: &Path) -> core::result::Result<(), FontError> {
+fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
         // Remove the C2PA manifest store from the stream
         remove_c2pa_from_stream(input_stream, temp_file.get_mut_file())
@@ -1000,7 +971,7 @@ fn remove_c2pa_from_font(font_path: &Path) -> core::result::Result<(), FontError
 fn remove_c2pa_from_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-) -> core::result::Result<(), FontError>
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
