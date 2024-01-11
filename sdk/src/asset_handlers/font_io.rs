@@ -102,7 +102,7 @@ pub enum FontSaveError {
 
     /// Failed to save a font file due to the fact the write operation
     /// failed.
-    #[error("Failed to save font because the write operation failed.")]
+    #[error("Failed to save font because the write operation failed; {0}")]
     FailedToWrite(std::io::Error),
 
     /// Failed to save a font file due to a state where the font's
