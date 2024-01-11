@@ -777,7 +777,7 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination)?;
@@ -821,7 +821,7 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination)?;
@@ -844,7 +844,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = WoffFont::from_reader(input_stream).map_err(|_| FontError::LoadError)?;
+    let mut font = WoffFont::from_reader(input_stream).map_err(|_| FontError::DeserializationError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -895,7 +895,7 @@ where
     match read_c2pa_from_stream(source) {
         Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
         Err(FontError::JumbfNotFound) => Ok(None),
-        Err(_) => Err(FontError::DeserializationError),
+        Err(e) => Err(e),
     }
 }
 
@@ -919,7 +919,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = WoffFont::from_reader(source).map_err(|_| FontError::LoadError)?;
+    let mut font = WoffFont::from_reader(source).map_err(|_| FontError::DeserializationError)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -959,7 +959,7 @@ where
         }
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination)?;
@@ -1071,18 +1071,16 @@ where
 /// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
 /// table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    let woff = WoffFont::from_reader(reader)?;
-    let c2pa_table: Option<TableC2PA> = match woff.tables.get(&C2PA_TABLE_TAG) {
-        None => None,
+    // Convert all errors from the reader to a deserialization error.
+    let woff = WoffFont::from_reader(reader).map_err(|_| FontError::DeserializationError)?;
+    match woff.tables.get(&C2PA_TABLE_TAG) {
+        None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => Some(c2pa.clone()),
+        Some(NamedTable::C2PA(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => {
-            return Err(FontError::LoadError);
-        }
-    };
-    c2pa_table.ok_or(FontError::JumbfNotFound)
+        Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
+    }
 }
 
 /// Main WOFF IO feature.

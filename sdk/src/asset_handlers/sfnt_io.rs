@@ -848,7 +848,7 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination)?;
@@ -895,7 +895,7 @@ where
         Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination).map_err(|_| FontError::SaveError)?;
@@ -918,7 +918,8 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = SfntFont::from_reader(input_stream).map_err(|_| FontError::LoadError)?;
+    let mut font =
+        SfntFont::from_reader(input_stream).map_err(|_| FontError::DeserializationError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -971,7 +972,7 @@ where
     match read_c2pa_from_stream(source) {
         Ok(c2pa_data) => Ok(c2pa_data.active_manifest_uri),
         Err(FontError::JumbfNotFound) => Ok(None),
-        Err(_) => Err(FontError::DeserializationError),
+        Err(e) => Err(e),
     }
 }
 
@@ -1034,7 +1035,7 @@ where
         }
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
-            return Err(FontError::LoadError);
+            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
     font.write(destination)?;
@@ -1104,17 +1105,16 @@ where
 
 /// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
 /// table data
-fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(
-    reader: &mut T,
-) -> core::result::Result<TableC2PA, FontError> {
-    let sfnt = SfntFont::from_reader(reader)?;
+fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
+    // Convert all errors from the reader to a deserialization error.
+    let sfnt = SfntFont::from_reader(reader).map_err(|_| FontError::DeserializationError)?;
     match sfnt.tables.get(&C2PA_TABLE_TAG) {
         None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
         Some(NamedTable::C2PA(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => Err(FontError::LoadError),
+        Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
     }
 }
 

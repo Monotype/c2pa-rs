@@ -40,13 +40,13 @@ pub enum FontError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
 
+    /// Invalid named table encountered.
+    #[error("Invalid named table: {0}")]
+    InvalidNamedTable(&'static str),
+
     //// The JUMBF data was not found.
     #[error("The JUMBF data was not found.")]
     JumbfNotFound,
-
-    /// Failed to load a font.
-    #[error("Failed to load font")]
-    LoadError,
 
     /// Failed to load the font's 'C2PA' table, either because it was missing or
     /// because it was truncated/bad.
