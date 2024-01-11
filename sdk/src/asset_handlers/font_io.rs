@@ -105,10 +105,15 @@ pub enum FontSaveError {
     #[error("Failed to save font because the write operation failed.")]
     FailedToWrite(std::io::Error),
 
-    /// Failed to save a font file with an unexpected number of tables
-    /// found in the font.
-    #[error("Unexpected number of tables.")]
-    UnexpectedNumberOfTables,
+    /// Failed to save a font file due to a state where the font's
+    /// table directory has more than just the 'C2PA' table added.
+    #[error("Too many tables were added to the font, only expected to add one for C2PA.")]
+    TooManyTablesAdded,
+
+    /// Failed to save a font file due to a state where the font's
+    /// table directory has more than just the 'C2PA' table removed.
+    #[error("Too many tables were removed from the font, only expected to remove one for C2PA.")]
+    TooManyTablesRemoved,
 
     /// Failed to save a font file with an unexpected table found in the
     /// table directory.

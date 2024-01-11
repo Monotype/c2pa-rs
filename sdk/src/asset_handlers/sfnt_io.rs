@@ -323,7 +323,7 @@ impl SfntFont {
                 } else {
                     // We added some other number of tables
                     return Err(FontError::SaveError(
-                        FontSaveError::UnexpectedNumberOfTables,
+                        FontSaveError::TooManyTablesAdded,
                     ));
                 }
             }
@@ -341,9 +341,9 @@ impl SfntFont {
                     // We removed exactly one table
                     -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
-                    // We added some other number of tables. Weird, right?
+                    // We removed some other number of tables. Weird, right?
                     return Err(FontError::SaveError(
-                        FontSaveError::UnexpectedNumberOfTables,
+                        FontSaveError::TooManyTablesRemoved,
                     ));
                 }
             }
