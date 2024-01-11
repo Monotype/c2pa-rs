@@ -32,9 +32,17 @@ pub enum FontError {
     #[error("Bad parameter: {0}")]
     BadParam(String),
 
+    /// Bad head table, when the magic number is not recognized.
+    #[error("Bad head table, unknown data format")]
+    BadHeadTable,
+
     /// Failed to parse or de-serialize font data
     #[error("Failed to de-serialize data")]
     DeserializationError,
+
+    /// The font's 'head' table is bad or missing.
+    #[error("head table bad or missing")]
+    HeadTableMissing,
 
     /// IO error while dealing with a potentially font-related file/stream.
     #[error(transparent)]
@@ -60,10 +68,6 @@ pub enum FontError {
     /// The font's 'C2PA' table is truncated.
     #[error("C2PA table claimed sizes exceed actual")]
     LoadC2PATableTruncated,
-
-    /// The font's 'head' table is bad or missing.
-    #[error("head table bad or missing")]
-    LoadHeadTableBadMissing,
 
     /// The font's SFNT header is bad or missing.
     #[error("SFNT header bad or missing")]
@@ -624,7 +628,7 @@ impl TableHead {
         reader.seek(SeekFrom::Start(offset))?;
         let actual_size = size_of::<TableHead>();
         if size != actual_size {
-            Err(FontError::LoadHeadTableBadMissing)
+            Err(FontError::HeadTableMissing)
         } else {
             let head = Self {
                 // 0x00
@@ -675,7 +679,7 @@ impl TableHead {
                 // stream is left, so we don't do anything, since that is simplest.
             };
             if head.magicNumber != HEAD_TABLE_MAGICNUMBER {
-                return Err(FontError::LoadHeadTableBadMissing);
+                return Err(FontError::BadHeadTable);
             }
             Ok(head)
         }
@@ -1084,7 +1088,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len());
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        assert_matches!(head, Err(FontError::LoadHeadTableBadMissing));
+        assert_matches!(head, Err(FontError::BadHeadTable));
     }
 
     #[test]
@@ -1109,7 +1113,7 @@ pub mod tests {
         let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
         assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
-        assert_matches!(head, Err(FontError::LoadHeadTableBadMissing));
+        assert_matches!(head, Err(FontError::HeadTableMissing));
     }
 
     #[test]

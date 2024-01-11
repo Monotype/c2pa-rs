@@ -844,7 +844,8 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font = WoffFont::from_reader(input_stream).map_err(|_| FontError::DeserializationError)?;
+    let mut font =
+        WoffFont::from_reader(input_stream).map_err(|_| FontError::DeserializationError)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
