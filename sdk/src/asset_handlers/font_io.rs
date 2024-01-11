@@ -37,10 +37,6 @@ pub enum FontError {
     #[error("Bad head table, unknown data format")]
     BadHeadTable,
 
-    /// Failed to parse or de-serialize font data
-    #[error("Failed to de-serialize data")]
-    DeserializationError,
-
     /// IO error while dealing with a potentially font-related file/stream.
     #[error(transparent)]
     IoError(#[from] std::io::Error),

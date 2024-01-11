@@ -844,8 +844,7 @@ where
     TWriter: Read + Seek + ?Sized + Write,
 {
     // Read the font from the input stream
-    let mut font =
-        WoffFont::from_reader(input_stream).map_err(|_| FontError::DeserializationError)?;
+    let mut font = WoffFont::from_reader(input_stream)?;
     // If the C2PA table does not exist...
     if font.tables.get(&C2PA_TABLE_TAG).is_none() {
         // ...install an empty one.
@@ -919,7 +918,7 @@ where
 {
     source.rewind()?;
     // Load the font from the stream
-    let mut font = WoffFont::from_reader(source).map_err(|_| FontError::DeserializationError)?;
+    let mut font = WoffFont::from_reader(source)?;
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
@@ -1072,7 +1071,7 @@ where
 /// table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
     // Convert all errors from the reader to a deserialization error.
-    let woff = WoffFont::from_reader(reader).map_err(|_| FontError::DeserializationError)?;
+    let woff = WoffFont::from_reader(reader)?;
     match woff.tables.get(&C2PA_TABLE_TAG) {
         None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
