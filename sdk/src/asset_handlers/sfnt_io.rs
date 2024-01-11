@@ -322,9 +322,7 @@ impl SfntFont {
                     size_of::<SfntDirectoryEntry>() as i64
                 } else {
                     // We added some other number of tables
-                    return Err(FontError::SaveError(
-                        FontSaveError::TooManyTablesAdded,
-                    ));
+                    return Err(FontError::SaveError(FontSaveError::TooManyTablesAdded));
                 }
             }
             Ordering::Equal => 0,
@@ -342,9 +340,7 @@ impl SfntFont {
                     -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
                     // We removed some other number of tables. Weird, right?
-                    return Err(FontError::SaveError(
-                        FontSaveError::TooManyTablesRemoved,
-                    ));
+                    return Err(FontError::SaveError(FontSaveError::TooManyTablesRemoved));
                 }
             }
         };
