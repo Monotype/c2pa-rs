@@ -64,12 +64,8 @@ pub enum FontError {
     #[error("head table claimed sizes exceed actual")]
     LoadHeadTableTruncated,
 
-    /// Failed to save the font.
-    #[error("Failed to save font")]
-    SaveError,
-
     #[error("Failed to save font: {0}")]
-    SavveeError(#[from] FontSaveError),
+    SaveError(#[from] FontSaveError),
 
     /// The font is missing a valid 'magic' number, therefore an unknown font type.
     #[error("Unknown font format, the 'magic' number is not recognized.")]

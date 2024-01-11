@@ -852,8 +852,7 @@ where
         font.append_empty_c2pa_table()?;
     }
     // Write the font to the output stream
-    font.write(output_stream)
-        .map_err(|_| FontError::SaveError)?;
+    font.write(output_stream)?;
     Ok(())
 }
 
@@ -924,7 +923,7 @@ where
     // Remove the table from the collection
     font.tables.remove(&C2PA_TABLE_TAG);
     // And write it to the destination stream
-    font.write(destination).map_err(|_| FontError::SaveError)?;
+    font.write(destination)?;
 
     Ok(())
 }

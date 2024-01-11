@@ -330,7 +330,7 @@ impl SfntFont {
                     size_of::<SfntDirectoryEntry>() as i64
                 } else {
                     // We added some other number of tables
-                    return Err(FontError::SavveeError(
+                    return Err(FontError::SaveError(
                         FontSaveError::UnexpectedNumberOfTables,
                     ));
                 }
@@ -342,7 +342,7 @@ impl SfntFont {
                     // the C2PA table - that's the only one we should ever
                     // be removing.
                     if self.tables.contains_key(&C2PA_TABLE_TAG) {
-                        return Err(FontError::SavveeError(FontSaveError::UnexpectedTable(
+                        return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
                             format!("{:?}", C2PA_TABLE_TAG),
                         )));
                     }
@@ -350,7 +350,7 @@ impl SfntFont {
                     -(size_of::<SfntDirectoryEntry>() as i64)
                 } else {
                     // We added some other number of tables. Weird, right?
-                    return Err(FontError::SavveeError(
+                    return Err(FontError::SaveError(
                         FontSaveError::UnexpectedNumberOfTables,
                     ));
                 }
@@ -384,7 +384,7 @@ impl SfntFont {
                     // be the case where we're removing the C2PA table; the
                     // bias *must not* be negative.
                     if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
-                        return Err(FontError::SavveeError(
+                        return Err(FontError::SaveError(
                             FontSaveError::InvalidDerivedTableOffsetBias,
                         ));
                     }
@@ -407,7 +407,7 @@ impl SfntFont {
                         // Check - this *must* be the case where we're adding
                         // a C2PA table - therefore the bias should be positive.
                         if td_derived_offset_bias <= 0 {
-                            return Err(FontError::SavveeError(
+                            return Err(FontError::SaveError(
                                 FontSaveError::InvalidDerivedTableOffsetBias,
                             ));
                         }
@@ -425,7 +425,7 @@ impl SfntFont {
                         //    align_to_four(entry.offset as usize + entry.length as usize);
                     }
                     _ => {
-                        return Err(FontError::SavveeError(FontSaveError::UnexpectedTable(
+                        return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
                             format!("{:?}", tag),
                         )))
                     }
