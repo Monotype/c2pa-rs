@@ -1129,18 +1129,14 @@ impl CAIWriter for WoffIO {
         output_stream: &mut dyn CAIReadWrite,
         store_bytes: &[u8],
     ) -> crate::error::Result<()> {
-        Ok(add_c2pa_to_stream(
-            input_stream,
-            output_stream,
-            store_bytes,
-        )?)
+        add_c2pa_to_stream(input_stream, output_stream, store_bytes).map_err(wrap_font_err)
     }
 
     fn get_object_locations_from_stream(
         &self,
         input_stream: &mut dyn CAIRead,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
-        Ok(get_object_locations_from_stream(self, input_stream)?)
+        get_object_locations_from_stream(self, input_stream).map_err(wrap_font_err)
     }
 
     fn remove_cai_store_from_stream(
@@ -1148,7 +1144,7 @@ impl CAIWriter for WoffIO {
         input_stream: &mut dyn CAIRead,
         output_stream: &mut dyn CAIReadWrite,
     ) -> crate::error::Result<()> {
-        Ok(remove_c2pa_from_stream(input_stream, output_stream)?)
+        remove_c2pa_from_stream(input_stream, output_stream).map_err(wrap_font_err)
     }
 }
 
@@ -1193,7 +1189,7 @@ impl AssetIO for WoffIO {
     }
 
     fn save_cai_store(&self, asset_path: &Path, store_bytes: &[u8]) -> crate::error::Result<()> {
-        Ok(add_c2pa_to_font(asset_path, store_bytes)?)
+        add_c2pa_to_font(asset_path, store_bytes).map_err(wrap_font_err)
     }
 
     fn get_object_locations(
@@ -1201,11 +1197,11 @@ impl AssetIO for WoffIO {
         asset_path: &Path,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
         let mut buf_reader = open_bufreader_for_file(asset_path)?;
-        Ok(get_object_locations_from_stream(self, &mut buf_reader)?)
+        get_object_locations_from_stream(self, &mut buf_reader).map_err(wrap_font_err)
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> crate::error::Result<()> {
-        Ok(remove_c2pa_from_font(asset_path)?)
+        remove_c2pa_from_font(asset_path).map_err(wrap_font_err)
     }
 
     fn asset_box_hash_ref(&self) -> Option<&dyn AssetBoxHash> {
@@ -1246,14 +1242,12 @@ impl RemoteRefEmbed for WoffIO {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
                 #[cfg(feature = "xmp_write")]
                 {
-                    Ok(font_xmp_support::add_reference_as_xmp_to_font(
-                        asset_path,
-                        &manifest_uri,
-                    )?)
+                    font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
+                        .map_err(wrap_font_err)
                 }
                 #[cfg(not(feature = "xmp_write"))]
                 {
-                    Ok(add_reference_to_font(asset_path, &manifest_uri)?)
+                    add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
                 }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
@@ -1272,19 +1266,17 @@ impl RemoteRefEmbed for WoffIO {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
                 #[cfg(feature = "xmp_write")]
                 {
-                    Ok(font_xmp_support::add_reference_as_xmp_to_stream(
+                    font_xmp_support::add_reference_as_xmp_to_stream(
                         reader,
                         output_stream,
                         &manifest_uri,
-                    )?)
+                    )
+                    .map_err(wrap_font_err)
                 }
                 #[cfg(not(feature = "xmp_write"))]
                 {
-                    Ok(add_reference_to_stream(
-                        reader,
-                        output_stream,
-                        &manifest_uri,
-                    )?)
+                    add_reference_to_stream(reader, output_stream, &manifest_uri)
+                        .map_err(wrap_font_err)
                 }
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),

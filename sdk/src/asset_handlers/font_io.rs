@@ -49,7 +49,7 @@ pub enum FontError {
     #[error("Invalid named table: {0}")]
     InvalidNamedTable(&'static str),
 
-    //// The JUMBF data was not found.
+    /// The JUMBF data was not found.
     #[error("The JUMBF data was not found.")]
     JumbfNotFound,
 
