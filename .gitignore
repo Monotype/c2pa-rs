@@ -5,8 +5,8 @@ Cargo.lock
 **/*.rs.bk
 
 .DS_Store
+.coverage
 .idea
-
 .vscode
 
 /semver-checks/target/

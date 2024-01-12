@@ -800,6 +800,11 @@ impl TableUnspecified {
 }
 
 impl Table for TableUnspecified {
+    /// NOTE - We _should_ be able to prune out `checksum` and `len`, because
+    /// we only need them for C2PA; but it leads to a wrinkle in sfnt_io,
+    /// inside the write function, which wants to call Table.checksum() and
+    /// Table.len(), but which will need to learn to down-cast to TableC2PA and
+    /// invoke the functions  directly.
     fn checksum(&self) -> Wrapping<u32> {
         checksum(&self.data)
     }
