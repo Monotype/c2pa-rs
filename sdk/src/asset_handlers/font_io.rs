@@ -282,20 +282,40 @@ pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
 }
 
 /// Computes a 32-bit big-endian OpenType-style checksum on the given byte
-/// array, which is presumed to start on a 4-byte boundary.  The `bias`
-/// parameter specifies the starting byte offset.
+/// array as though it began on the specified byte offset, preceded by bytes
+/// containing zero (0).
 ///
 /// # Remarks
 /// Note that trailing pad bytes do not affect this checksum - it's not a real
 /// CRC.
 #[allow(dead_code)]
 pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
-    match bias & 3 {
-        0 => checksum(bytes),
-        1 => Wrapping(BigEndian::read_u24(bytes)) + checksum(&(bytes[3..bytes.len()])),
-        2 => Wrapping(BigEndian::read_u16(bytes) as u32) + checksum(&(bytes[2..bytes.len()])),
-        3 => Wrapping(bytes[0] as u32) + checksum(&(bytes[1..bytes.len()])),
-        4_u32..=u32::MAX => todo!(),
+    let bytes_len = bytes.len();
+    match bytes_len {
+        0 => Wrapping(0),
+        1 | 2 | 3 => {
+            // There are too few bytes to read a full u32, and therefore no
+            // need to sum anything; we just need to (probably) rearrange the
+            // bytes we have into the appropriate big-endian value.
+            let fragment = BigEndian::read_uint(bytes, bytes_len as usize) as u32;
+            // Shift the first byte we read into the most-significant position.
+            // Unnerving that we must cast bytes_len here (and in other rotate calls).
+            let justified_fragment = fragment.rotate_left((4 - bytes_len as u32) * 8);
+            // Now, apply the bias
+            let biased_fragment = justified_fragment.rotate_right(bias as u32 * 8);
+            Wrapping(biased_fragment)
+        }
+        _ => {
+            match bias & 3 {
+                // Bias the checksum calculation to the given offset; we can
+                // presume there are four (4) or more bytes.
+                0 => checksum(bytes),
+                1 => Wrapping(BigEndian::read_u24(bytes)) + checksum(&(bytes[3..bytes_len])),
+                2 => Wrapping(BigEndian::read_u16(bytes) as u32) + checksum(&(bytes[2..bytes_len])),
+                3 => Wrapping(bytes[0] as u32) + checksum(&(bytes[1..bytes_len])),
+                4_u32..=u32::MAX => panic!("(bias & 3) cannot be four or more!"),
+            }
+        }
     }
 }
 
@@ -1168,14 +1188,13 @@ pub mod tests {
     }
 
     #[test]
-    /// Verifies the adding of a remote C2PA manifest reference works as
-    /// expected.
-    fn un_checksums() {
-        let un_data = vec![
+    /// Verifies checksum function for TableUnspecified
+    fn test_table_checksum() {
+        let data = vec![
             0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             0x01, 0x00,
         ];
-        let un_expecteds: [u32; 17] = [
+        let expecteds: [u32; 17] = [
             0x00000000_u32,
             0x0f000000_u32,
             0x0f0f0000_u32,
@@ -1194,12 +1213,116 @@ pub mod tests {
             0x13131210_u32,
             0x13131210_u32,
         ];
-        let mut un_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&un_data);
-        for (n, un_expected) in un_expecteds.iter().enumerate() {
-            // Make an unspecified table from the first n bytes
-            let un = TableUnspecified::from_reader(&mut un_stream, 0, n).unwrap();
-            let un_cksum = un.checksum();
-            assert_eq!(un_expected, &(un_cksum.0));
+        let mut stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&data);
+        for (n, expected) in expecteds.iter().enumerate() {
+            // Create a fragment from the first N bytes
+            let frag_0n = TableUnspecified::from_reader(&mut stream, 0, n).unwrap();
+            // Verify its checksum
+            let cksum = frag_0n.checksum();
+            assert_eq!(expected, &(cksum.0));
+        }
+    }
+
+    #[test]
+    /// Verifies the adding of a remote C2PA manifest reference works as
+    /// expected.
+    fn test_checksum_and_biased() {
+        let data = vec![
+            0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x01, 0x00,
+        ];
+        let expecteds: [[u32; 17]; 4] = [
+            [
+                0x00000000_u32,
+                0x0f000000_u32,
+                0x0f0f0000_u32,
+                0x0f0f0f00_u32,
+                0x0f0f0f0f_u32,
+                0x130f0f0f_u32,
+                0x13120f0f_u32,
+                0x1312110f_u32,
+                0x13121110_u32,
+                0x13121110_u32,
+                0x13121110_u32,
+                0x13121110_u32,
+                0x13121110_u32,
+                0x13121110_u32,
+                0x13131110_u32,
+                0x13131210_u32,
+                0x13131210_u32,
+            ],
+            [
+                0x00000000_u32,
+                0x000f0000_u32,
+                0x000f0f00_u32,
+                0x000f0f0f_u32,
+                0x0f0f0f0f_u32,
+                0x0f130f0f_u32,
+                0x0f13120f_u32,
+                0x0f131211_u32,
+                0x10131211_u32,
+                0x10131211_u32,
+                0x10131211_u32,
+                0x10131211_u32,
+                0x10131211_u32,
+                0x10131211_u32,
+                0x10131311_u32,
+                0x10131312_u32,
+                0x10131312_u32,
+            ],
+            [
+                0x00000000_u32,
+                0x00000f00_u32,
+                0x00000f0f_u32,
+                0x0f000f0f_u32,
+                0x0f0f0f0f_u32,
+                0x0f0f130f_u32,
+                0x0f0f1312_u32,
+                0x110f1312_u32,
+                0x11101312_u32,
+                0x11101312_u32,
+                0x11101312_u32,
+                0x11101312_u32,
+                0x11101312_u32,
+                0x11101312_u32,
+                0x11101313_u32,
+                0x12101313_u32,
+                0x12101313_u32,
+            ],
+            [
+                0x00000000_u32,
+                0x0000000f_u32,
+                0x0f00000f_u32,
+                0x0f0f000f_u32,
+                0x0f0f0f0f_u32,
+                0x0f0f0f13_u32,
+                0x120f0f13_u32,
+                0x12110f13_u32,
+                0x12111013_u32,
+                0x12111013_u32,
+                0x12111013_u32,
+                0x12111013_u32,
+                0x12111013_u32,
+                0x12111013_u32,
+                0x13111013_u32,
+                0x13121013_u32,
+                0x13121013_u32,
+            ],
+        ];
+        for frag_length in 0..data.len() {
+            // Create a fragment from the first N bytes
+            let frag_0n = &data[0..frag_length];
+            // Verify its checksum for different bias values
+            let cksum = checksum(frag_0n);
+            let cksum_0 = checksum_biased(frag_0n, 0);
+            let cksum_1 = checksum_biased(frag_0n, 1);
+            let cksum_2 = checksum_biased(frag_0n, 2);
+            let cksum_3 = checksum_biased(frag_0n, 3);
+            assert_eq!(expecteds[0][frag_length], cksum.0);
+            assert_eq!(expecteds[0][frag_length], cksum_0.0);
+            assert_eq!(expecteds[1][frag_length], cksum_1.0);
+            assert_eq!(expecteds[2][frag_length], cksum_2.0);
+            assert_eq!(expecteds[3][frag_length], cksum_3.0);
         }
     }
 }
