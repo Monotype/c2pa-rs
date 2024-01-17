@@ -368,13 +368,8 @@ pub(crate) fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
     Wrapping((big & 0x00000000ffffffff) as u32)
 }
 
+/// Abstract interface for any font table
 pub(crate) trait Table {
-    /// Computes the checksum for this table.
-    fn checksum(&self) -> Wrapping<u32>;
-
-    /// Returns the total length in bytes of this table.
-    fn len(&self) -> usize;
-
     /// Serializes this instance to the given writer.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()>;
 }
@@ -559,10 +554,9 @@ impl TableC2PA {
     pub(crate) fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
-}
 
-impl Table for TableC2PA {
-    fn checksum(&self) -> Wrapping<u32> {
+    /// Compute the SFNT-style checksum value of our data.
+    pub(crate) fn checksum(&self) -> Wrapping<u32> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
         let header_cksum = raw_table.checksum();
@@ -583,7 +577,8 @@ impl Table for TableC2PA {
         header_cksum + uri_cksum + manifest_cksum
     }
 
-    fn len(&self) -> usize {
+    /// Calculate the number of bytes of SFNT table storage we require.
+    pub(crate) fn len(&self) -> usize {
         size_of::<TableC2PARaw>()
             + match &self.active_manifest_uri {
                 Some(uri) => uri.len(),
@@ -594,7 +589,9 @@ impl Table for TableC2PA {
                 None => 0,
             }
     }
+}
 
+impl Table for TableC2PA {
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // Set up the structured data
         let raw_table = TableC2PARaw::from_table(self);
@@ -722,42 +719,6 @@ impl TableHead {
 }
 
 impl Table for TableHead {
-    fn checksum(&self) -> Wrapping<u32> {
-        // 0x00
-        u32_from_u16_pair(self.majorVersion, self.minorVersion)
-          // 0x04
-          + Wrapping(self.fontRevision)
-          // 0x08
-          // (Note: checksumAdjustment is treated as containing all-
-          //  zeros during this operation.)
-          // 0x0c
-          + Wrapping(self.magicNumber)
-          // 0x10
-          + u32_from_u16_pair(self.flags, self.unitsPerEm)
-          // 0x14
-          + u32_from_u64_hi(self.created as u64)
-          + u32_from_u64_lo(self.created as u64)
-          // 0x1c
-          + u32_from_u64_hi(self.modified as u64)
-          + u32_from_u64_lo(self.modified as u64)
-          // 0x24
-          + u32_from_u16_pair(self.xMin as u16, self.yMin as u16)
-          // 0x28
-          + u32_from_u16_pair(self.xMax as u16, self.yMax as u16)
-          // 0x2c
-          + u32_from_u16_pair(self.macStyle, self.lowestRecPPEM)
-          // 0x30
-          + u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16)
-          // 0x34
-          + u32_from_u16_pair(self.glyphDataFormat as u16, 0_u16/*padpad*/)
-        // 0x38
-    }
-
-    fn len(&self) -> usize {
-        // TBD - Is this called?
-        size_of::<Self>()
-    }
-
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         // 0x00
         destination.write_u16::<BigEndian>(self.majorVersion)?;
@@ -820,19 +781,6 @@ impl TableUnspecified {
 }
 
 impl Table for TableUnspecified {
-    /// NOTE - We _should_ be able to prune out `checksum` and `len`, because
-    /// we only need them for C2PA; but it leads to a wrinkle in sfnt_io,
-    /// inside the write function, which wants to call Table.checksum() and
-    /// Table.len(), but which will need to learn to down-cast to TableC2PA and
-    /// invoke the functions  directly.
-    fn checksum(&self) -> Wrapping<u32> {
-        checksum(&self.data)
-    }
-
-    fn len(&self) -> usize {
-        self.data.len()
-    }
-
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         destination
             .write_all(&self.data[..])
@@ -882,25 +830,7 @@ impl NamedTable {
     }
 }
 
-// TBD - This looks sort of like the CRTP from C++; do we want a Trait here
-// that *both* table *and* its value-types implement?
 impl Table for NamedTable {
-    fn checksum(&self) -> Wrapping<u32> {
-        match self {
-            NamedTable::C2PA(c2pa) => c2pa.checksum(),
-            NamedTable::Head(head) => head.checksum(),
-            NamedTable::Unspecified(un) => un.checksum(),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            NamedTable::C2PA(c2pa) => c2pa.len(),
-            NamedTable::Head(head) => head.len(),
-            NamedTable::Unspecified(un) => un.len(),
-        }
-    }
-
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         match self {
             NamedTable::C2PA(c2pa) => c2pa.write(destination),
@@ -1154,73 +1084,6 @@ pub mod tests {
         assert_eq!(size_of::<TableHead>(), head_data.len() + 1);
         let head = TableHead::from_reader(&mut head_stream, 0, head_data.len());
         assert_matches!(head, Err(FontError::LoadHeadTableTruncated));
-    }
-
-    #[test]
-    /// Verifies the head table's .checksum() method.
-    fn head_checksum() {
-        let head_data = vec![
-            0x00, 0x07, 0x00, 0x07, // majorVersion: 7, minorVersion: 7
-            0x12, 0x34, 0x56, 0x78, // fontRevision: 305419896
-            0x81, 0x29, 0x36, 0x0f, // checksumAdjustment: 2166961679
-            0x5f, 0x0f, 0x3c, 0xf5, // magicNumber: 1594834165
-            0xc3, 0x5a, 0x04, 0x22, // flags: 0xc35a, unitsPerEm: 0x0422
-            0x90, 0x00, 0x00, 0x00, // created (hi) 0x90000000
-            0x81, 0x4e, 0xaf, 0x80, // created (lo) 0x814eaf80
-            0xa0, 0x00, 0x00, 0x00, // modified (hi) 0xa0000000
-            0x83, 0x39, 0x1d, 0x80, // modified (lo) 0x83391d80
-            0xff, 0xb7, 0xff, 0xb6, // xMin: -73, yMin: -72
-            0x00, 0x48, 0x00, 0x49, // xMax:  72, yMax:  73
-            0xa5, 0x3c, 0x04, 0x05, // macStyle: 0xa53c, lowestRecPPEM: 1029
-            0xff, 0xfd, 0x11, 0x11, // fontDirectionHint: -3, indexToLocFormat: 0x1111
-            0x22, 0x22, // glyphDataFormat: 0x2222
-        ];
-        let mut head_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&head_data);
-        assert_eq!(size_of::<TableHead>(), head_data.len());
-        let head = TableHead::from_reader(&mut head_stream, 0, head_data.len()).unwrap();
-        let naive_cksum = checksum(&head_data).0;
-        let table_cksum = head.checksum().0;
-        // Verify that a naive word-wise checksum produces the well-known
-        // expected value of a valid SFNT.
-        assert_eq!(SFNT_EXPECTED_CHECKSUM, naive_cksum);
-        // Verify that head.checksum() excluded the checksumAdjustment field.
-        assert_eq!(814184875, table_cksum);
-    }
-
-    #[test]
-    /// Verifies checksum function for TableUnspecified
-    fn test_table_checksum() {
-        let data = vec![
-            0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            0x01, 0x00,
-        ];
-        let expecteds: [u32; 17] = [
-            0x00000000_u32,
-            0x0f000000_u32,
-            0x0f0f0000_u32,
-            0x0f0f0f00_u32,
-            0x0f0f0f0f_u32,
-            0x130f0f0f_u32,
-            0x13120f0f_u32,
-            0x1312110f_u32,
-            0x13121110_u32,
-            0x13121110_u32,
-            0x13121110_u32,
-            0x13121110_u32,
-            0x13121110_u32,
-            0x13121110_u32,
-            0x13131110_u32,
-            0x13131210_u32,
-            0x13131210_u32,
-        ];
-        let mut stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&data);
-        for (n, expected) in expecteds.iter().enumerate() {
-            // Create a fragment from the first N bytes
-            let frag_0n = TableUnspecified::from_reader(&mut stream, 0, n).unwrap();
-            // Verify its checksum
-            let cksum = frag_0n.checksum();
-            assert_eq!(expected, &(cksum.0));
-        }
     }
 
     #[test]

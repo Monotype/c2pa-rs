@@ -380,11 +380,25 @@ impl SfntFont {
                         tag: entry.tag,
                         offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
                         checksum: match *tag {
-                            C2PA_TABLE_TAG => table.checksum().0,
+                            C2PA_TABLE_TAG => match table {
+                                NamedTable::C2PA(c2pa) => c2pa.checksum().0,
+                                _ => {
+                                    return Err(FontError::SaveError(
+                                        FontSaveError::UnexpectedTable(format!("{:?}", tag)),
+                                    ));
+                                }
+                            },
                             _ => entry.checksum,
                         },
                         length: match tag {
-                            &C2PA_TABLE_TAG => table.len() as u32,
+                            &C2PA_TABLE_TAG => match table {
+                                NamedTable::C2PA(c2pa) => c2pa.len() as u32,
+                                _ => {
+                                    return Err(FontError::SaveError(
+                                        FontSaveError::UnexpectedTable(format!("{:?}", tag)),
+                                    ));
+                                }
+                            },
                             _ => entry.length,
                         },
                     };
@@ -399,11 +413,19 @@ impl SfntFont {
                                 FontSaveError::InvalidDerivedTableOffsetBias,
                             ));
                         }
+                        let c2pa = match table {
+                            NamedTable::C2PA(c2pa) => c2pa,
+                            _ => {
+                                return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
+                                    format!("{:?}", tag),
+                                )));
+                            }
+                        };
                         let neo_entry = SfntDirectoryEntry {
                             tag: *tag,
                             offset: align_to_four(new_data_offset) as u32,
-                            checksum: table.checksum().0,
-                            length: table.len() as u32,
+                            checksum: c2pa.checksum().0,
+                            length: c2pa.len() as u32,
                         };
                         neo_directory.entries.push(neo_entry);
                         // Note - new_data_offset is never actually used after
