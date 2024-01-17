@@ -293,16 +293,16 @@ pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
     let bytes_len = bytes.len();
     match bytes_len {
         0 => Wrapping(0),
-        1 | 2 | 3 => {
+        1..=3 => {
             // There are too few bytes to read a full u32, and therefore no
             // need to sum anything; we just need to (probably) rearrange the
             // bytes we have into the appropriate big-endian value.
-            let fragment = BigEndian::read_uint(bytes, bytes_len as usize) as u32;
+            let fragment = BigEndian::read_uint(bytes, bytes_len) as u32;
             // Shift the first byte we read into the most-significant position.
             // Unnerving that we must cast bytes_len here (and in other rotate calls).
             let justified_fragment = fragment.rotate_left((4 - bytes_len as u32) * 8);
             // Now, apply the bias
-            let biased_fragment = justified_fragment.rotate_right(bias as u32 * 8);
+            let biased_fragment = justified_fragment.rotate_right(bias * 8);
             Wrapping(biased_fragment)
         }
         _ => {
@@ -313,7 +313,7 @@ pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
                 1 => Wrapping(BigEndian::read_u24(bytes)) + checksum(&(bytes[3..bytes_len])),
                 2 => Wrapping(BigEndian::read_u16(bytes) as u32) + checksum(&(bytes[2..bytes_len])),
                 3 => Wrapping(bytes[0] as u32) + checksum(&(bytes[1..bytes_len])),
-                4_u32..=u32::MAX => panic!("(bias & 3) cannot be four or more!"),
+                4_u32..=u32::MAX => todo!("panic! (bias & 3) is greater than 3!"),
             }
         }
     }
@@ -1227,7 +1227,7 @@ pub mod tests {
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
     fn test_checksum_and_biased() {
-        let data = vec![
+        let data = [
             0x0f, 0x0f, 0x0f, 0x0f, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             0x01, 0x00,
         ];
