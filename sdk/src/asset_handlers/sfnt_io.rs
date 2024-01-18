@@ -1470,13 +1470,14 @@ pub mod tests {
         // Create our SfntIO asset handler for testing
         let sfnt_io = SfntIO {};
 
-        // The font has 11 records, 11 tables, 1 table directory
-        // but the head table will expand from 1 to 3 positions bringing it to 25
-        // And then the required C2PA chunks will be added, bringing it to 27
-        let saved_log_level = log::max_level();
-        log::set_max_level(log::LevelFilter::Trace);
+        // We expect 15 "objects"
+        // 0. The "header" (file header + table directory), as "Cai"
+        // 1. The first 8 bytes of the `head` table, as "Other"
+        // 2. The 4-byte checksumAdjustment field, as "Cai"
+        // 3. The rest of the `head` table.
+        // 4-13. The other tables in the font.
+        // 14. The C2PA table, automatically added when the font is deserialized
         let positions = sfnt_io.get_object_locations(&output).unwrap();
-        log::set_max_level(saved_log_level);
         assert_eq!(15, positions.len());
     }
 
@@ -1495,10 +1496,19 @@ pub mod tests {
         // Create our SfntIO asset handler for testing
         let sfnt_io = SfntIO {};
 
-        // The font has 11 records, 11 tables, 1 table directory
-        // but the head table will expand from 1 to 3 positions bringing it to 25
-        // And then the required C2PA chunks will be added, bringing it to 27
+        // We expect 15 "objects"
+        // 0. The "header" (file header + table directory), as "Cai"
+        // 1. The first 8 bytes of the `head` table, as "Other"
+        // 2. The 4-byte checksumAdjustment field, as "Cai"
+        // 3. The rest of the `head` table.
+        // 4-13. The other tables in the font.
+        // 14. The C2PA table, which was already present in this file.
+        //
+        // Note that we also flip on Trace logging, to test those paths.
+        let saved_log_level = log::max_level();
+        log::set_max_level(log::LevelFilter::Trace);
         let positions = sfnt_io.get_object_locations(&output).unwrap();
+        log::set_max_level(saved_log_level);
         assert_eq!(15, positions.len());
     }
 
