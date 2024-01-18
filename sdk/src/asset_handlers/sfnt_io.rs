@@ -1817,10 +1817,7 @@ pub mod tests {
             // Verify the reference was removed
             {
                 let mut f: File = File::open(&output).unwrap();
-                match otf_handler.read_xmp(&mut f) {
-                    Some(xmp_data_str) => panic!("Unexpected XMP data: {}", xmp_data_str),
-                    None => (),
-                }
+                assert_none!(otf_handler.read_xmp(&mut f));
             }
         }
 
