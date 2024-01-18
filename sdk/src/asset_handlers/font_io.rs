@@ -338,36 +338,6 @@ pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
     Wrapping((hi as u32 * 65536) + lo as u32)
 }
 
-/// Gets the high-order u32 from the given u64 (extracted from the
-/// more-significant 32 bits of the given value).
-///
-/// # Examples
-/// ```ignore
-/// // Cannot work as written because font_io is private.
-/// use c2pa::asset_handlers::font_io::u32_from_u64_hi;
-/// let hi_word = u32_from_u64_hi(0x123456789abcdef0);
-/// assert_eq!(hi_word, 0x12345678);
-/// ```
-#[allow(dead_code)]
-pub(crate) fn u32_from_u64_hi(big: u64) -> Wrapping<u32> {
-    Wrapping(((big & 0xffffffff00000000) >> 32) as u32)
-}
-
-/// Gets the low-order u32 from the given u64 (extracted from the
-/// less-significant 32 bits of the given value).
-///
-/// # Examples
-/// ```ignore
-/// // Cannot work as written because font_io is private.
-/// use c2pa::asset_handlers::font_io::u32_from_u64_lo;
-/// let lo_word = u32_from_u64_lo(0x123456789abcdef0);
-/// assert_eq!(lo_word, 0x9abcdef0);
-/// ```
-#[allow(dead_code)]
-pub(crate) fn u32_from_u64_lo(big: u64) -> Wrapping<u32> {
-    Wrapping((big & 0x00000000ffffffff) as u32)
-}
-
 /// Abstract interface for any font table
 pub(crate) trait Table {
     /// Serializes this instance to the given writer.
@@ -375,7 +345,6 @@ pub(crate) trait Table {
 }
 
 /// 'C2PA' font table as it appears in storage
-#[derive(Debug, Default)]
 #[repr(C, packed(1))] // As defined by the C2PA spec.
 #[allow(non_snake_case)] // As named by the C2PA spec.
 pub(crate) struct TableC2PARaw {
@@ -623,7 +592,7 @@ impl Default for TableC2PA {
 
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[repr(C, packed(1))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly
 // support exotics like FIXED).
@@ -757,7 +726,6 @@ impl Table for TableHead {
 }
 
 /// Generic font table with unknown contents.
-#[derive(Debug)]
 pub(crate) struct TableUnspecified {
     pub data: Vec<u8>,
 }
@@ -797,7 +765,6 @@ impl Table for TableUnspecified {
 }
 
 /// Possible tables
-#[derive(Debug)]
 pub(crate) enum NamedTable {
     /// 'C2PA' table
     C2PA(TableC2PA),
@@ -848,7 +815,7 @@ impl Table for NamedTable {
 ///
 /// This SFNT type is also referenced by WOFF formats, so it is defined here for
 /// common use.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 #[repr(C, packed(1))] // As defined by the OpenType spec.
 #[allow(dead_code, non_snake_case)] // As defined by the OpenType spec.
 pub(crate) struct SfntHeader {
@@ -882,6 +849,39 @@ pub mod tests {
     use claims::*;
 
     use super::*;
+
+    // Test SfntTag Debug & Display trait support.
+    #[test]
+    fn sfnt_tag_debug_n_display_impls() {
+        // Softball
+        let garf_tag = {
+            SfntTag {
+                data: [0x47_u8, 0x61_u8, 0x52_u8, 0x66_u8],
+            }
+        };
+        let garf_tag_display = format!("{}", garf_tag);
+        assert_eq!(garf_tag_display, "GaRf");
+        let garf_tag_debug = format!("{:#?}", garf_tag);
+        assert_eq!(garf_tag_debug, "GaRf");
+
+        // Some cruddy values
+        let nul_vt_del_us_tag = {
+            SfntTag {
+                data: [0x00_u8, 0x11_u8, 0xff_u8, 0x1f_u8],
+            }
+        };
+        let nul_vt_del_us_tag_expected = [0_u8, 0x11_u8, 0xef_u8, 0xbf_u8, 0xbd_u8, 0x1f_u8];
+        let nul_vt_del_us_tag_display = format!("{}", nul_vt_del_us_tag);
+        assert_eq!(
+            nul_vt_del_us_tag_display.as_bytes(),
+            nul_vt_del_us_tag_expected
+        );
+        let nul_vt_del_us_tag_debug = format!("{:#?}", nul_vt_del_us_tag);
+        assert_eq!(
+            nul_vt_del_us_tag_debug.as_bytes(),
+            nul_vt_del_us_tag_expected
+        );
+    }
 
     // TBD - add'l c2pa table tests:
     //  - Short table

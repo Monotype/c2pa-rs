@@ -565,17 +565,6 @@ impl SfntDirectoryEntry {
     }
 }
 
-impl Default for SfntDirectoryEntry {
-    fn default() -> Self {
-        Self {
-            tag: SfntTag::new(*b"\0\0\0\0"),
-            checksum: 0,
-            offset: 0,
-            length: 0,
-        }
-    }
-}
-
 /// SFNT Directory is just an array of entries. Undoubtedly there exists a
 /// more-oxidized way of just using Vec directly for this... but maybe we
 /// don't want to? Note the choice of Vec over BTreeMap here, which lets us
