@@ -850,19 +850,43 @@ pub mod tests {
 
     use super::*;
 
-    // Test SfntTag Debug & Display trait support.
+    // Test FontError Debug trait.
     #[test]
-    fn sfnt_tag_debug_n_display_impls() {
+    fn font_error_debug_and_display_impls() {
+        let ferr = FontError::InvalidNamedTable("SPLuK");
+        let ferr_debug = format!("{:#?}", ferr);
+        assert_eq!(ferr_debug, "InvalidNamedTable(\n    \"SPLuK\",\n)");
+        let ferr_display = format!("{}", ferr);
+        assert_eq!(ferr_display, "Invalid named table: SPLuK");
+    }
+
+    // Test FontSaveError Debug trait.
+    #[test]
+    fn font_save_error_debug_and_display_impls() {
+        let fserr = FontSaveError::UnexpectedTable("KlerF".to_string());
+        let fserr_debug = format!("{:#?}", fserr);
+        assert_eq!(fserr_debug, "UnexpectedTable(\n    \"KlerF\",\n)");
+        let fserr_display = format!("{}", fserr);
+        assert_eq!(
+            fserr_display,
+            "Unexpected table found in the table directory: KlerF"
+        );
+    }
+
+    // Test SfntTag Debug & Display trait.
+    #[test]
+    fn sfnt_tag_debug_and_display_impls() {
         // Softball
         let garf_tag = {
             SfntTag {
                 data: [0x47_u8, 0x61_u8, 0x52_u8, 0x66_u8],
             }
         };
-        let garf_tag_display = format!("{}", garf_tag);
-        assert_eq!(garf_tag_display, "GaRf");
         let garf_tag_debug = format!("{:#?}", garf_tag);
         assert_eq!(garf_tag_debug, "GaRf");
+
+        let garf_tag_display = format!("{}", garf_tag);
+        assert_eq!(garf_tag_display, "GaRf");
 
         // Some cruddy values
         let nul_vt_del_us_tag = {
@@ -871,14 +895,14 @@ pub mod tests {
             }
         };
         let nul_vt_del_us_tag_expected = [0_u8, 0x11_u8, 0xef_u8, 0xbf_u8, 0xbd_u8, 0x1f_u8];
-        let nul_vt_del_us_tag_display = format!("{}", nul_vt_del_us_tag);
-        assert_eq!(
-            nul_vt_del_us_tag_display.as_bytes(),
-            nul_vt_del_us_tag_expected
-        );
         let nul_vt_del_us_tag_debug = format!("{:#?}", nul_vt_del_us_tag);
         assert_eq!(
             nul_vt_del_us_tag_debug.as_bytes(),
+            nul_vt_del_us_tag_expected
+        );
+        let nul_vt_del_us_tag_display = format!("{}", nul_vt_del_us_tag);
+        assert_eq!(
+            nul_vt_del_us_tag_display.as_bytes(),
             nul_vt_del_us_tag_expected
         );
     }

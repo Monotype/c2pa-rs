@@ -1335,6 +1335,155 @@ pub mod tests {
     use crate::utils::test::{fixture_path, temp_dir_path};
 
     #[test]
+    fn chunk_type_debug_and_display() {
+        assert_eq!(format!("{}", ChunkType::Header), "Header");
+        assert_eq!(format!("{}", ChunkType::_Directory), "Directory");
+        assert_eq!(
+            format!("{}", ChunkType::TableDataIncluded),
+            "TableDataIncluded"
+        );
+        assert_eq!(
+            format!("{}", ChunkType::TableDataExcluded),
+            "TableDataExcluded"
+        );
+    }
+
+    #[test]
+    fn chunk_position_debug_and_display() {
+        let chunk = ChunkPosition {
+            offset: 72,
+            length: 37,
+            name: [65, 66, 67, 68],
+            chunk_type: ChunkType::TableDataIncluded,
+        };
+        assert_eq!(format!("{:?}", chunk), "ABCD, 72, 37, TableDataIncluded");
+        assert_eq!(format!("{}", chunk), "ABCD, 72, 37, TableDataIncluded");
+    }
+
+    #[test]
+    /// Verify that short file fails to chunk-parse at all
+    fn get_chunk_positions_without_any_font() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00, // ...and then one more byte, and that's it.
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let sfnt_io = SfntIO {};
+        assert_err!(sfnt_io.get_chunk_positions(&mut font_stream));
+    }
+
+    #[test]
+    /// Verify chunk-parsing behavior for empty font with just the header
+    fn get_chunk_positions_without_any_tables() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00, 0x00, 0x00, 0x00, // 0 tables / 0
+            0x00, 0x00, 0x00, 0x00, // 0 / 0
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let sfnt_io = SfntIO {};
+        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have one positions reported, for a header and no dir entries
+        assert_eq!(1, positions.len());
+        assert_eq!(
+            positions.first().unwrap(),
+            &ChunkPosition {
+                offset: 0_usize,
+                length: 12_usize,
+                name: SFNT_HEADER_CHUNK_NAME.data,
+                chunk_type: ChunkType::Header,
+            }
+        );
+    }
+
+    #[test]
+    /// Verify when reading the object locations for hashing, we get zero
+    /// positions when the font does not contain a C2PA font table
+    fn get_chunk_positions_without_c2pa_table() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO
+            0x00, 0x01, // 1 tables
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x42, // C2PB table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x01, // length of table data
+            0x00, // C2PB data
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        let sfnt_io = SfntIO {};
+        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
+        // Should have 2 positions reported for the header and the table data
+        assert_eq!(2, positions.len());
+        // First is the header
+        assert_eq!(
+            positions.first().unwrap(),
+            &ChunkPosition {
+                offset: 0_usize,
+                length: 28_usize,
+                name: SFNT_HEADER_CHUNK_NAME.data,
+                chunk_type: ChunkType::Header,
+            }
+        );
+        // Second is the C2PB table
+        assert_eq!(
+            positions.get(1).unwrap(),
+            &ChunkPosition {
+                offset: 28_usize,
+                length: 1,
+                name: *b"C2PB",
+                chunk_type: ChunkType::TableDataIncluded,
+            }
+        );
+    }
+
+    #[test]
+    fn get_object_locations_c2pa_absent() {
+        // Load the basic OTF test fixture
+        let source = fixture_path("font.otf");
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.otf");
+
+        // Copy the source to the output
+        std::fs::copy(source, &output).unwrap();
+
+        // Create our SfntIO asset handler for testing
+        let sfnt_io = SfntIO {};
+
+        // The font has 11 records, 11 tables, 1 table directory
+        // but the head table will expand from 1 to 3 positions bringing it to 25
+        // And then the required C2PA chunks will be added, bringing it to 27
+        let positions = sfnt_io.get_object_locations(&output).unwrap();
+        assert_eq!(15, positions.len());
+    }
+
+    #[test]
+    fn get_object_locations_c2pa_present() {
+        // Load the basic OTF test fixture
+        let source = fixture_path("font_c2pa.otf");
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.otf");
+
+        // Copy the source to the output
+        std::fs::copy(source, &output).unwrap();
+
+        // Create our SfntIO asset handler for testing
+        let sfnt_io = SfntIO {};
+
+        // The font has 11 records, 11 tables, 1 table directory
+        // but the head table will expand from 1 to 3 positions bringing it to 25
+        // And then the required C2PA chunks will be added, bringing it to 27
+        let positions = sfnt_io.get_object_locations(&output).unwrap();
+        assert_eq!(15, positions.len());
+    }
+
+    #[test]
     #[cfg(not(feature = "xmp_write"))]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
@@ -1474,107 +1623,6 @@ pub mod tests {
         assert_eq!(font_data, test_data);
         let naive_test_cksum = checksum(&test_data).0;
         assert_eq!(naive_test_cksum, SFNT_EXPECTED_CHECKSUM);
-    }
-
-    #[test]
-    /// Verify that short file fails to chunk-parse at all
-    fn get_chunk_positions_without_any_font() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, // ...and then one more byte, and that's it.
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        assert_err!(sfnt_io.get_chunk_positions(&mut font_stream));
-    }
-
-    #[test]
-    /// Verify chunk-parsing behavior for empty font with just the header
-    fn get_chunk_positions_without_any_tables() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, 0x00, 0x00, 0x00, // 0 tables / 0
-            0x00, 0x00, 0x00, 0x00, // 0 / 0
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have one positions reported, for a header and no dir entries
-        assert_eq!(1, positions.len());
-        assert_eq!(
-            positions.first().unwrap(),
-            &ChunkPosition {
-                offset: 0_usize,
-                length: 12_usize,
-                name: SFNT_HEADER_CHUNK_NAME.data,
-                chunk_type: ChunkType::Header,
-            }
-        );
-    }
-
-    #[test]
-    /// Verify when reading the object locations for hashing, we get zero
-    /// positions when the font does not contain a C2PA font table
-    fn get_chunk_positions_without_c2pa_table() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, 0x01, // 1 tables
-            0x00, 0x00, // search range
-            0x00, 0x00, // entry selector
-            0x00, 0x00, // range shift
-            0x43, 0x32, 0x50, 0x42, // C2PB table tag
-            0x00, 0x00, 0x00, 0x00, // Checksum
-            0x00, 0x00, 0x00, 0x1c, // offset to table data
-            0x00, 0x00, 0x00, 0x01, // length of table data
-            0x00, // C2PB data
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have 2 positions reported for the header and the table data
-        assert_eq!(2, positions.len());
-        // First is the header
-        assert_eq!(
-            positions.first().unwrap(),
-            &ChunkPosition {
-                offset: 0_usize,
-                length: 28_usize,
-                name: SFNT_HEADER_CHUNK_NAME.data,
-                chunk_type: ChunkType::Header,
-            }
-        );
-        // Second is the C2PB table
-        assert_eq!(
-            positions.get(1).unwrap(),
-            &ChunkPosition {
-                offset: 28_usize,
-                length: 1,
-                name: *b"C2PB",
-                chunk_type: ChunkType::TableDataIncluded,
-            }
-        );
-    }
-
-    #[test]
-    fn get_object_locations() {
-        // Load the basic OTF test fixture
-        let source = fixture_path("font.otf");
-
-        // Create a temporary output for the file
-        let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.otf");
-
-        // Copy the source to the output
-        std::fs::copy(source, &output).unwrap();
-
-        // Create our SfntIO asset handler for testing
-        let sfnt_io = SfntIO {};
-
-        // The font has 11 records, 11 tables, 1 table directory
-        // but the head table will expand from 1 to 3 positions bringing it to 25
-        // And then the required C2PA chunks will be added, bringing it to 27
-        let positions = sfnt_io.get_object_locations(&output).unwrap();
-        assert_eq!(15, positions.len());
     }
 
     #[test]
