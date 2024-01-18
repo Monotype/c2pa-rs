@@ -1337,13 +1337,19 @@ pub mod tests {
     #[test]
     fn chunk_type_debug_and_display() {
         assert_eq!(format!("{}", ChunkType::Header), "Header");
+        assert_eq!(format!("{:?}", ChunkType::Header), "Header");
         assert_eq!(format!("{}", ChunkType::_Directory), "Directory");
+        assert_eq!(format!("{:?}", ChunkType::_Directory), "Directory");
         assert_eq!(
             format!("{}", ChunkType::TableDataIncluded),
             "TableDataIncluded"
         );
         assert_eq!(
-            format!("{}", ChunkType::TableDataExcluded),
+            format!("{:?}", ChunkType::TableDataIncluded),
+            "TableDataIncluded"
+        );
+        assert_eq!(
+            format!("{:}", ChunkType::TableDataExcluded),
             "TableDataExcluded"
         );
     }
@@ -1729,6 +1735,7 @@ pub mod tests {
     pub mod font_xmp_support_tests {
         use std::{fs::File, io::Cursor, str::FromStr};
 
+        use claims::*;
         use tempfile::tempdir;
         use xmp_toolkit::XmpMeta;
 
@@ -1757,16 +1764,16 @@ pub mod tests {
             std::fs::copy(source, &output).unwrap();
 
             // Add a reference to the font
-            match font_xmp_support::add_reference_as_xmp_to_font(&output, "test data") {
-                Ok(_) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
-            }
+            assert_ok!(font_xmp_support::add_reference_as_xmp_to_font(
+                &output,
+                "test data"
+            ));
 
             // Add again, with a new value
-            match font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data") {
-                Ok(_) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
-            }
+            assert_ok!(font_xmp_support::add_reference_as_xmp_to_font(
+                &output,
+                "new test data"
+            ));
 
             let otf_handler = SfntIO {};
             let mut f: File = File::open(output).unwrap();
@@ -1800,6 +1807,10 @@ pub mod tests {
                 0x00, // C2PB data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+            // Note - We could improve code-covereage here (eliminating all these
+            // match-arms) if we could just do:
+            //   assert_err_eq!(font_xmp_support::build_xmp_from_stream(&mut font_stream), Err(FontError::XmpNotFound));
+            // but that requires adding PartialOrd to FontError...
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
                 Ok(_) => panic!("Did not expect an OK result, as data is missing"),
                 Err(FontError::XmpNotFound) => {}
@@ -1832,10 +1843,7 @@ pub mod tests {
                 0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-            match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
-                Ok(_xmp_data) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
-            }
+            assert_ok!(font_xmp_support::build_xmp_from_stream(&mut font_stream));
         }
     }
 }
