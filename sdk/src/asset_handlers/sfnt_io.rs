@@ -992,9 +992,19 @@ where
     Ok(())
 }
 
+/// Remove any remote manifest reference from any `C2PA` font table which
+/// exists in the given font file (specified by path).
+#[allow(dead_code)]
+fn remove_reference_from_font(font_path: &Path) -> Result<()> {
+    process_file_with_streams(font_path, move |input_stream, temp_file| {
+        remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
+        Ok(())
+    })
+}
+
 /// Removes the reference to the active manifest from the source stream, writing
-/// to the destination.  Returns an optional active manifest URI reference, if
-/// there was one.
+/// to the destination. Returns an optional active manifest URI reference, if
+/// one was present.
 #[allow(dead_code)]
 fn remove_reference_from_stream<TSource, TDest>(
     source: &mut TSource,
@@ -1463,7 +1473,10 @@ pub mod tests {
         // The font has 11 records, 11 tables, 1 table directory
         // but the head table will expand from 1 to 3 positions bringing it to 25
         // And then the required C2PA chunks will be added, bringing it to 27
+        let saved_log_level = log::max_level();
+        log::set_max_level(log::LevelFilter::Trace);
         let positions = sfnt_io.get_object_locations(&output).unwrap();
+        log::set_max_level(saved_log_level);
         assert_eq!(15, positions.len());
     }
 
@@ -1742,7 +1755,7 @@ pub mod tests {
         use crate::{
             asset_handlers::{
                 font_io::FontError,
-                sfnt_io::{font_xmp_support, SfntIO},
+                sfnt_io::{font_xmp_support, remove_reference_from_font, SfntIO},
             },
             asset_io::CAIReader,
             utils::test::temp_dir_path,
@@ -1774,18 +1787,30 @@ pub mod tests {
                 &output,
                 "new test data"
             ));
-
             let otf_handler = SfntIO {};
-            let mut f: File = File::open(output).unwrap();
-            match otf_handler.read_xmp(&mut f) {
-                Some(xmp_data_str) => {
-                    let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
-                    match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
-                        Some(xmp_value) => assert_eq!("new test data", xmp_value.value),
-                        None => panic!("Expected a value for provenance"),
+            // Verify the reference was updated
+            {
+                let mut f: File = File::open(&output).unwrap();
+                match otf_handler.read_xmp(&mut f) {
+                    Some(xmp_data_str) => {
+                        let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
+                        match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
+                            Some(xmp_value) => assert_eq!("new test data", xmp_value.value),
+                            None => panic!("Expected a value for provenance"),
+                        }
                     }
+                    None => panic!("Expected to read XMP from the resource."),
                 }
-                None => panic!("Expected to read XMP from the resource."),
+            }
+            // Remove the reference
+            assert_ok!(remove_reference_from_font(&output));
+            // Verify the reference was removed
+            {
+                let mut f: File = File::open(&output).unwrap();
+                match otf_handler.read_xmp(&mut f) {
+                    Some(xmp_data_str) => panic!("Unexpected XMP data: {}", xmp_data_str),
+                    None => (),
+                }
             }
         }
 
