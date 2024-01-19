@@ -1655,6 +1655,156 @@ pub mod tests {
     }
 
     #[test]
+    /// Try to read a font with an invalid table offset
+    fn sfnt_from_reader_bad_offset() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x0f, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x25, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            0x61, // active manifest uri data (e.g., file://a)
+            0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, 0x74, 0x61, // C2PA manifest store data
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// Try to read a font truncated in the header
+    fn sfnt_from_reader_trunc_header() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, // range sh...
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// Try to read a font truncated in the directory
+    fn sfnt_from_reader_trunc_directory() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x0f, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, // length of table da...
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// Try to read a font truncated in the C2PA table's prologue
+    fn sfnt_from_reader_trunc_c2pa_table_prologue() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x25, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, // reserv...
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// Try to read a font truncated in the C2PA table's uri storage
+    fn sfnt_from_reader_trunc_c2pa_table_uri() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x25, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            // Partial active manifest uri data
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// Try to read a font truncated in the C2PA table's manifest storage
+    fn sfnt_from_reader_trunc_c2pa_table_manifest_store() {
+        let font_data = vec![
+            0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
+            0x00, 0x01, // 1 table
+            0x00, 0x00, // search range
+            0x00, 0x00, // entry selector
+            0x00, 0x00, // range shift
+            0x43, 0x32, 0x50, 0x41, // C2PA table tag
+            0x00, 0x00, 0x00, 0x00, // Checksum
+            0x00, 0x00, 0x00, 0x1c, // offset to table data
+            0x00, 0x00, 0x00, 0x25, // length of table data
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            0x61, // active manifest uri data (e.g., file://a)
+            0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, // Partial manifest data
+        ];
+        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+        // Read & build
+        let result = SfntFont::from_reader(&mut font_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
     /// Verify the C2PA table data can be read from a font stream
     fn reads_c2pa_table_from_stream() {
         let font_data = vec![
@@ -1839,7 +1989,7 @@ pub mod tests {
                 0x00, // C2PB data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-            // Note - We could improve code-covereage here (eliminating all these
+            // Note - We could improve code-coverage here (eliminating all these
             // match-arms) if we could just do:
             //   assert_err_eq!(font_xmp_support::build_xmp_from_stream(&mut font_stream), Err(FontError::XmpNotFound));
             // but that requires adding PartialOrd to FontError...
