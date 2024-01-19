@@ -192,6 +192,7 @@ pub(crate) fn align_to_four(size: usize) -> usize {
 /// Note that Embedded OpenType and MicroType Express formats cannot be detected
 /// with a simple magic-number sniff. Conceivably, EOT could be dealt with as a
 /// variation on SFNT, but MTX will needs more exotic handling.
+#[derive(PartialEq)]
 pub(crate) enum Magic {
     /// 'OTTO' - OpenType
     OpenType = 0x4f54544f,

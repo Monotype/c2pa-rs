@@ -494,13 +494,26 @@ impl SfntFont {
 impl SfntHeader {
     /// Reads a new instance from the given source.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        Ok(Self {
+        // Read in the raw data
+        // TBD - domain-map these errors?
+        let unchecked = Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
             searchRange: reader.read_u16::<BigEndian>()?,
             entrySelector: reader.read_u16::<BigEndian>()?,
             rangeShift: reader.read_u16::<BigEndian>()?,
-        })
+        };
+        // Check for a valid sfntVersion
+        let magic = <u32 as std::convert::TryInto<Magic>>::try_into(unchecked.sfntVersion)?;
+        if magic != Magic::OpenType && magic != Magic::TrueType {
+            Err(FontError::Unsupported)
+        } else {
+            // Otherwise, let it through.
+            // TBD - What else could we check -- the table count, against an
+            // arbitrary limit? Do we want to check the three stooges^H^H^H table-
+            // binary-search accelerator values?
+            Ok(unchecked)
+        }
     }
 
     /// Serializes this instance to the given writer.
@@ -1359,7 +1372,11 @@ pub mod tests {
             "TableDataIncluded"
         );
         assert_eq!(
-            format!("{:}", ChunkType::TableDataExcluded),
+            format!("{}", ChunkType::TableDataExcluded),
+            "TableDataExcluded"
+        );
+        assert_eq!(
+            format!("{:?}", ChunkType::TableDataExcluded),
             "TableDataExcluded"
         );
     }
@@ -2027,5 +2044,74 @@ pub mod tests {
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
             assert_ok!(font_xmp_support::build_xmp_from_stream(&mut font_stream));
         }
+    }
+
+    #[test]
+    fn test_write_cai_using_stream_existing_cai_data() {
+        let source = include_bytes!("../../tests/fixtures/font_c2pa.otf");
+        let mut stream = Cursor::new(source.to_vec());
+        let sfnt_io = SfntIO {};
+
+        // cai data already exists
+        assert!(matches!(
+            sfnt_io.read_cai(&mut stream),
+            Ok(data) if !data.is_empty(),
+        ));
+
+        // write new data
+        let output: Vec<u8> = Vec::new();
+        let mut output_stream = Cursor::new(output);
+        let data_to_write: Vec<u8> = vec![0, 1, 1, 2, 3, 5, 8, 34, 21, 23];
+        assert!(sfnt_io
+            .write_cai(&mut stream, &mut output_stream, &data_to_write)
+            .is_ok());
+        // new data replaces the existing cai data
+        assert_ok!(output_stream.rewind()); // <- Why is this rewind needed? png_io tests don't need to do this...
+        let data_written = sfnt_io.read_cai(&mut output_stream).unwrap();
+        assert_eq!(data_to_write, data_written);
+    }
+
+    #[test]
+    fn test_write_cai_using_stream_no_cai_data() {
+        let source = include_bytes!("../../tests/fixtures/font.otf");
+        let mut stream = Cursor::new(source.to_vec());
+        let sfnt_io = SfntIO {};
+
+        // no cai data present in stream.
+        assert!(matches!(
+            sfnt_io.read_cai(&mut stream),
+            Err(Error::JumbfNotFound)
+        ));
+
+        // write new data.
+        let output: Vec<u8> = Vec::new();
+        let mut output_stream = Cursor::new(output);
+
+        let data_to_write: Vec<u8> = vec![0, 1, 1, 23, 3, 5, 8, 1, 21, 34];
+        assert!(sfnt_io
+            .write_cai(&mut stream, &mut output_stream, &data_to_write)
+            .is_ok());
+
+        // assert new cai data is present.
+        assert_ok!(output_stream.rewind());
+        let data_written = sfnt_io.read_cai(&mut output_stream).unwrap();
+        assert_eq!(data_to_write, data_written);
+    }
+
+    #[test]
+    fn test_write_cai_data_to_stream_wrong_format() {
+        let source = include_bytes!("../../tests/fixtures/mars.webp");
+        let mut stream = Cursor::new(source.to_vec());
+        let sfnt_io = SfntIO {};
+
+        let output: Vec<u8> = Vec::new();
+        let mut output_stream = Cursor::new(output);
+        assert!(matches!(
+            sfnt_io.write_cai(&mut stream, &mut output_stream, &[]),
+            // TBD - Should we be mapping these kinds of failures to
+            // Error::InvalidAsset(_), as, for example, the PNG asset
+            // code does?
+            Err(Error::FontError(_),)
+        ));
     }
 }
