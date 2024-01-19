@@ -171,12 +171,17 @@ impl std::fmt::Debug for SfntTag {
 /// Round the given value up to the next multiple of four (4).
 ///
 /// # Examples
-/// ```ignore
-/// // Cannot work as written because font_io is private.
-/// use c2pa::asset_handlers::font_io::align_to_four;
-/// let forties = (align_to_four(36), align_to_four(37));
-/// assert_eq!(forties.0, 36);
-/// assert_eq!(forties.1, 40);
+/// ```
+/// let thirty_six_or_forty = (
+///     c2pa::asset_handlers::font_io::align_to_four(36),
+///     c2pa::asset_handlers::font_io::align_to_four(38),
+///     c2pa::asset_handlers::font_io::align_to_four(39),
+///     c2pa::asset_handlers::font_io::align_to_four(40),
+/// );
+/// assert_eq!(thirty_six_or_forty.0, 36);
+/// assert_eq!(thirty_six_or_forty.1, 40);
+/// assert_eq!(thirty_six_or_forty.2, 40);
+/// assert_eq!(thirty_six_or_forty.3, 40);
 /// ```
 pub(crate) fn align_to_four(size: usize) -> usize {
     (size + 3) & (!3)
@@ -325,11 +330,9 @@ pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
 /// more-significant position.
 ///
 /// # Examples
-/// ```ignore
-/// // Cannot work as written because font_io is private.
-/// use c2pa::asset_handlers::font_io::u32_from_u16_pair;
-/// let full_word = u32_from_u16_pair(0x1234, 0x5678);
-/// assert_eq!(full_word, 0x12345678);
+/// ```
+/// let full_word = c2pa::asset_handlers::font_io::u32_from_u16_pair(0x1234, 0x5678);
+/// assert_eq!(full_word, std::num::Wrapping(0x12345678));
 /// ```
 #[allow(dead_code)]
 pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
@@ -850,6 +853,18 @@ pub mod tests {
 
     use super::*;
 
+    // Test error wrapper
+    #[test]
+    fn font_err_wrapper() {
+        let wrapped_error = wrap_font_err(FontError::BadParam(String::from(
+            "That one parameter was pretty bad, honestly speaking.",
+        )));
+        match wrapped_error {
+            Error::FontError(_) => {}
+            _ => panic!("But why?!"),
+        }
+    }
+
     // Test FontError Debug trait.
     #[test]
     fn font_error_debug_and_display_impls() {
@@ -1211,5 +1226,71 @@ pub mod tests {
             assert_eq!(expecteds[2][frag_length], cksum_2.0);
             assert_eq!(expecteds[3][frag_length], cksum_3.0);
         }
+    }
+
+    #[test]
+    /// Try to read a C2PA table with truncated prologue
+    fn c2pa_from_reader_trunc_prologue() {
+        let c2pa_data = vec![
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, // reserv...
+        ];
+        let mut c2pa_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_data);
+        // Read & build - tell the truth about the size
+        let result = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len());
+        assert!(result.is_err());
+        // Read & build - lie about the size
+        let result2 = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len() + 1024_usize);
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    /// Try to read a C2PA table with truncated uri storage
+    fn c2pa_from_reader_trunc_uri() {
+        let c2pa_data = vec![
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            // Partial active manifest uri data
+        ];
+        let mut c2pa_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_data);
+        // Read & build - tell the truth about the size
+        let result = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len());
+        assert!(result.is_err());
+        // Read & build - lie about the size
+        let result2 = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len() + 1024_usize);
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    /// Try to read a C2PA table with truncated manifest storage
+    fn c2pa_from_reader_trunc_manifest_store() {
+        let c2pa_data = vec![
+            0x00, 0x00, // Major version
+            0x00, 0x01, // Minor version
+            0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
+            0x00, 0x08, // Active manifest URI length
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x1c, // C2PA manifest store offset
+            0x00, 0x00, 0x00, 0x09, // C2PA manifest store length
+            0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f,
+            0x61, // active manifest uri data (e.g., file://a)
+            0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, // Partial manifest data
+        ];
+        let mut c2pa_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_data);
+        // Read & build - tell the truth about the size
+        let result = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len());
+        assert!(result.is_err());
+        // Read & build - lie about the size
+        let result2 = TableC2PA::from_reader(&mut c2pa_stream, 0_u64, c2pa_data.len() + 1024_usize);
+        assert!(result2.is_err());
     }
 }
