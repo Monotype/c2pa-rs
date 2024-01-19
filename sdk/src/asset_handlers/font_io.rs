@@ -845,6 +845,7 @@ pub(crate) struct SfntDirectoryEntry {
 
 #[cfg(test)]
 pub mod tests {
+    #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
     use std::io::Cursor;
