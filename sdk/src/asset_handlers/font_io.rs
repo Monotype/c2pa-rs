@@ -1075,8 +1075,83 @@ pub mod tests {
         assert_eq!(c2pa_input_data, c2pa_output_stream.get_ref().as_slice());
     }
 
-    // TBD - add'l head table tests:
-    //  - Bad offset/size to from_reader
+    #[test]
+    /// Verify read fails when the URI and manifest data overlap.
+    fn c2pa_read_fails_with_overlap() {
+        let c2pa_input_data = vec![
+            0x00, 0x07, 0x00, 0x11, // Major: 7, Minor: 17
+            0x00, 0x00, 0x00, 0x14, // Manifest URI offset (20)
+            0x00, 0x1a, 0x00, 0x00, // Manifest URI length (26) / reserved (0)
+            0x00, 0x00, 0x00, 0x2c, // C2PA manifest store offset (44 - 2 bytes shorter)
+            0x00, 0x00, 0x00, 0x12, // C2PA manifest store length (18)
+            0x68, 0x74, 0x74, 0x70, // http
+            0x3a, 0x2f, 0x2f, 0x65, // ://e
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x2e, 0x63, // le.c
+            0x6f, 0x6d, 0x2f, 0x6e, // om/n
+            0x6f, 0x74, 0x68, 0x69, // othi
+            0x6e, 0x67, 0x3c, 0x45, // ng<E
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x4d, 0x61, // leMa
+            0x6e, 0x69, 0x66, 0x65, // nife
+            0x73, 0x74, // 0x2f, 0x3e, // 'st', but '/>' is missing.
+        ];
+        let mut c2pa_input_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_input_data);
+        let c2pa = TableC2PA::from_reader(&mut c2pa_input_stream, 0, c2pa_input_data.len());
+        assert_err!(c2pa);
+    }
+
+    #[test]
+    /// Verify read fails when the URI offset is wild.
+    fn c2pa_read_fails_with_wild_uri_offset() {
+        let c2pa_input_data = vec![
+            0x00, 0x07, 0x00, 0x11, // Major: 7, Minor: 17
+            0xff, 0xff, 0xff, 0xe8, // Manifest URI offset (-24)
+            0x00, 0x1a, 0x00, 0x00, // Manifest URI length (26) / reserved (0)
+            0x00, 0x00, 0x00, 0x2e, // C2PA manifest store offset (46)
+            0x00, 0x00, 0x00, 0x12, // C2PA manifest store length (18)
+            0x68, 0x74, 0x74, 0x70, // http
+            0x3a, 0x2f, 0x2f, 0x65, // ://e
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x2e, 0x63, // le.c
+            0x6f, 0x6d, 0x2f, 0x6e, // om/n
+            0x6f, 0x74, 0x68, 0x69, // othi
+            0x6e, 0x67, 0x3c, 0x45, // ng<E
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x4d, 0x61, // leMa
+            0x6e, 0x69, 0x66, 0x65, // nife
+            0x73, 0x74, 0x2f, 0x3e, // st/>
+        ];
+        let mut c2pa_input_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_input_data);
+        let c2pa = TableC2PA::from_reader(&mut c2pa_input_stream, 0, c2pa_input_data.len());
+        assert_err!(c2pa);
+    }
+
+    #[test]
+    /// Verify read fails when the manifest offset is wild.
+    fn c2pa_read_fails_with_wild_manifest_offset() {
+        let c2pa_input_data = vec![
+            0x00, 0x07, 0x00, 0x11, // Major: 7, Minor: 17
+            0x00, 0x00, 0x00, 0x14, // Manifest URI offset (20)
+            0x00, 0x1a, 0x00, 0x00, // Manifest URI length (26) / reserved (0)
+            0x00, 0x00, 0x00, 0x43, // C2PA manifest store offset (67 - just before the end)
+            0x00, 0x00, 0x00, 0x12, // C2PA manifest store length (18)
+            0x68, 0x74, 0x74, 0x70, // http
+            0x3a, 0x2f, 0x2f, 0x65, // ://e
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x2e, 0x63, // le.c
+            0x6f, 0x6d, 0x2f, 0x6e, // om/n
+            0x6f, 0x74, 0x68, 0x69, // othi
+            0x6e, 0x67, 0x3c, 0x45, // ng<E
+            0x78, 0x61, 0x6d, 0x70, // xamp
+            0x6c, 0x65, 0x4d, 0x61, // leMa
+            0x6e, 0x69, 0x66, 0x65, // nife
+            0x73, 0x74, 0x2f, 0x3e, // st/>
+        ];
+        let mut c2pa_input_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&c2pa_input_data);
+        let c2pa = TableC2PA::from_reader(&mut c2pa_input_stream, 0, c2pa_input_data.len());
+        assert_err!(c2pa);
+    }
 
     #[test]
     /// Verifies that data with bad magic fails to produce a head table.
