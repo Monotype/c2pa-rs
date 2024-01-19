@@ -171,7 +171,7 @@ impl std::fmt::Debug for SfntTag {
 /// Round the given value up to the next multiple of four (4).
 ///
 /// # Examples
-/// ```
+/// ```ignore // Because asset_handlers is private...
 /// let thirty_six_or_forty = (
 ///     c2pa::asset_handlers::font_io::align_to_four(36),
 ///     c2pa::asset_handlers::font_io::align_to_four(38),
@@ -331,7 +331,7 @@ pub(crate) fn checksum_biased(bytes: &[u8], bias: u32) -> Wrapping<u32> {
 /// more-significant position.
 ///
 /// # Examples
-/// ```
+/// ```ignore // Because asset_handlers is private...
 /// let full_word = c2pa::asset_handlers::font_io::u32_from_u16_pair(0x1234, 0x5678);
 /// assert_eq!(full_word, std::num::Wrapping(0x12345678));
 /// ```
