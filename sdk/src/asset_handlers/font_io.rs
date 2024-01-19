@@ -636,6 +636,7 @@ impl TableHead {
             Err(FontError::LoadHeadTableTruncated)
         } else {
             let head = Self {
+                // TBD - domain-map any read errors into "truncated table"
                 // 0x00
                 majorVersion: reader.read_u16::<BigEndian>()?,
                 minorVersion: reader.read_u16::<BigEndian>()?,

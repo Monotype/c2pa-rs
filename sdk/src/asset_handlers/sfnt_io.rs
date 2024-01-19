@@ -456,7 +456,8 @@ impl SfntFont {
                 });
 
         // Rewrite the head table's checksumAdjustment. (This act does *not*
-        // invalidate the checksum in the TDE for the 'head' table, which is        // always treated as zero during check summing).
+        // invalidate the checksum in the TDE for the 'head' table, which is
+        // always treated as zero during check summing).
         if let Some(NamedTable::Head(head)) = self.tables.get_mut(&HEAD_TABLE_TAG) {
             head.checksumAdjustment =
                 (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
@@ -2066,7 +2067,7 @@ pub mod tests {
             .write_cai(&mut stream, &mut output_stream, &data_to_write)
             .is_ok());
         // new data replaces the existing cai data
-        assert_ok!(output_stream.rewind()); // <- Why is this rewind needed? png_io tests don't need to do this...
+        assert_ok!(output_stream.rewind()); // <- Why is this rewind needed? sfnt_io tests don't need to do this...
         let data_written = sfnt_io.read_cai(&mut output_stream).unwrap();
         assert_eq!(data_to_write, data_written);
     }
@@ -2111,7 +2112,85 @@ pub mod tests {
             // TBD - Should we be mapping these kinds of failures to
             // Error::InvalidAsset(_), as, for example, the PNG asset
             // code does?
-            Err(Error::FontError(_),)
+            Err(Error::FontError(_)),
         ));
+    }
+
+    #[test]
+    fn test_stream_object_locations() {
+        let source = include_bytes!("../../tests/fixtures/font_c2pa.otf");
+        let mut stream = Cursor::new(source.to_vec());
+        let sfnt_io = SfntIO {};
+        let cai_posns = sfnt_io
+            .get_object_locations_from_stream(&mut stream)
+            .unwrap();
+        assert_eq!(cai_posns.len(), 15);
+    }
+
+    #[test]
+    fn test_stream_object_locations_with_incorrect_file_type() {
+        let source = include_bytes!("../../tests/fixtures/unsupported_type.txt");
+        let mut stream = Cursor::new(source.to_vec());
+        let sfnt_io = SfntIO {};
+        assert!(matches!(
+            sfnt_io.get_object_locations_from_stream(&mut stream),
+            Err(Error::FontError(_))
+        ));
+    }
+
+    #[test]
+    fn test_stream_object_locations_adds_offsets_to_file_without_claims() {
+        let source = include_bytes!("../../tests/fixtures/font.otf");
+        let mut stream = Cursor::new(source.to_vec());
+
+        let sfnt_io = SfntIO {};
+        assert!(sfnt_io
+            .get_object_locations_from_stream(&mut stream)
+            .unwrap()
+            .into_iter()
+            .any(|chunk| chunk.htype == HashBlockObjectType::Cai));
+    }
+
+    #[test]
+    fn test_remove_c2pa() {
+        let source = fixture_path("font_c2pa.otf");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "font_c2pa_removed.otf");
+        std::fs::copy(source, &output).unwrap();
+
+        let sfnt_io = SfntIO {};
+        sfnt_io.remove_cai_store(&output).unwrap();
+
+        // read back in asset, JumbfNotFound is expected since it was removed
+        match sfnt_io.read_cai_store(&output) {
+            Err(Error::JumbfNotFound) => (),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_remove_c2pa_from_stream() {
+        let source = fixture_path("font_c2pa.otf");
+
+        let source_bytes = std::fs::read(source).unwrap();
+        let mut source_stream = Cursor::new(source_bytes);
+
+        let sfnt_io = SfntIO {};
+        let sfnt_writer = sfnt_io.get_writer("ttf").unwrap();
+
+        let output_bytes = Vec::new();
+        let mut output_stream = Cursor::new(output_bytes);
+
+        sfnt_writer
+            .remove_cai_store_from_stream(&mut source_stream, &mut output_stream)
+            .unwrap();
+
+        // read back in asset, JumbfNotFound is expected since it was removed
+        let sfnt_reader = sfnt_io.get_reader();
+        assert_ok!(output_stream.rewind());
+        match sfnt_reader.read_cai(&mut output_stream) {
+            Err(Error::JumbfNotFound) => (),
+            _ => unreachable!(),
+        }
     }
 }
