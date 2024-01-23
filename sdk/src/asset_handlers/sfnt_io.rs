@@ -496,7 +496,6 @@ impl SfntHeader {
     /// Reads a new instance from the given source.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
         // Read in the raw data
-        // TBD - domain-map these errors?
         let unchecked = Self {
             sfntVersion: reader.read_u32::<BigEndian>()?,
             numTables: reader.read_u16::<BigEndian>()?,
@@ -1004,16 +1003,6 @@ where
     // And write it to the destination stream
     font.write(destination)?;
     Ok(())
-}
-
-/// Remove any remote manifest reference from any `C2PA` font table which
-/// exists in the given font file (specified by path).
-#[allow(dead_code)]
-fn remove_reference_from_font(font_path: &Path) -> Result<()> {
-    process_file_with_streams(font_path, move |input_stream, temp_file| {
-        remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
-        Ok(())
-    })
 }
 
 /// Removes the reference to the active manifest from the source stream, writing
@@ -1933,11 +1922,22 @@ pub mod tests {
         use crate::{
             asset_handlers::{
                 font_io::FontError,
-                sfnt_io::{font_xmp_support, remove_reference_from_font, SfntIO},
+                sfnt_io::{font_xmp_support, SfntIO},
             },
             asset_io::CAIReader,
             utils::test::temp_dir_path,
         };
+
+        /// Remove any remote manifest reference from any `C2PA` font table which
+        /// exists in the given font file (specified by path).
+        #[allow(dead_code)]
+        fn remove_reference_from_font(font_path: &Path) -> Result<()> {
+            let sfnt_io = SfntIO {};
+            sfnt_io.process_file_with_streams(font_path, move |input_stream, temp_file| {
+                sfnt_io.remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
+                Ok(())
+            })
+        }
 
         #[test]
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
