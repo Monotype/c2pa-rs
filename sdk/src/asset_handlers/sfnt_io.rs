@@ -1913,12 +1913,13 @@ pub mod tests {
     #[cfg(feature = "xmp_write")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
-        use std::{fs::File, io::Cursor, str::FromStr};
+        use std::{fs::File, io::Cursor, path::Path, str::FromStr};
 
         use claims::*;
         use tempfile::tempdir;
         use xmp_toolkit::XmpMeta;
 
+        use super::{process_file_with_streams, remove_reference_from_stream};
         use crate::{
             asset_handlers::{
                 font_io::FontError,
@@ -1931,10 +1932,9 @@ pub mod tests {
         /// Remove any remote manifest reference from any `C2PA` font table which
         /// exists in the given font file (specified by path).
         #[allow(dead_code)]
-        fn remove_reference_from_font(font_path: &Path) -> Result<()> {
-            let sfnt_io = SfntIO {};
-            sfnt_io.process_file_with_streams(font_path, move |input_stream, temp_file| {
-                sfnt_io.remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
+        fn remove_reference_from_font(font_path: &Path) -> Result<(), FontError> {
+            process_file_with_streams(font_path, move |input_stream, temp_file| {
+                remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
                 Ok(())
             })
         }
