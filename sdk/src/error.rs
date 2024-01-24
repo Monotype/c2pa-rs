@@ -150,6 +150,10 @@ pub enum Error {
     #[error("COSE Signature too big for JUMBF box")]
     CoseSigboxTooSmall,
 
+    #[cfg(feature = "font")]
+    #[error("Font error: {0}")]
+    FontError(#[from] crate::asset_handlers::font_io::FontError),
+
     #[error("WASM verifier error")]
     WasmVerifier,
 
@@ -233,9 +237,6 @@ pub enum Error {
     #[error("PDF read error")]
     PdfReadError,
 
-    #[error("OTF read error")]
-    OtfReadError,
-
     #[error(transparent)]
     InvalidClaim(#[from] crate::store::InvalidClaimError),
 
@@ -278,25 +279,6 @@ pub enum Error {
 
     #[error(transparent)]
     OtherError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Failed to load a font
-    #[error("Failed to load font")]
-    FontLoadError,
-
-    /// Failed to save a font
-    #[error("Failed to save font")]
-    FontSaveError,
-
-    #[error("Font has unknown magic number")]
-    FontUnknownMagic,
-
-    /// Failed to parse or de-serialize font data
-    #[error("Failed to de-serialize data")]
-    DeserializationError,
-
-    /// Invalid font format
-    #[error("Failed to load font")]
-    UnsupportedFontError,
 
     #[error("prerelease content detected")]
     PrereleaseError,
