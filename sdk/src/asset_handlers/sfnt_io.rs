@@ -32,7 +32,6 @@ use crate::{
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
     },
     error::Error,
-    hash_utils,
 };
 
 /// This module is a temporary implementation of a very basic support for XMP in
@@ -691,6 +690,15 @@ pub(crate) struct ChunkPosition {
     pub chunk_type: ChunkType,
 }
 
+impl ChunkPosition {
+    /// Gets the name as an UTF-8 string.
+    pub(crate) fn name_as_string(&self) -> core::result::Result<String, FontError> {
+        Ok(std::str::from_utf8(&self.name)
+            .map_err(FontError::Utf8Error)?
+            .to_string())
+    }
+}
+
 /// Custom trait for reading chunks of data from a scalable font (SFNT).
 pub(crate) trait ChunkReader {
     type Error;
@@ -1259,43 +1267,37 @@ impl AssetBoxHash for SfntIO {
         let chunks = self.get_chunk_positions(input_stream)?;
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
+
+        // Function to create and push a box map to the vector
+        let create_and_push_box_map = |chunk: &ChunkPosition, box_maps: &mut Vec<BoxMap>| {
+            let name = chunk.name_as_string()?;
+            // NOTE: The actual hash is not calculated here, as it is stated in the
+            //       trait documentation that the hash is calculated by the caller.
+            let box_map = BoxMap {
+                names: vec![name],
+                alg: None,
+                hash: ByteBuf::from(Vec::new()),
+                pad: ByteBuf::from(Vec::new()),
+                range_start: chunk.offset,
+                range_len: chunk.length,
+            };
+            box_maps.push(box_map);
+            Ok::<(), FontError>(())
+        };
+
         for chunk in chunks {
             // If the chunk type is to be included in the hash, then generate
             // and add the hash to the box map
             // Note: this also takes into account the `checkSumAdjustment` field
             //       as it is split into portions.
-            if let ChunkType::TableDataIncluded = chunk.chunk_type {
-                // Create a buffer to use for calculating the hash
-                let mut buf = vec![0; chunk.length];
-                // Seek to the location of the chunk
-                input_stream.seek(SeekFrom::Start(chunk.offset as u64))?;
-                // Read the chunk into the buffer
-                input_stream.read_exact(buf.as_mut_slice())?;
-                // Now we can calculate the hash
-                let hash = hash_utils::hash_by_alg("sha256", &buf, None);
-                let name = std::str::from_utf8(&chunk.name)
-                    .map_err(|e| wrap_font_err(FontError::Utf8Error(e)))?;
-                let box_map = BoxMap {
-                    names: vec![name.to_string()],
-                    alg: None,
-                    hash: ByteBuf::from(hash),
-                    pad: ByteBuf::from(Vec::new()),
-                    range_start: chunk.offset,
-                    range_len: chunk.length,
-                };
-                box_maps.push(box_map);
-            } else if let ChunkType::TableDataExcluded = chunk.chunk_type {
-                if *b"C2PA" == chunk.name {
-                    let box_map = BoxMap {
-                        names: vec!["C2PA".to_string()],
-                        alg: None,
-                        hash: ByteBuf::from(Vec::new()),
-                        pad: ByteBuf::from(Vec::new()),
-                        range_start: chunk.offset,
-                        range_len: chunk.length,
-                    };
-                    box_maps.push(box_map);
+            match chunk.chunk_type {
+                ChunkType::TableDataIncluded => {
+                    create_and_push_box_map(&chunk, &mut box_maps)?;
                 }
+                ChunkType::TableDataExcluded if *b"C2PA" == chunk.name => {
+                    create_and_push_box_map(&chunk, &mut box_maps)?;
+                }
+                _ => {}
             }
         }
         // Do not iterate if the log level is not set to at least trace
