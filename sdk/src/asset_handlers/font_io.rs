@@ -72,6 +72,10 @@ pub enum FontError {
     #[error("Invalid or unsupported font format")]
     Unsupported,
 
+    /// Failed to convert a byte array to a string as UTF-8.
+    #[error(transparent)]
+    Utf8Error(#[from] std::str::Utf8Error),
+
     /// XMP data was not found.
     #[cfg(feature = "xmp_write")]
     #[error("XMP data was not found in the font.")]

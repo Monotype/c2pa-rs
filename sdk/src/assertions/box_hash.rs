@@ -332,6 +332,31 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(feature = "sfnt")]
+    #[test]
+    fn test_hash_verify_signed_sfnt() {
+        // Similar to the test_hash_verify_sfnt test, but with a signed font file
+        // to verify dealing with the `C2PA` box.
+        let ap = fixture_path("font_c2pa.otf");
+
+        let bhp = get_assetio_handler_from_path(&ap)
+            .unwrap()
+            .asset_box_hash_ref()
+            .unwrap();
+
+        let mut input = File::open(&ap).unwrap();
+
+        let mut bh = BoxHash { boxes: Vec::new() };
+
+        // generate box hashes
+        bh.generate_box_hash_from_stream(&mut input, "sha256", bhp, false)
+            .unwrap();
+
+        // see if they match reading
+        bh.verify_stream_hash(&mut input, Some("sha256"), bhp)
+            .unwrap();
+    }
+
     #[test]
     fn test_hash_verify_jpg() {
         let ap = fixture_path("CA.jpg");

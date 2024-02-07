@@ -32,6 +32,7 @@ use crate::{
         HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
     },
     error::Error,
+    hash_utils,
 };
 
 /// This module is a temporary implementation of a very basic support for XMP in
@@ -1259,15 +1260,43 @@ impl AssetBoxHash for SfntIO {
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
         for chunk in chunks {
-            let box_map = BoxMap {
-                names: vec![format!("{:?}", chunk.name)],
-                alg: None,
-                hash: ByteBuf::from(Vec::new()),
-                pad: ByteBuf::from(Vec::new()),
-                range_start: chunk.offset,
-                range_len: chunk.length,
-            };
-            box_maps.push(box_map);
+            // If the chunk type is to be included in the hash, then generate
+            // and add the hash to the box map
+            // Note: this also takes into account the `checkSumAdjustment` field
+            //       as it is split into portions.
+            if let ChunkType::TableDataIncluded = chunk.chunk_type {
+                // Create a buffer to use for calculating the hash
+                let mut buf = vec![0; chunk.length];
+                // Seek to the location of the chunk
+                input_stream.seek(SeekFrom::Start(chunk.offset as u64))?;
+                // Read the chunk into the buffer
+                input_stream.read_exact(buf.as_mut_slice())?;
+                // Now we can calculate the hash
+                let hash = hash_utils::hash_by_alg("sha256", &buf, None);
+                let name = std::str::from_utf8(&chunk.name)
+                    .map_err(|e| wrap_font_err(FontError::Utf8Error(e)))?;
+                let box_map = BoxMap {
+                    names: vec![name.to_string()],
+                    alg: None,
+                    hash: ByteBuf::from(hash),
+                    pad: ByteBuf::from(Vec::new()),
+                    range_start: chunk.offset,
+                    range_len: chunk.length,
+                };
+                box_maps.push(box_map);
+            } else if let ChunkType::TableDataExcluded = chunk.chunk_type {
+                if *b"C2PA" == chunk.name {
+                    let box_map = BoxMap {
+                        names: vec!["C2PA".to_string()],
+                        alg: None,
+                        hash: ByteBuf::from(Vec::new()),
+                        pad: ByteBuf::from(Vec::new()),
+                        range_start: chunk.offset,
+                        range_len: chunk.length,
+                    };
+                    box_maps.push(box_map);
+                }
+            }
         }
         // Do not iterate if the log level is not set to at least trace
         if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
