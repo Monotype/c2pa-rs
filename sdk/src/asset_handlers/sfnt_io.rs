@@ -1403,6 +1403,29 @@ pub mod tests {
     }
 
     #[test]
+    fn chunk_name_as_string() {
+        let chunk = ChunkPosition {
+            offset: 0,
+            length: 0,
+            name: [65, 66, 67, 68],
+            chunk_type: ChunkType::Header,
+        };
+        assert_eq!(chunk.name_as_string().unwrap(), "ABCD");
+    }
+
+    #[test]
+    fn chunk_name_as_string_with_invalid_utf8() {
+        let chunk = ChunkPosition {
+            offset: 0,
+            length: 0,
+            // Use an invalid UTF-8 sequence to cause an error
+            name: [b'\xE0', b'\x80', b'\x80', b'\0'],
+            chunk_type: ChunkType::Header,
+        };
+        assert_err!(chunk.name_as_string());
+    }
+
+    #[test]
     fn chunk_position_debug_and_display() {
         let chunk = ChunkPosition {
             offset: 72,
