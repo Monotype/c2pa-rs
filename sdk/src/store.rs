@@ -26,7 +26,7 @@ use crate::{
     },
     assertions::{
         labels::{self, CLAIM},
-        DataBox, DataHash, Ingredient, Relationship,
+        BoxHash, DataBox, DataHash, Ingredient, Relationship,
     },
     asset_io::{
         CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions, RemoteRefEmbedType,
@@ -2260,29 +2260,44 @@ impl Store {
 
         // we will not do automatic hashing if we detect a box hash present
         let mut needs_hashing = false;
-        if pc.hash_assertions().is_empty() {
-            // 2) Get hash ranges if needed, do not generate for update manifests
-            let mut hash_ranges = object_locations_from_stream(format, &mut intermediate_stream)?;
-            let hashes: Vec<DataHash> = if pc.update_manifest() {
-                Vec::new()
-            } else {
-                Store::generate_data_hashes_for_stream(
-                    &mut intermediate_stream,
-                    pc.alg(),
-                    &mut hash_ranges,
-                    false,
-                )?
-            };
+        if pc.box_hash_assertions().is_empty() {
+            if let Some(handler) = get_assetio_handler(format) {
+                if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash_from_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        box_hash_handler,
+                        true,
+                    )?;
+                    pc.add_assertion(&box_hash)?;
+                } else {
+                    log::debug!("Using a the data hash assertions to calculate the hash");
+                    // 2) Get hash ranges if needed, do not generate for update manifests
+                    let mut hash_ranges =
+                        object_locations_from_stream(format, &mut intermediate_stream)?;
+                    let hashes: Vec<DataHash> = if pc.update_manifest() {
+                        Vec::new()
+                    } else {
+                        Store::generate_data_hashes_for_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            &mut hash_ranges,
+                            false,
+                        )?
+                    };
 
-            // add the placeholder data hashes to provenance claim so that the required space is reserved
-            for mut hash in hashes {
-                // add padding to account for possible cbor expansion of final DataHash
-                let padding: Vec<u8> = vec![0x0; 10];
-                hash.add_padding(padding);
+                    // add the placeholder data hashes to provenance claim so that the required space is reserved
+                    for mut hash in hashes {
+                        // add padding to account for possible cbor expansion of final DataHash
+                        let padding: Vec<u8> = vec![0x0; 10];
+                        hash.add_padding(padding);
 
-                pc.add_assertion(&hash)?;
+                        pc.add_assertion(&hash)?;
+                    }
+                    needs_hashing = true;
+                }
             }
-            needs_hashing = true;
         }
 
         // 3) Generate in memory CAI jumbf block
@@ -2486,24 +2501,44 @@ impl Store {
         } else {
             // we will not do automatic hashing if we detect a box hash present
             let mut needs_hashing = false;
+            let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
             if pc.box_hash_assertions().is_empty() {
-                // 2) Get hash ranges if needed, do not generate for update manifests
-                let mut hash_ranges = object_locations(&output_path)?;
-                let hashes: Vec<DataHash> = if pc.update_manifest() {
-                    Vec::new()
-                } else {
-                    Store::generate_data_hashes(dest_path, pc.alg(), &mut hash_ranges, false)?
-                };
+                if let Some(handler) = get_assetio_handler(&ext) {
+                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                        log::debug!("Using a the box hash assertions to calculate the hash");
+                        let mut box_hash = BoxHash::new();
+                        box_hash.generate_box_hash(
+                            &output_path,
+                            pc.alg(),
+                            box_hash_handler,
+                            false,
+                        )?;
+                        pc.add_assertion(&box_hash)?;
+                    } else {
+                        // 2) Get hash ranges if needed, do not generate for update manifests
+                        let mut hash_ranges = object_locations(&output_path)?;
+                        let hashes: Vec<DataHash> = if pc.update_manifest() {
+                            Vec::new()
+                        } else {
+                            Store::generate_data_hashes(
+                                dest_path,
+                                pc.alg(),
+                                &mut hash_ranges,
+                                false,
+                            )?
+                        };
 
-                // add the placeholder data hashes to provenance claim so that the required space is reserved
-                for mut hash in hashes {
-                    // add padding to account for possible cbor expansion of final DataHash
-                    let padding: Vec<u8> = vec![0x0; 10];
-                    hash.add_padding(padding);
+                        // add the placeholder data hashes to provenance claim so that the required space is reserved
+                        for mut hash in hashes {
+                            // add padding to account for possible cbor expansion of final DataHash
+                            let padding: Vec<u8> = vec![0x0; 10];
+                            hash.add_padding(padding);
 
-                    pc.add_assertion(&hash)?;
+                            pc.add_assertion(&hash)?;
+                        }
+                        needs_hashing = true;
+                    }
                 }
-                needs_hashing = true;
             }
 
             // 3) Generate in memory CAI jumbf block
