@@ -37,6 +37,9 @@ fetch_remote_manifests = ["file_io"]
 openssl_sign = ["openssl"]
 json_schema = ["dep:schemars"]
 pdf = ["dep:lopdf"]
+font = []
+sfnt = ["font"]
+woff = ["font"]
 
 # The diagnostics feature is unsupported and might be removed.
 # It enables some low-overhead timing features used in our development cycle.
@@ -140,6 +143,7 @@ web-sys = { version = "0.3.58", features = [
 
 [dev-dependencies]
 anyhow = "1.0.40"
+claims = "0.7"
 mockall = "0.11.2"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

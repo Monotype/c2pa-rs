@@ -150,6 +150,10 @@ pub enum Error {
     #[error("COSE Signature too big for JUMBF box")]
     CoseSigboxTooSmall,
 
+    #[cfg(feature = "font")]
+    #[error("Font error: {0}")]
+    FontError(#[from] crate::asset_handlers::font_io::FontError),
+
     #[error("WASM verifier error")]
     WasmVerifier,
 
@@ -183,6 +187,9 @@ pub enum Error {
 
     #[error("could not fetch the remote manifest")]
     RemoteManifestFetch(String),
+
+    #[error("use of remote manifest not supported for type")]
+    RemoteManifestNotSupported,
 
     #[error("must fetch remote manifests from url")]
     RemoteManifestUrl(String),
