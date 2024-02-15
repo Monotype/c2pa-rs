@@ -128,6 +128,13 @@ fn time_stamp_request_http(
 
     let response = req
         .set("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
+        // Temporary workaround:
+        // Currently there exists a problem with the some VPN servers where this
+        // request to timestamp fails if being sent to
+        // http://timestamp.digicert.com; we don't know exactly why this is,
+        // it's possibly a VPN configuration issue.  Until then, adding this
+        // line appears to circumvent the issue.  (C2PA-381)
+        .set("Transfer-Encoding", "chunked")
         .send(body_reader)
         .map_err(|_err| Error::CoseTimeStampGeneration)?;
 
