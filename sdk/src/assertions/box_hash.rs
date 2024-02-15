@@ -305,7 +305,6 @@ impl BoxHash {
                 self.boxes.push(bm);
             }
         }
-
         Ok(())
     }
 }

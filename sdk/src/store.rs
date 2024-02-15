@@ -2261,6 +2261,7 @@ impl Store {
         // we will not do automatic hashing if we detect a box hash present
         let mut needs_hashing = false;
         if pc.box_hash_assertions().is_empty() {
+            needs_hashing = true;
             if let Some(handler) = get_assetio_handler(format) {
                 if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                     let mut box_hash = BoxHash::new();
@@ -2295,7 +2296,6 @@ impl Store {
 
                         pc.add_assertion(&hash)?;
                     }
-                    needs_hashing = true;
                 }
             }
         }
@@ -2313,32 +2313,47 @@ impl Store {
         // replace the source with correct asset hashes so that the claim hash will be correct
         if needs_hashing {
             let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
-
             // get the final hash ranges, but not for update manifests
             intermediate_stream.rewind()?;
             output_stream.rewind()?;
             std::io::copy(output_stream, &mut intermediate_stream)?; // can remove this once we can get a CAIReader from CAIReadWrite safely
-            let mut new_hash_ranges =
-                object_locations_from_stream(format, &mut intermediate_stream)?;
-            let updated_hashes = if pc.update_manifest() {
-                Vec::new()
-            } else {
-                Store::generate_data_hashes_for_stream(
-                    &mut intermediate_stream,
-                    pc.alg(),
-                    &mut new_hash_ranges,
-                    true,
-                )?
-            };
 
-            // patch existing claim hash with updated data
-            for hash in updated_hashes {
-                pc.update_data_hash(hash)?;
+            if let Some(handler) = get_assetio_handler(format) {
+                if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash_from_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        box_hash_handler,
+                        true,
+                    )?;
+                    pc.update_box_hash(box_hash)?;
+                }
+                else {
+                    let mut new_hash_ranges =
+                        object_locations_from_stream(format, &mut intermediate_stream)?;
+                    let updated_hashes = if pc.update_manifest() {
+                        Vec::new()
+                    } else {
+                        Store::generate_data_hashes_for_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            &mut new_hash_ranges,
+                            true,
+                        )?
+                    };
+
+                    // patch existing claim hash with updated data
+                    for hash in updated_hashes {
+                        pc.update_data_hash(hash)?;
+                    }
+                }
             }
 
             // regenerate the jumbf because the cbor changed
             data = self.to_jumbf_internal(reserve_size)?;
             if jumbf_size != data.len() {
+                log::debug!("Jumbf size changed from {} to {}", jumbf_size, data.len());
                 return Err(Error::JumbfCreationError);
             }
         }
@@ -2503,6 +2518,7 @@ impl Store {
             let mut needs_hashing = false;
             let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
             if pc.box_hash_assertions().is_empty() {
+                needs_hashing = true;
                 if let Some(handler) = get_assetio_handler(&ext) {
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         log::debug!("Using a the box hash assertions to calculate the hash");
@@ -2513,6 +2529,7 @@ impl Store {
                             box_hash_handler,
                             false,
                         )?;
+                        log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
                         pc.add_assertion(&box_hash)?;
                     } else {
                         // 2) Get hash ranges if needed, do not generate for update manifests
@@ -2536,7 +2553,6 @@ impl Store {
 
                             pc.add_assertion(&hash)?;
                         }
-                        needs_hashing = true;
                     }
                 }
             }
@@ -2554,17 +2570,34 @@ impl Store {
             if needs_hashing {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
 
-                // get the final hash ranges, but not for update manifests
-                let mut new_hash_ranges = object_locations(&output_path)?;
-                let updated_hashes = if pc.update_manifest() {
-                    Vec::new()
-                } else {
-                    Store::generate_data_hashes(dest_path, pc.alg(), &mut new_hash_ranges, true)?
-                };
+                if let Some(handler) = get_assetio_handler(&ext) {
+                    // Box hash
+                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                        let mut box_hash = BoxHash::new();
+                        box_hash.generate_box_hash(
+                            &output_path,
+                            pc.alg(),
+                            box_hash_handler,
+                            false,
+                        )?;
+                        log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
+                        pc.update_box_hash(box_hash)?;
+                    }
+                    // Data hash
+                    else {
+                        // get the final hash ranges, but not for update manifests
+                        let mut new_hash_ranges = object_locations(&output_path)?;
+                        let updated_hashes = if pc.update_manifest() {
+                            Vec::new()
+                        } else {
+                            Store::generate_data_hashes(dest_path, pc.alg(), &mut new_hash_ranges, true)?
+                        };
 
-                // patch existing claim hash with updated data
-                for hash in updated_hashes {
-                    pc.update_data_hash(hash)?;
+                        // patch existing claim hash with updated data
+                        for hash in updated_hashes {
+                            pc.update_data_hash(hash)?;
+                        }
+                    }
                 }
             }
         }
@@ -2572,6 +2605,7 @@ impl Store {
         // regenerate the jumbf because the cbor changed
         data = self.to_jumbf_internal(reserve_size)?;
         if jumbf_size != data.len() {
+            log::debug!("jumbf_size: {}, data.len: {}", jumbf_size, data.len());
             return Err(Error::JumbfCreationError);
         }
 
