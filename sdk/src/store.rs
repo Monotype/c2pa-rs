@@ -1738,7 +1738,7 @@ impl Store {
 
         // if user did not supply a hash
         if pc.hash_assertions().is_empty() {
-            // create placholder DataHash large enough for 10 Exclusions
+            // create placeholder DataHash large enough for 10 Exclusions
             let mut ph = DataHash::new("jumbf manifest", pc.alg());
             for _ in 0..10 {
                 ph.add_exclusion(HashRange::new(0, 2));
@@ -1779,17 +1779,17 @@ impl Store {
             ));
         }
 
-        let mut adusted_dh = DataHash::new("jumbf manifest", pc.alg());
-        adusted_dh.exclusions = dh.exclusions.clone();
-        adusted_dh.hash = dh.hash.clone();
+        let mut adjusted_dh = DataHash::new("jumbf manifest", pc.alg());
+        adjusted_dh.exclusions = dh.exclusions.clone();
+        adjusted_dh.hash = dh.hash.clone();
 
         if let Some(reader) = asset_reader {
             // calc hashes
-            adusted_dh.gen_hash_from_stream(reader)?;
+            adjusted_dh.gen_hash_from_stream(reader)?;
         }
 
         // update the placeholder hash
-        pc.update_data_hash(adusted_dh)?;
+        pc.update_data_hash(adjusted_dh)?;
 
         self.to_jumbf_internal(reserve_size)
     }
@@ -1810,14 +1810,14 @@ impl Store {
         self.get_composed_manifest(jumbf_bytes, format)
     }
 
-    /// Returns a finalized, signed manifest.  The manfiest are only supported
+    /// Returns a finalized, signed manifest.  The manifest are only supported
     /// for cases when the client has provided a data hash content hash binding.  Note,
     /// this function will not work for cases like BMFF where the position
     /// of the content is also encoded.  This function is not compatible with
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calculations, otherwise the function uses the caller supplied values.  
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
     /// actual hash values not required when using BoxHashes.  
@@ -1840,14 +1840,14 @@ impl Store {
         self.finish_embeddable_store(&sig, &sig_placeholder, &mut jumbf_bytes, format)
     }
 
-    /// Returns a finalized, signed manifest.  The manfiest are only supported
+    /// Returns a finalized, signed manifest.  The manifest are only supported
     /// for cases when the client has provided a data hash content hash binding.  Note,
     /// this function will not work for cases like BMFF where the position
     /// of the content is also encoded.  This function is not compatible with
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calculations, otherwise the function uses the caller supplied values.  
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
     /// actual hash values not required when using BoxHashes.  
@@ -1872,14 +1872,14 @@ impl Store {
         self.finish_embeddable_store(&sig, &sig_placeholder, &mut jumbf_bytes, format)
     }
 
-    /// Returns a finalized, signed manifest.  The manfiest are only supported
+    /// Returns a finalized, signed manifest.  The manifest are only supported
     /// for cases when the client has provided a data hash content hash binding.  Note,
     /// this function will not work for cases like BMFF where the position
     /// of the content is also encoded.  This function is not compatible with
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calculations, otherwise the function uses the caller supplied values.  
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
     /// actual hash values not required when using BoxHashes.  
@@ -1974,8 +1974,8 @@ impl Store {
         Ok(jumbf_bytes)
     }
 
-    /// Returns the supplied manifest composed to be directly compatibile with the desired format.
-    /// For example, if format is JPEG funtion will return the set of APP11 segments that contains
+    /// Returns the supplied manifest composed to be directly compatible with the desired format.
+    /// For example, if format is JPEG function will return the set of APP11 segments that contains
     /// the manifest.  Similarly for PNG it would be the PNG chunk complete with header and  CRC.   
     pub fn get_composed_manifest(&self, manifest_bytes: &[u8], format: &str) -> Result<Vec<u8>> {
         if let Some(h) = get_assetio_handler(format) {
@@ -2111,7 +2111,7 @@ impl Store {
                 let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
                 pc_mut.set_signature_val(s);
 
-                // do we need to make a C2PA file in addtion to standard embedded output
+                // do we need to make a C2PA file in addition to standard embedded output
                 if let crate::claim::RemoteManifest::EmbedWithRemote(_url) =
                     pc_mut.remote_manifest()
                 {
@@ -2168,7 +2168,7 @@ impl Store {
                 let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
                 pc_mut.set_signature_val(s);
 
-                // do we need to make a C2PA file in addtion to standard embedded output
+                // do we need to make a C2PA file in addition to standard embedded output
                 if let crate::claim::RemoteManifest::EmbedWithRemote(_url) =
                     pc_mut.remote_manifest()
                 {
@@ -2224,7 +2224,7 @@ impl Store {
                 let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
                 pc_mut.set_signature_val(s);
 
-                // do we need to make a C2PA file in addtion to standard embedded output
+                // do we need to make a C2PA file in addition to standard embedded output
                 if let crate::claim::RemoteManifest::EmbedWithRemote(_url) =
                     pc_mut.remote_manifest()
                 {
@@ -2853,7 +2853,7 @@ impl Store {
     }
 
     /// Returns embedded remote manifest URL if available
-    /// asset_type: extentions or mime type of the data
+    /// asset_type: extensions or mime type of the data
     /// data: byte array containing the asset
     pub fn get_remote_manifest_url(asset_type: &str, data: &[u8]) -> Option<String> {
         let mut buf_reader = Cursor::new(data);
@@ -2904,7 +2904,7 @@ impl Store {
         })
     }
 
-    /// Load Store from a in-memory asset asychronously validating
+    /// Load Store from a in-memory asset asynchronously validating
     /// asset_type: asset extension or mime type
     /// data: reference to bytes of the file
     /// verify: if true will run verification checks when loading
@@ -2965,7 +2965,7 @@ impl Store {
         })
     }
 
-    /// Load Store from a in-memory asset asychronously validating
+    /// Load Store from a in-memory asset asynchronously validating
     /// asset_type: asset extension or mime type
     /// init_segment: reference to bytes of the init segment
     /// fragment: reference to bytes of the fragment to validate
@@ -3101,12 +3101,9 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        assertions::{labels::BOX_HASH, Action, Actions, BoxHash, Ingredient, Uuid},
-        claim::{AssertionStoreJsonFormat, Claim},
-        jumbf_io::{
-            get_assetio_handler_from_path, load_jumbf_from_file, save_jumbf_to_file,
-            update_file_jumbf,
-        },
+        assertions::{labels::BOX_HASH, Action, Actions, BoxHash, Uuid},
+        claim::AssertionStoreJsonFormat,
+        jumbf_io::{get_assetio_handler_from_path, update_file_jumbf},
         status_tracker::*,
         utils::{
             hash_utils::Hasher,
@@ -3174,7 +3171,7 @@ pub mod tests {
         let capture = claim_capture.label().to_string();
         let claim2_label = claim2.label().to_string();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -3281,7 +3278,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
 
@@ -3531,7 +3528,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -3773,7 +3770,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -3847,7 +3844,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -3921,7 +3918,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -3987,7 +3984,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
 
@@ -4031,7 +4028,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
 
@@ -4075,7 +4072,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
 
@@ -4757,7 +4754,7 @@ pub mod tests {
         // Do we generate JUMBF?
         let signer = temp_signer();
 
-        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commmits
+        // Move the claim to claims list. Note this is not real, the claims would have to be signed in between commits
         store.commit_claim(claim1).unwrap();
         store.save_to_asset(&ap, signer.as_ref(), &op).unwrap();
         store.commit_claim(claim_capture).unwrap();
@@ -4836,7 +4833,7 @@ pub mod tests {
         // get composed version for embedding to JPEG
         let cm = store.get_composed_manifest(&em, "jpg").unwrap();
 
-        // insert manifest into ouput asset
+        // insert manifest into output asset
         let jpeg_io = get_assetio_handler_from_path(&ap).unwrap();
         let ol = jpeg_io.get_object_locations(&ap).unwrap();
 
@@ -4873,6 +4870,7 @@ pub mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&output)
             .unwrap();
         output_file.write_all(&out_stream.into_inner()).unwrap();
@@ -4916,7 +4914,7 @@ pub mod tests {
         // get composed version for embedding to JPEG
         let cm = store.get_composed_manifest(&em, "jpg").unwrap();
 
-        // insert manifest into ouput asset
+        // insert manifest into output asset
         let jpeg_io = get_assetio_handler_from_path(&ap).unwrap();
         let ol = jpeg_io.get_object_locations(&ap).unwrap();
 
@@ -4953,6 +4951,7 @@ pub mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&output)
             .unwrap();
         output_file.write_all(&out_stream.into_inner()).unwrap();
@@ -4992,6 +4991,7 @@ pub mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&output)
             .unwrap();
 
@@ -5054,6 +5054,7 @@ pub mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&output)
             .unwrap();
 
@@ -5122,6 +5123,7 @@ pub mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&output)
             .unwrap();
 

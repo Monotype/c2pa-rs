@@ -11,8 +11,6 @@
 // specific language governing permissions and limitations under
 // each license.
 
-use std::convert::TryFrom;
-
 use async_generic::async_generic;
 use bcder::decode::Constructed;
 use coset::{sig_structure_data, ProtectedHeader};
@@ -128,13 +126,6 @@ fn time_stamp_request_http(
 
     let response = req
         .set("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
-        // Temporary workaround:
-        // Currently there exists a problem with the some VPN servers where this
-        // request to timestamp fails if being sent to
-        // http://timestamp.digicert.com; we don't know exactly why this is,
-        // it's possibly a VPN configuration issue.  Until then, adding this
-        // line appears to circumvent the issue.  (C2PA-381)
-        .set("Transfer-Encoding", "chunked")
         .send(body_reader)
         .map_err(|_err| Error::CoseTimeStampGeneration)?;
 
@@ -189,15 +180,15 @@ pub(crate) fn time_stamp_message_http(
     message: &[u8],
     digest_algorithm: DigestAlgorithm,
 ) -> Result<Vec<u8>> {
-    use ring::rand::SecureRandom;
+    use rand::{thread_rng, Rng};
 
     let mut h = digest_algorithm.digester();
     h.update(message);
     let digest = h.finish();
 
     let mut random = [0u8; 8];
-    ring::rand::SystemRandom::new()
-        .fill(&mut random)
+    thread_rng()
+        .try_fill(&mut random)
         .map_err(|_| Error::CoseTimeStampGeneration)?;
 
     let request = crate::asn1::rfc3161::TimeStampReq {
