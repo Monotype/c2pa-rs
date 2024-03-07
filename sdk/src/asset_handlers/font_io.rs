@@ -11,7 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 
-use core::{convert::TryFrom, mem::size_of, num::Wrapping, str::from_utf8};
+use core::{mem::size_of, num::Wrapping, str::from_utf8};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use asn1_rs::nom::AsBytes;
