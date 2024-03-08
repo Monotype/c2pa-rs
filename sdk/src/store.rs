@@ -2289,11 +2289,13 @@ impl Store {
             }
         }
 
-        // we will not do automatic hashing if we detect a box hash present
         let mut needs_hashing = false;
-        if pc.box_hash_assertions().is_empty() {
+        // 2) If we have no hash assertions (and aren't an update manifest),
+        // add a hash assertion.
+        if pc.hash_assertions().is_empty() && !pc.update_manifest() {
             needs_hashing = true;
             if let Some(handler) = get_assetio_handler(format) {
+                // If our asset supports box hashing, create one now.
                 if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                     let mut box_hash = BoxHash::new();
                     box_hash.generate_box_hash_from_stream(
@@ -2303,21 +2305,19 @@ impl Store {
                         false,
                     )?;
                     pc.add_assertion(&box_hash)?;
+                // Otherwise, fall back to data hashing.
                 } else {
                     log::debug!("Using a the data hash assertions to calculate the hash");
-                    // 2) Get hash ranges if needed, do not generate for update manifests
+                    // Get hash ranges.
                     let mut hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
-                    let hashes: Vec<DataHash> = if pc.update_manifest() {
-                        Vec::new()
-                    } else {
+                    let hashes =
                         Store::generate_data_hashes_for_stream(
                             &mut intermediate_stream,
                             pc.alg(),
                             &mut hash_ranges,
                             false,
-                        )?
-                    };
+                        )?;
 
                     // add the placeholder data hashes to provenance claim so that the required space is reserved
                     for mut hash in hashes {
@@ -2335,7 +2335,6 @@ impl Store {
         // and write preliminary jumbf store to file
         // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
         data = self.to_jumbf_internal(reserve_size)?;
-        let jumbf_size = data.len();
 
         intermediate_stream.rewind()?;
         save_jumbf_to_stream(format, &mut intermediate_stream, output_stream, &data)?;
@@ -2363,16 +2362,13 @@ impl Store {
                 else {
                     let mut new_hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
-                    let updated_hashes = if pc.update_manifest() {
-                        Vec::new()
-                    } else {
+                    let updated_hashes =
                         Store::generate_data_hashes_for_stream(
                             &mut intermediate_stream,
                             pc.alg(),
                             &mut new_hash_ranges,
                             true,
-                        )?
-                    };
+                        )?;
 
                     // patch existing claim hash with updated data
                     for hash in updated_hashes {
@@ -2383,10 +2379,6 @@ impl Store {
 
             // regenerate the jumbf because the cbor changed
             data = self.to_jumbf_internal(reserve_size)?;
-            if jumbf_size != data.len() {
-                log::debug!("Jumbf size changed from {} to {}", jumbf_size, data.len());
-                return Err(Error::JumbfCreationError);
-            }
         }
 
         Ok(data) // return JUMBF data
@@ -2565,7 +2557,7 @@ impl Store {
                         pc.add_assertion(&box_hash)?;
                     // Otherwise, fall back to data hashing.
                     } else {
-                        // Get hash ranges if needed, do not generate for update manifests
+                        // Get hash ranges.
                         let mut hash_ranges = object_locations(&output_path)?;
                         let hashes =
                             Store::generate_data_hashes(
