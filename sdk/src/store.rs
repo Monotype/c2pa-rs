@@ -2514,7 +2514,6 @@ impl Store {
         let is_bmff = is_bmff_format(&ext);
 
         let mut data;
-        let jumbf_size;
 
         if is_bmff {
             // 2) Get hash ranges if needed, do not generate for update manifests
@@ -2529,7 +2528,6 @@ impl Store {
             // and write preliminary jumbf store to file
             // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
             data = self.to_jumbf_internal(reserve_size)?;
-            jumbf_size = data.len();
             save_jumbf_to_file(&data, &output_path, Some(&output_path))?;
 
             // generate actual hash values
@@ -2545,12 +2543,14 @@ impl Store {
                 }
             }
         } else {
-            // we will not do automatic hashing if we detect a box hash present
+            // Create preliminary JUMBF store.
             let mut needs_hashing = false;
             let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
-            if pc.box_hash_assertions().is_empty() {
+            // 2) If we have no hash assertions, create one.
+            if pc.hash_assertions().is_empty() {
                 needs_hashing = true;
                 if let Some(handler) = get_assetio_handler(&ext) {
+                    // If our asset supports box hashing, create one now.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         log::debug!("Using a the box hash assertions to calculate the hash");
                         let mut box_hash = BoxHash::new();
@@ -2562,8 +2562,9 @@ impl Store {
                         )?;
                         log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
                         pc.add_assertion(&box_hash)?;
+                    // Otherwise, fall back to data hashing.
                     } else {
-                        // 2) Get hash ranges if needed, do not generate for update manifests
+                        // Get hash ranges if needed, do not generate for update manifests
                         let mut hash_ranges = object_locations(&output_path)?;
                         let hashes: Vec<DataHash> = if pc.update_manifest() {
                             Vec::new()
@@ -2592,7 +2593,6 @@ impl Store {
             // and write preliminary jumbf store to file
             // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
             data = self.to_jumbf_internal(reserve_size)?;
-            jumbf_size = data.len();
             save_jumbf_to_file(&data, &output_path, Some(&output_path))?;
 
             // 4)  determine final object locations and patch the asset hashes with correct offset
@@ -2635,10 +2635,6 @@ impl Store {
 
         // regenerate the jumbf because the cbor changed
         data = self.to_jumbf_internal(reserve_size)?;
-        if jumbf_size != data.len() {
-            log::debug!("jumbf_size: {}, data.len: {}", jumbf_size, data.len());
-            return Err(Error::JumbfCreationError);
-        }
 
         Ok(data) // return JUMBF data
     }
