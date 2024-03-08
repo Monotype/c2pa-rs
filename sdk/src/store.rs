@@ -2300,7 +2300,7 @@ impl Store {
                         &mut intermediate_stream,
                         pc.alg(),
                         box_hash_handler,
-                        true,
+                        false,
                     )?;
                     pc.add_assertion(&box_hash)?;
                 } else {
@@ -2356,7 +2356,7 @@ impl Store {
                         &mut intermediate_stream,
                         pc.alg(),
                         box_hash_handler,
-                        true,
+                        false,
                     )?;
                     pc.update_box_hash(box_hash)?;
                 }
