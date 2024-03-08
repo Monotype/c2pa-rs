@@ -1291,8 +1291,6 @@ pub mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use std::io::Cursor;
-
     use claims::*;
     use tempfile::tempdir;
 

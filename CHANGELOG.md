@@ -6,6 +6,17 @@ This project adheres to [Semantic Versioning](https://semver.org), except that â
 
 Do not manually edit this file. It will be automatically updated when a new release is published.
 
+## 0.29.0
+_26 February 2024_
+
+* SDK configuration settings support (infrastructure) ([#408](https://github.com/contentauth/c2pa-rs/pull/408))
+* Support streaming writes for TIFF ([#410](https://github.com/contentauth/c2pa-rs/pull/410))
+* Fixed typo in comment ([#409](https://github.com/contentauth/c2pa-rs/pull/409))
+* (MINOR) Update `xmp_toolkit` to v1.7.1, remove Ring dependency, fix build errors ([#407](https://github.com/contentauth/c2pa-rs/pull/407))
+* Crate udate to fix jpeg parsing error ([#402](https://github.com/contentauth/c2pa-rs/pull/402))
+* allows builds to pass ([#403](https://github.com/contentauth/c2pa-rs/pull/403))
+* Ocsp support ([#371](https://github.com/contentauth/c2pa-rs/pull/371))
+
 ## 0.28.5
 _06 February 2024_
 
@@ -48,7 +59,7 @@ _17 November 2023_
 _01 November 2023_
 
 * (PATCH) switches af relationship for a reference to the c2pa data to an array of references, one of which is the c2pa spec ([#333](https://github.com/contentauth/c2pa-rs/pull/333))
-* Restore async versions of embedd functions ([#327](https://github.com/contentauth/c2pa-rs/pull/327))
+* Restore async versions of embed functions ([#327](https://github.com/contentauth/c2pa-rs/pull/327))
 * (MINOR) Support databox thumbnails CAI-4142 ([#325](https://github.com/contentauth/c2pa-rs/pull/325))
 * (MINOR) Reuse claim thumbnail as ingredient thumbnail if the store is valid ([#322](https://github.com/contentauth/c2pa-rs/pull/322))
 * (MINOR) Use JUMBF URIs for ManifestStore identifiers ([#323](https://github.com/contentauth/c2pa-rs/pull/323))
