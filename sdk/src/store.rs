@@ -2546,8 +2546,9 @@ impl Store {
             // Create preliminary JUMBF store.
             let mut needs_hashing = false;
             let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
-            // 2) If we have no hash assertions, create one.
-            if pc.hash_assertions().is_empty() {
+            // 2) If we have no hash assertions (and aren't an update manifest),
+            // add a hash assertion.
+            if pc.hash_assertions().is_empty() && !pc.update_manifest() {
                 needs_hashing = true;
                 if let Some(handler) = get_assetio_handler(&ext) {
                     // If our asset supports box hashing, create one now.
@@ -2566,16 +2567,13 @@ impl Store {
                     } else {
                         // Get hash ranges if needed, do not generate for update manifests
                         let mut hash_ranges = object_locations(&output_path)?;
-                        let hashes: Vec<DataHash> = if pc.update_manifest() {
-                            Vec::new()
-                        } else {
+                        let hashes =
                             Store::generate_data_hashes(
                                 dest_path,
                                 pc.alg(),
                                 &mut hash_ranges,
                                 false,
-                            )?
-                        };
+                            )?;
 
                         // add the placeholder data hashes to provenance claim so that the required space is reserved
                         for mut hash in hashes {
@@ -2618,11 +2616,11 @@ impl Store {
                     else {
                         // get the final hash ranges, but not for update manifests
                         let mut new_hash_ranges = object_locations(&output_path)?;
-                        let updated_hashes = if pc.update_manifest() {
-                            Vec::new()
-                        } else {
-                            Store::generate_data_hashes(dest_path, pc.alg(), &mut new_hash_ranges, true)?
-                        };
+                        let updated_hashes = 
+                            Store::generate_data_hashes(
+                                dest_path,pc.alg(),
+                                &mut new_hash_ranges,
+                                true)?;
 
                         // patch existing claim hash with updated data
                         for hash in updated_hashes {
