@@ -2307,7 +2307,6 @@ impl Store {
                     pc.add_assertion(&box_hash)?;
                 // Otherwise, fall back to data hashing.
                 } else {
-                    log::debug!("Using a the data hash assertions to calculate the hash");
                     // Get hash ranges.
                     let mut hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
@@ -2552,7 +2551,6 @@ impl Store {
                 if let Some(handler) = get_assetio_handler(&ext) {
                     // If our asset supports box hashing, create one now.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
-                        log::debug!("Using a the box hash assertions to calculate the hash");
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
                             &output_path,
@@ -2560,7 +2558,6 @@ impl Store {
                             box_hash_handler,
                             false,
                         )?;
-                        log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
                         pc.add_assertion(&box_hash)?;
                     // Otherwise, fall back to data hashing.
                     } else {
