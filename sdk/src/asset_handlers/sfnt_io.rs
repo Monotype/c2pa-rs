@@ -1285,7 +1285,6 @@ impl AssetBoxHash for SfntIO {
             Ok::<(), FontError>(())
         };
 
-        let mut needs_empty_c2pa = true;
         for chunk in chunks {
             // If the chunk type is to be included in the hash, then generate
             // and add the hash to the box map
@@ -1297,25 +1296,9 @@ impl AssetBoxHash for SfntIO {
                 }
                 ChunkType::TableDataExcluded if *b"C2PA" == chunk.name => {
                     create_and_push_box_map(&chunk, &mut box_maps)?;
-                    needs_empty_c2pa = false;
                 }
                 _ => {}
             }
-        }
-        if needs_empty_c2pa {
-            // For now, we will grab the end of the file as the potential location
-            // of the C2PA table
-            input_stream.seek(SeekFrom::End(0))?;
-            let offset = input_stream.stream_position()? as usize;
-            create_and_push_box_map(
-                &ChunkPosition {
-                    offset,
-                    length: 0,
-                    name: *b"C2PA",
-                    chunk_type: ChunkType::TableDataExcluded,
-                },
-                &mut box_maps,
-            )?;
         }
         // Do not iterate if the log level is not set to at least trace
         if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
