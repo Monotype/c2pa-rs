@@ -2291,11 +2291,12 @@ impl Store {
 
         let mut needs_hashing = false;
         // 2) If we have no hash assertions (and aren't an update manifest),
-        // add a hash assertion.
+        // add a hash assertion.  This creates a preliminary JUMBF store.
         if pc.hash_assertions().is_empty() && !pc.update_manifest() {
             needs_hashing = true;
             if let Some(handler) = get_assetio_handler(format) {
-                // If our asset supports box hashing, create one now.
+                // If our asset supports box hashing, generate and add a box
+                // hash assertion.
                 if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                     let mut box_hash = BoxHash::new();
                     box_hash.generate_box_hash_from_stream(
@@ -2348,7 +2349,8 @@ impl Store {
             std::io::copy(output_stream, &mut intermediate_stream)?; // can remove this once we can get a CAIReader from CAIReadWrite safely
 
             if let Some(handler) = get_assetio_handler(format) {
-                // If our asset supports box hashing, create one now.
+                // If our asset supports box hashing, generate and update
+                // the existing box hash assertion.
                 if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                     let mut box_hash = BoxHash::new();
                     box_hash.generate_box_hash_from_stream(
@@ -2541,15 +2543,15 @@ impl Store {
                 }
             }
         } else {
-            // Create preliminary JUMBF store.
             let mut needs_hashing = false;
             let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
             // 2) If we have no hash assertions (and aren't an update manifest),
-            // add a hash assertion.
+            // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
                 needs_hashing = true;
                 if let Some(handler) = get_assetio_handler(&ext) {
-                    // If our asset supports box hashing, create one now.
+                    // If our asset supports box hashing, generate and add a box
+                    // hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
@@ -2596,7 +2598,8 @@ impl Store {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
 
                 if let Some(handler) = get_assetio_handler(&ext) {
-                    // If our asset supports box hashing, create one now.
+                    // If our asset supports box hashing, generate and update
+                    // the existing box hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
