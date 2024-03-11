@@ -157,7 +157,6 @@ pub enum Error {
     #[error("Font error: {0}")]
     FontError(#[from] crate::asset_handlers::font_io::FontError),
 
-
     #[error("COSE Signer does not contain signing certificate")]
     CoseNoCerts,
 
