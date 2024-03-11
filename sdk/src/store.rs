@@ -2605,7 +2605,6 @@ impl Store {
                             box_hash_handler,
                             false,
                         )?;
-                        log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
                         pc.update_box_hash(box_hash)?;
                     }
                     // Otherwise, fall back to data hashing.
