@@ -2311,13 +2311,12 @@ impl Store {
                     // Get hash ranges.
                     let mut hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
-                    let hashes =
-                        Store::generate_data_hashes_for_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            &mut hash_ranges,
-                            false,
-                        )?;
+                    let hashes = Store::generate_data_hashes_for_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        &mut hash_ranges,
+                        false,
+                    )?;
 
                     // add the placeholder data hashes to provenance claim so that the required space is reserved
                     for mut hash in hashes {
@@ -2365,13 +2364,12 @@ impl Store {
                 else {
                     let mut new_hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
-                    let updated_hashes =
-                        Store::generate_data_hashes_for_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            &mut new_hash_ranges,
-                            true,
-                        )?;
+                    let updated_hashes = Store::generate_data_hashes_for_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        &mut new_hash_ranges,
+                        true,
+                    )?;
 
                     // patch existing claim hash with updated data
                     for hash in updated_hashes {
@@ -2383,10 +2381,10 @@ impl Store {
             // regenerate the jumbf because the cbor changed
             data = self.to_jumbf_internal(reserve_size)?;
 
-        // NOTE: Previously this code was comparing the size of the preliminary
-        // JUMBF store with the final JUMBF store. This is not a valid
-        // comparison, as the preliminary JUMBF store may not have had the C2PA
-        // box present yet, but the final always will.
+            // NOTE: Previously this code was comparing the size of the preliminary
+            // JUMBF store with the final JUMBF store. This is not a valid
+            // comparison, as the preliminary JUMBF store may not have had the C2PA
+            // box present yet, but the final always will.
         }
 
         Ok(data) // return JUMBF data
@@ -2565,13 +2563,12 @@ impl Store {
                     } else {
                         // Get hash ranges.
                         let mut hash_ranges = object_locations(&output_path)?;
-                        let hashes =
-                            Store::generate_data_hashes(
-                                dest_path,
-                                pc.alg(),
-                                &mut hash_ranges,
-                                false,
-                            )?;
+                        let hashes = Store::generate_data_hashes(
+                            dest_path,
+                            pc.alg(),
+                            &mut hash_ranges,
+                            false,
+                        )?;
 
                         // add the placeholder data hashes to provenance claim so that the required space is reserved
                         for mut hash in hashes {
@@ -2615,11 +2612,12 @@ impl Store {
                     else {
                         // get the final hash ranges, but not for update manifests
                         let mut new_hash_ranges = object_locations(&output_path)?;
-                        let updated_hashes = 
-                            Store::generate_data_hashes(
-                                dest_path,pc.alg(),
-                                &mut new_hash_ranges,
-                                true)?;
+                        let updated_hashes = Store::generate_data_hashes(
+                            dest_path,
+                            pc.alg(),
+                            &mut new_hash_ranges,
+                            true,
+                        )?;
 
                         // patch existing claim hash with updated data
                         for hash in updated_hashes {

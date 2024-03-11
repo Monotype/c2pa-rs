@@ -1498,8 +1498,7 @@ pub(crate) mod tests {
         // data hash validation silent errors (logging the error) but box
         // hashing actually returns an error result.  So we'll now just load the
         // store from the signed asset instead.
-        let store1 = Store::load_from_asset(&output, true, &mut validation_log)
-            .unwrap();
+        let store1 = Store::load_from_asset(&output, true, &mut validation_log).unwrap();
         let claim1_label = store1.provenance_label().unwrap();
         let claim = store1.provenance_claim().unwrap();
         assert!(claim.get_claim_assertion(ASSERTION_LABEL, 0).is_some()); // verify the assertion is there
