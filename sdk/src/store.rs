@@ -2349,6 +2349,7 @@ impl Store {
             std::io::copy(output_stream, &mut intermediate_stream)?; // can remove this once we can get a CAIReader from CAIReadWrite safely
 
             if let Some(handler) = get_assetio_handler(format) {
+                // If our asset supports box hashing, create one now.
                 if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                     let mut box_hash = BoxHash::new();
                     box_hash.generate_box_hash_from_stream(
@@ -2359,6 +2360,7 @@ impl Store {
                     )?;
                     pc.update_box_hash(box_hash)?;
                 }
+                // Otherwise, fall back to data hashing.
                 else {
                     let mut new_hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
@@ -2379,6 +2381,11 @@ impl Store {
 
             // regenerate the jumbf because the cbor changed
             data = self.to_jumbf_internal(reserve_size)?;
+
+        // NOTE: Previously this code was comparing the size of the preliminary
+        // JUMBF store with the final JUMBF store. This is not a valid
+        // comparison, as the preliminary JUMBF store may not have had the C2PA
+        // box present yet, but the final always will.
         }
 
         Ok(data) // return JUMBF data
@@ -2592,7 +2599,7 @@ impl Store {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
 
                 if let Some(handler) = get_assetio_handler(&ext) {
-                    // Box hash
+                    // If our asset supports box hashing, create one now.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
@@ -2604,7 +2611,7 @@ impl Store {
                         log::debug!("Box hash: {}", serde_json::to_string(&box_hash).unwrap());
                         pc.update_box_hash(box_hash)?;
                     }
-                    // Data hash
+                    // Otherwise, fall back to data hashing.
                     else {
                         // get the final hash ranges, but not for update manifests
                         let mut new_hash_ranges = object_locations(&output_path)?;
@@ -2625,6 +2632,11 @@ impl Store {
 
         // regenerate the jumbf because the cbor changed
         data = self.to_jumbf_internal(reserve_size)?;
+
+        // NOTE: Previously this code was comparing the size of the preliminary
+        // JUMBF store with the final JUMBF store. This is not a valid
+        // comparison, as the preliminary JUMBF store may not have had the C2PA
+        // box present yet, but the final always will.
 
         Ok(data) // return JUMBF data
     }
