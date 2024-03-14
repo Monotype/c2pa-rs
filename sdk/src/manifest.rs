@@ -1498,13 +1498,6 @@ pub(crate) mod tests {
             .expect("embed");
         let mut validation_log = DetailedStatusTracker::new();
 
-        // Note: previously this was loading the asset from memory, using the
-        // data returned from the embed call before.  As we're requesting that
-        // he validate, this was causing a problem - he can't validate a hash
-        // without the original asset data.  This was sliding by before because
-        // data hash validation silent errors (logging the error) but box
-        // hashing actually returns an error result.  So we'll now just load the
-        // store from the signed asset instead.
         let store1 = Store::load_from_asset(&output, true, &mut validation_log).unwrap();
         let claim1_label = store1.provenance_label().unwrap();
         let claim = store1.provenance_claim().unwrap();

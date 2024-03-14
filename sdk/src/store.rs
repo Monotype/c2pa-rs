@@ -2490,11 +2490,6 @@ impl Store {
 
             // regenerate the jumbf because the cbor changed
             data = self.to_jumbf_internal(reserve_size)?;
-
-            // NOTE: Previously this code was comparing the size of the preliminary
-            // JUMBF store with the final JUMBF store. This is not a valid
-            // comparison, as the preliminary JUMBF store may not have had the C2PA
-            // box present yet, but the final always will.
         }
 
         Ok(data) // return JUMBF data
@@ -2739,11 +2734,6 @@ impl Store {
 
         // regenerate the jumbf because the cbor changed
         data = self.to_jumbf_internal(reserve_size)?;
-
-        // NOTE: Previously this code was comparing the size of the preliminary
-        // JUMBF store with the final JUMBF store. This is not a valid
-        // comparison, as the preliminary JUMBF store may not have had the C2PA
-        // box present yet, but the final always will.
 
         Ok(data) // return JUMBF data
     }
