@@ -39,6 +39,8 @@ pdf = ["dep:lopdf"]
 font = []
 sfnt = ["font"]
 woff = ["font"]
+v1_api = []
+unstable_api = []
 
 # The diagnostics feature is unsupported and might be removed.
 # It enables some low-overhead timing features used in our development cycle.
