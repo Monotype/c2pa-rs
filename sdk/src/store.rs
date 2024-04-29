@@ -20,6 +20,8 @@ use std::{fs, path::Path};
 
 use log::error;
 
+#[cfg(feature = "openssl")]
+use crate::cose_validator::{verify_cose, verify_cose_async};
 use crate::{
     assertion::{
         Assertion, AssertionBase, AssertionData, AssertionDecodeError, AssertionDecodeErrorCause,
@@ -32,8 +34,8 @@ use crate::{
         CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions, RemoteRefEmbedType,
     },
     claim::{Claim, ClaimAssertion, ClaimAssetData},
-    cose_sign::cose_sign,
-    cose_validator::{check_ocsp_status, verify_cose},
+    cose_sign::{cose_sign, cose_sign_async},
+    cose_validator::check_ocsp_status,
     error::{Error, Result},
     hash_utils::{hash_by_alg, vec_compare, verify_by_alg},
     jumbf::{
@@ -45,6 +47,7 @@ use crate::{
         get_assetio_handler, load_jumbf_from_stream, object_locations_from_stream,
         save_jumbf_to_memory, save_jumbf_to_stream,
     },
+    manifest_store_report::ManifestStoreReport,
     salt::DefaultSalt,
     settings::get_settings_value,
     status_tracker::{log_item, OneShotStatusTracker, StatusTracker},
@@ -53,7 +56,7 @@ use crate::{
         hash_utils::{hash_sha256, HashRange},
         patch::patch_bytes,
     },
-    validation_status, AsyncSigner, ManifestStoreReport, RemoteSigner, Signer,
+    validation_status, AsyncSigner, RemoteSigner, Signer,
 };
 #[cfg(feature = "file_io")]
 use crate::{
@@ -450,6 +453,7 @@ impl Store {
     }
 
     /// Return certificate chain for the provenance claim
+    #[cfg(feature = "v1_api")]
     pub(crate) fn get_provenance_cert_chain(&self) -> Result<String> {
         let claim = self.provenance_claim().ok_or(Error::ProvenanceMissing)?;
 
@@ -501,6 +505,7 @@ impl Store {
 
         cose_sign(signer, &claim_bytes, box_size).and_then(|sig| {
             // Sanity check: Ensure that this signature is valid.
+            #[cfg(feature = "openssl")]
             if let Ok(verify_after_sign) = get_settings_value::<bool>("verify.verify_after_sign") {
                 if verify_after_sign {
                     let mut cose_log = OneShotStatusTracker::new();
@@ -531,13 +536,12 @@ impl Store {
         signer: &dyn AsyncSigner,
         box_size: usize,
     ) -> Result<Vec<u8>> {
-        use crate::{cose_sign::cose_sign_async, cose_validator::verify_cose_async};
-
         let claim_bytes = claim.data()?;
 
         match cose_sign_async(signer, &claim_bytes, box_size).await {
             // Sanity check: Ensure that this signature is valid.
             Ok(sig) => {
+                #[cfg(feature = "openssl")]
                 if let Ok(verify_after_sign) =
                     get_settings_value::<bool>("verify.verify_after_sign")
                 {
@@ -2140,6 +2144,56 @@ impl Store {
         }
     }
 
+    /// Async version of save_to_stream
+    ///
+    /// This can also handle remote signing if direct_cose_handling() is true
+    pub async fn save_to_stream_async(
+        &mut self,
+        format: &str,
+        input_stream: &mut dyn CAIRead,
+        output_stream: &mut dyn CAIReadWrite,
+        signer: &dyn AsyncSigner,
+    ) -> Result<Vec<u8>> {
+        let intermediate_output: Vec<u8> = Vec::new();
+        let mut intermediate_stream = Cursor::new(intermediate_output);
+
+        let jumbf_bytes = self.start_save_stream(
+            format,
+            input_stream,
+            &mut intermediate_stream,
+            signer.reserve_size(),
+        )?;
+
+        let pc = self.provenance_claim().ok_or(Error::ClaimEncoding)?;
+        let claim_bytes = pc.data()?;
+        let sig = if signer.direct_cose_handling() {
+            // let the signer do all the COSE processing and return the structured COSE data
+            signer.sign(claim_bytes).await?
+        } else {
+            self.sign_claim_async(pc, signer, signer.reserve_size())
+                .await?
+        };
+        let sig_placeholder = Store::sign_claim_placeholder(pc, signer.reserve_size());
+
+        match self.finish_save_stream(
+            jumbf_bytes,
+            format,
+            &mut intermediate_stream,
+            output_stream,
+            sig,
+            &sig_placeholder,
+        ) {
+            Ok((s, m)) => {
+                // save sig so store is up to date
+                let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
+                pc_mut.set_signature_val(s);
+
+                Ok(m)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Async RemoteSigner used to embed the claims store and  returns memory representation of the
     /// asset and manifest. Updates XMP with provenance record.
     /// When called, the stream should contain an asset matching format.
@@ -2193,7 +2247,7 @@ impl Store {
     ) -> Result<Vec<u8>> {
         // set up temp dir, contents auto deleted
         let td = tempfile::TempDir::new()?;
-        let temp_path = td.into_path();
+        let temp_path = td.path();
         let temp_file = temp_path.join(
             dest_path
                 .file_name()
@@ -2248,7 +2302,7 @@ impl Store {
     ) -> Result<Vec<u8>> {
         // set up temp dir, contents auto deleted
         let td = tempfile::TempDir::new()?;
-        let temp_path = td.into_path();
+        let temp_path = td.path();
         let temp_file = temp_path.join(
             dest_path
                 .file_name()
@@ -2305,7 +2359,7 @@ impl Store {
     ) -> Result<Vec<u8>> {
         // set up temp dir, contents auto deleted
         let td = tempfile::TempDir::new()?;
-        let temp_path = td.into_path();
+        let temp_path = td.path();
         let temp_file = temp_path.join(
             dest_path
                 .file_name()
@@ -2800,7 +2854,7 @@ impl Store {
     }
 
     // fetch remote manifest if possible
-    #[cfg(feature = "file_io")]
+    #[cfg(feature = "fetch_remote_manifests")]
     fn fetch_remote_manifest(url: &str) -> Result<Vec<u8>> {
         use conv::ValueFrom;
         use ureq::Error as uError;
@@ -2848,30 +2902,14 @@ impl Store {
     }
 
     /// Handles remote manifests when file_io/fetch_remote_manifests feature is enabled
-    #[cfg(feature = "file_io")]
     fn handle_remote_manifest(ext_ref: &str) -> Result<Vec<u8>> {
         // verify provenance path is remote url
-        let is_remote_url = Store::is_valid_remote_url(ext_ref);
-
-        if cfg!(feature = "fetch_remote_manifests") && is_remote_url {
-            Store::fetch_remote_manifest(ext_ref)
-        } else {
-            // return an error with the url that should be read
-            if is_remote_url {
-                Err(Error::RemoteManifestUrl(ext_ref.to_owned()))
-            } else {
-                Err(Error::JumbfNotFound)
+        if Store::is_valid_remote_url(ext_ref) {
+            #[cfg(feature = "fetch_remote_manifests")]
+            {
+                Store::fetch_remote_manifest(ext_ref)
             }
-        }
-    }
-
-    /// Handles remote manifests for Wasm or when the file_io/fetch_remote_manifests feature is disabled
-    #[cfg(not(feature = "file_io"))]
-    fn handle_remote_manifest(ext_ref: &str) -> Result<Vec<u8>> {
-        // verify provenance path is remote url
-        let is_remote_url = Store::is_valid_remote_url(ext_ref);
-
-        if is_remote_url {
+            #[cfg(not(feature = "fetch_remote_manifests"))]
             Err(Error::RemoteManifestUrl(ext_ref.to_owned()))
         } else {
             Err(Error::JumbfNotFound)
@@ -3265,7 +3303,8 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        assertions::{labels::BOX_HASH, Action, Actions, Uuid},
+        assertion::AssertionJson,
+        assertions::{labels::BOX_HASH, Action, Actions, BoxHash, Uuid},
         claim::AssertionStoreJsonFormat,
         jumbf_io::{get_assetio_handler_from_path, update_file_jumbf},
         status_tracker::*,
@@ -3277,7 +3316,7 @@ pub mod tests {
                 write_jpeg_placeholder_file,
             },
         },
-        AssertionJson, SigningAlg,
+        SigningAlg,
     };
 
     fn create_editing_claim(claim: &mut Claim) -> Result<&mut Claim> {
@@ -3543,7 +3582,6 @@ pub mod tests {
 
         store.commit_claim(claim).unwrap();
 
-        // JUMBF generation should fail because the certificate won't validate.
         let r = store.save_to_asset(&ap, &signer, &op);
         assert!(r.is_err());
         assert_eq!(r.err().unwrap().to_string(), "COSE certificate has expired");

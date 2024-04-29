@@ -49,11 +49,16 @@ pub trait Signer {
     ///
     /// The default implementation will send the request to the URL
     /// provided by [`Self::time_authority_url()`], if any.
+    #[cfg(not(target_arch = "wasm32"))]
     fn send_timestamp_request(&self, message: &[u8]) -> Option<Result<Vec<u8>>> {
         let headers: Option<Vec<(String, String)>> = self.timestamp_request_headers();
 
         self.time_authority_url()
             .map(|url| crate::time_stamp::default_rfc3161_request(&url, headers, message))
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn send_timestamp_request(&self, _message: &[u8]) -> Option<Result<Vec<u8>>> {
+        None
     }
 
     /// OCSP response for the signing cert if available
@@ -136,6 +141,7 @@ pub trait AsyncSigner: Sync {
     ///
     /// The default implementation will send the request to the URL
     /// provided by [`Self::time_authority_url()`], if any.
+    #[cfg(not(target_arch = "wasm32"))]
     async fn send_timestamp_request(&self, message: &[u8]) -> Option<Result<Vec<u8>>> {
         // NOTE: This is currently synchronous, but may become
         // async in the future.
@@ -144,6 +150,8 @@ pub trait AsyncSigner: Sync {
         self.time_authority_url()
             .map(|url| crate::time_stamp::default_rfc3161_request(&url, headers, message))
     }
+    #[cfg(target_arch = "wasm32")]
+    async fn send_timestamp_request(&self, message: &[u8]) -> Option<Result<Vec<u8>>>;
 
     /// OCSP response for the signing cert if available
     /// This is the only C2PA supported cert revocation method.
@@ -151,6 +159,14 @@ pub trait AsyncSigner: Sync {
     /// be cached taking pressure off of the CA (recommended by C2PA spec)
     fn ocsp_val(&self) -> Option<Vec<u8>> {
         None
+    }
+
+    /// If this returns true the sign function is responsible for for direct handling of the COSE structure.
+    ///
+    /// This is useful for cases where the signer needs to handle the COSE structure directly.
+    /// Not recommended for general use.
+    fn direct_cose_handling(&self) -> bool {
+        false
     }
 }
 
