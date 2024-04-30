@@ -747,6 +747,52 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
         .map_err(|_e| Error::InvalidAsset("could not read JPEG segments".to_string()))?;
 
     while let Ok(seg) = reader.next_segment() {
+        // !!! ATTENTION !!!
+        // 
+        // For the following `println!` to work, you must supply a Debug
+        // formatter for the SegmentKind type in the jfifdump crate.
+        //
+        // 1. After cargo-building this stuff once, go and find the file
+        //
+        //    C:\Users\<username>\.cargo\registry\src\index.crates.io-6f17d22bba15001f\jfifdump-0.5.1\src\reader.rs
+        //
+        // and paste in the following code, just after the close-brace on the
+        // definition for `pub enum SegmentKind`:
+        //
+        // impl fmt::Debug for SegmentKind {
+        //     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        //         f.write_fmt(format_args!(
+        //             "{}",
+        //             match (*self) {
+        //                 SegmentKind::Soi => "Soi",
+        //                 SegmentKind::Eoi => "Eoi",
+        //                 SegmentKind::App {..} => "App",
+        //                 SegmentKind::App0Jfif(_) => "App0Jfif",
+        //                 SegmentKind::Dqt(_) => "Dqt",
+        //                 SegmentKind::Dht(_) => "Dht",
+        //                 SegmentKind::Dac(_) => "Dac",
+        //                 SegmentKind::Frame(_) => "Frame",
+        //                 SegmentKind::Scan(_) => "Scan",
+        //                 SegmentKind::Dri(_) => "Dri",
+        //                 SegmentKind::Rst(_) => "Rst",
+        //                 SegmentKind::Comment(_) => "Comment",
+        //                 SegmentKind::Unknown {..} => "Unknown",
+        //             }
+        //         ))
+        //     }
+        // }
+        //
+        // 2. Don't forget to put `use std::fmt` near the top, after the `use std::io...` line.
+        //
+        // 3. Zap the cached jfifdump crate to force a rebuild:
+        //
+        //    cargo clean -p jfifdump
+        //
+        // 4. Proceed to build & run as normal:
+        //
+        //    cargo test --package c2pa --test test_builder --features add_thumbnails,unstable_api -- test_builder_ca_jpg --exact --show-output
+        //
+        println!("Seg: {:?}", seg.kind);
         match seg.kind {
             jfifdump::SegmentKind::Eoi => {
                 let bm = BoxMap {
@@ -811,9 +857,9 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
                             box_maps.push(c2pa_bm);
                             cai_index = box_maps.len() - 1;
                         } else {
-                            let name = segment_names
-                                .get(&nr)
-                                .ok_or(Error::InvalidAsset("Unknown segment marker".to_owned()))?;
+                            let name = segment_names.get(&nr).ok_or(Error::InvalidAsset(
+                                format!("Unknown segment marker {:?}", nr).to_owned(),
+                            ))?;
 
                             let bm = BoxMap {
                                 names: vec![name.to_string()],
@@ -833,9 +879,9 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
                 let nr = nr | 0xe0;
                 let _data = data;
 
-                let name = segment_names
-                    .get(&nr)
-                    .ok_or(Error::InvalidAsset("Unknown segment marker".to_owned()))?;
+                let name = segment_names.get(&nr).ok_or(Error::InvalidAsset(
+                    format!("Unknown segment marker {:?}", nr).to_owned(),
+                ))?;
 
                 let bm = BoxMap {
                     names: vec![name.to_string()],
@@ -897,9 +943,9 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
                 box_maps.push(bm);
             }
             jfifdump::SegmentKind::Frame(f) => {
-                let name = segment_names
-                    .get(&f.sof)
-                    .ok_or(Error::InvalidAsset("Unknown segment marker".to_owned()))?;
+                let name = segment_names.get(&f.sof).ok_or(Error::InvalidAsset(
+                    format!("Unknown segment marker {:?}", f.sof).to_owned(),
+                ))?;
 
                 let bm = BoxMap {
                     names: vec![name.to_string()],
@@ -950,9 +996,9 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
                 box_maps.push(bm);
             }
             jfifdump::SegmentKind::Unknown { marker, data: _ } => {
-                let name = segment_names
-                    .get(&marker)
-                    .ok_or(Error::InvalidAsset("Unknown segment marker".to_owned()))?;
+                let name = segment_names.get(&marker).ok_or(Error::InvalidAsset(
+                    format!("Unknown segment marker {:?}", marker).to_owned(),
+                ))?;
 
                 let bm = BoxMap {
                     names: vec![name.to_string()],
