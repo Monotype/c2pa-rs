@@ -2507,7 +2507,7 @@ impl Store {
         if needs_hashing {
             let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
             // get the final hash ranges, but not for update manifests
-            intermediate_stream.rewind()?;
+            intermediate_stream = Cursor::new(Vec::new());
             output_stream.rewind()?;
             std::io::copy(output_stream, &mut intermediate_stream)?; // can remove this once we can get a CAIReader from CAIReadWrite safely
 
