@@ -32,7 +32,8 @@ use crate::{
     },
     assertions::{
         labels::{self, CLAIM},
-        BmffHash, DataBox, DataHash, DataMap, ExclusionsMap, Ingredient, Relationship, SubsetMap,
+        BmffHash, BoxHash, DataBox, DataHash, DataMap, ExclusionsMap, Ingredient, Relationship,
+        SubsetMap,
     },
     asset_io::{
         CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions, RemoteRefEmbedType,
@@ -2420,7 +2421,6 @@ impl Store {
         let is_bmff = is_bmff_format(format);
 
         let mut data;
-        let jumbf_size;
 
         if is_bmff {
             // 2) Get hash ranges if needed, do not generate for update manifests
@@ -2437,7 +2437,6 @@ impl Store {
             // and write preliminary jumbf store to file
             // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
             data = self.to_jumbf_internal(reserve_size)?;
-            jumbf_size = data.len();
             // write the jumbf to the output stream if we are embedding the manifest
             if !remove_manifests {
                 intermediate_stream.rewind()?;
@@ -2464,37 +2463,49 @@ impl Store {
                 }
             }
         } else {
-            // we will not do automatic hashing if we detect a box hash present
             let mut needs_hashing = false;
-            if pc.hash_assertions().is_empty() {
-                // 2) Get hash ranges if needed, do not generate for update manifests
-                let mut hash_ranges =
-                    object_locations_from_stream(format, &mut intermediate_stream)?;
-                let hashes: Vec<DataHash> = if pc.update_manifest() {
-                    Vec::new()
-                } else {
-                    Store::generate_data_hashes_for_stream(
-                        &mut intermediate_stream,
-                        pc.alg(),
-                        &mut hash_ranges,
-                        false,
-                    )?
-                };
-
-                // add the placeholder data hashes to provenance claim so that the required space is reserved
-                for mut hash in hashes {
-                    // add padding to account for possible cbor expansion of final DataHash
-                    let padding: Vec<u8> = vec![0x0; 10];
-                    hash.add_padding(padding);
-
-                    pc.add_assertion(&hash)?;
-                }
+            // 2) If we have no hash assertions (and aren't an update manifest),
+            // add a hash assertion.  This creates a preliminary JUMBF store.
+            if pc.hash_assertions().is_empty() && !pc.update_manifest() {
                 needs_hashing = true;
+                if let Some(handler) = get_assetio_handler(format) {
+                    // If our asset supports box hashing, generate and add a box
+                    // hash assertion.
+                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                        let mut box_hash = BoxHash::new();
+                        box_hash.generate_box_hash_from_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            box_hash_handler,
+                            false,
+                        )?;
+                        pc.add_assertion(&box_hash)?;
+                    // Otherwise, fall back to data hashing.
+                    } else {
+                        // Get hash ranges.
+                        let mut hash_ranges =
+                            object_locations_from_stream(format, &mut intermediate_stream)?;
+                        let hashes = Store::generate_data_hashes_for_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            &mut hash_ranges,
+                            false,
+                        )?;
+
+                        // add the placeholder data hashes to provenance claim so that the required space is reserved
+                        for mut hash in hashes {
+                            // add padding to account for possible cbor expansion of final DataHash
+                            let padding: Vec<u8> = vec![0x0; 10];
+                            hash.add_padding(padding);
+
+                            pc.add_assertion(&hash)?;
+                        }
+                    }
+                }
             }
 
             // 3) Generate in memory CAI jumbf block
             data = self.to_jumbf_internal(reserve_size)?;
-            jumbf_size = data.len();
 
             // write the jumbf to the output stream if we are embedding the manifest
             if !remove_manifests {
@@ -2510,36 +2521,47 @@ impl Store {
             // replace the source with correct asset hashes so that the claim hash will be correct
             if needs_hashing {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
-
                 // get the final hash ranges, but not for update manifests
-                intermediate_stream.rewind()?;
+                // reset the intermediate stream here (the previous jumbf may
+                // have been larger)
+                intermediate_stream = Cursor::new(Vec::new());
                 output_stream.rewind()?;
                 std::io::copy(output_stream, &mut intermediate_stream)?; // can remove this once we can get a CAIReader from CAIReadWrite safely
-                let mut new_hash_ranges =
-                    object_locations_from_stream(format, &mut intermediate_stream)?;
-                let updated_hashes = if pc.update_manifest() {
-                    Vec::new()
-                } else {
-                    Store::generate_data_hashes_for_stream(
-                        &mut intermediate_stream,
-                        pc.alg(),
-                        &mut new_hash_ranges,
-                        true,
-                    )?
-                };
+                if let Some(handler) = get_assetio_handler(format) {
+                    // If our asset supports box hashing, generate and update
+                    // the existing box hash assertion.
+                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
+                        let mut box_hash = BoxHash::new();
+                        box_hash.generate_box_hash_from_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            box_hash_handler,
+                            false,
+                        )?;
+                        pc.replace_box_hash(box_hash)?;
+                    }
+                    // Otherwise, fall back to data hashing.
+                    else {
+                        let mut new_hash_ranges =
+                            object_locations_from_stream(format, &mut intermediate_stream)?;
+                        let updated_hashes = Store::generate_data_hashes_for_stream(
+                            &mut intermediate_stream,
+                            pc.alg(),
+                            &mut new_hash_ranges,
+                            true,
+                        )?;
 
-                // patch existing claim hash with updated data
-                for hash in updated_hashes {
-                    pc.update_data_hash(hash)?;
+                        // patch existing claim hash with updated data
+                        for hash in updated_hashes {
+                            pc.update_data_hash(hash)?;
+                        }
+                    }
                 }
             }
         }
 
         // regenerate the jumbf because the cbor changed
         data = self.to_jumbf_internal(reserve_size)?;
-        if jumbf_size != data.len() {
-            return Err(Error::JumbfCreationError);
-        }
 
         Ok(data) // return JUMBF data
     }
@@ -2787,7 +2809,7 @@ impl Store {
                             pc.update_data_hash(hash)?;
                         }
                     }
-                }
+                }   
             }
         }
 

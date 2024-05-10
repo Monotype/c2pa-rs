@@ -16,8 +16,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 use asn1_rs::nom::AsBytes;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
-#[cfg(feature = "xmp_write")]
-use xmp_toolkit::XmpError;
 
 use crate::error::Error;
 
@@ -76,25 +74,15 @@ pub enum FontError {
     #[error(transparent)]
     Utf8Error(#[from] std::str::Utf8Error),
 
+    // Failed to read XMP data.
+    #[cfg(feature = "xmp_write")]
+    #[error("Error reading/writing XMP data: {0}")]
+    XmpError(String),
+
     /// XMP data was not found.
     #[cfg(feature = "xmp_write")]
     #[error("XMP data was not found in the font.")]
     XmpNotFound,
-
-    /// [`XmpError::ErrorType::NoFile`] error from the XMP toolkit.
-    #[cfg(feature = "xmp_write")]
-    #[error("XMP write error, no file; {0}")]
-    XmpNoFile(XmpError),
-
-    /// [`XmpError::ErrorType::UnsupportedType`] error from the XMP toolkit.
-    #[cfg(feature = "xmp_write")]
-    #[error("XMP write error, unsupported type: {0}")]
-    XmpUnsupportedType(XmpError),
-
-    /// XMP write error
-    #[cfg(feature = "xmp_write")]
-    #[error(transparent)]
-    XmpWriteError(#[from] XmpError),
 }
 
 /// Errors that can occur when saving a font.

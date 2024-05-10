@@ -95,7 +95,7 @@ fn extract_xmp_key(xmp: &str, key: &str) -> Option<String> {
 }
 
 /// Add a value to XMP using a key, replaces the value if the key exists
-fn add_xmp_key(xmp: &str, key: &str, value: &str) -> Result<String> {
+pub fn add_xmp_key(xmp: &str, key: &str, value: &str) -> Result<String> {
     let mut reader = Reader::from_str(xmp);
     reader.trim_text(true);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
