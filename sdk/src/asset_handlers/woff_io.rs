@@ -53,9 +53,8 @@ use crate::{
 /// This module depends on the `feature = "xmp_write"` to be enabled.
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
-    use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
-
     use super::*;
+    use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
 
     /// Creates a default `XmpMeta` object for fonts, using the supplied
     /// document and instance identifiers.
@@ -71,16 +70,23 @@ mod font_xmp_support {
         let xmp = MIN_XMP.to_string();
 
         // Add in the namespace for DocumentID and InstanceID.
-        add_xmp_key(&xmp, "xmlns:xmpMM", "http://ns.adobe.com/xap/1.0/mm/")
-            .map_err(|_e| FontError::XmpError("Unable to add media management namespace".to_string()))?;
-        
+        add_xmp_key(&xmp, "xmlns:xmpMM", "http://ns.adobe.com/xap/1.0/mm/").map_err(|_e| {
+            FontError::XmpError("Unable to add media management namespace".to_string())
+        })?;
+
         // Add in DocumentID and InstanceID.
-        add_xmp_key(&xmp, "xmpMM:DocumentID",
-            document_id.unwrap_or(Uuid::new_v4().to_string()).as_str())
-            .map_err(|_e| FontError::XmpError("Unable to add DocumentID".to_string()))?;
-        add_xmp_key(&xmp, "xmpMM:InstanceID",
-            instance_id.unwrap_or(Uuid::new_v4().to_string()).as_str())
-            .map_err(|_e| FontError::XmpError("Unable to add InstanceID".to_string()))?;
+        add_xmp_key(
+            &xmp,
+            "xmpMM:DocumentID",
+            document_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
+        )
+        .map_err(|_e| FontError::XmpError("Unable to add DocumentID".to_string()))?;
+        add_xmp_key(
+            &xmp,
+            "xmpMM:InstanceID",
+            instance_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
+        )
+        .map_err(|_e| FontError::XmpError("Unable to add InstanceID".to_string()))?;
 
         Ok(xmp)
     }
@@ -98,9 +104,7 @@ mod font_xmp_support {
         match read_reference_from_stream(source)? {
             // For now we pretend the reference read from the stream is really XMP
             // data
-            Some(xmp) => {
-                Ok(xmp)
-            }
+            Some(xmp) => Ok(xmp),
             // Mention there is no data representing XMP found
             None => Err(FontError::XmpNotFound),
         }
@@ -150,7 +154,7 @@ mod font_xmp_support {
         // Reset the source stream to the beginning
         source.seek(SeekFrom::Start(0))?;
         // Add the provenance to the XMP data.
-        add_provenance(&mut xmp_meta, manifest_uri)
+        xmp_meta = add_provenance(&xmp_meta, manifest_uri)
             .map_err(|_e| FontError::XmpError("Unable to add provenance".to_string()))?;
         // Finally write the XMP data as a string to the stream
         add_reference_to_stream(source, destination, &xmp_meta.to_string())?;
@@ -802,7 +806,7 @@ where
     // Read the font from the input stream
     let mut font = WoffFont::from_reader(input_stream)?;
     // If the C2PA table does not exist...
-    if font.tables.get(&C2PA_TABLE_TAG).is_none() {
+    if !font.tables.contains_key(&C2PA_TABLE_TAG) {
         // ...install an empty one.
         font.append_empty_c2pa_table()?;
     }
@@ -1347,8 +1351,7 @@ pub mod tests {
 
         match read_reference_from_font(&output) {
             Ok(Some(manifest_uri)) => {
-                let provenance =
-                    extract_provenance(manifest_uri.as_str()).unwrap();
+                let provenance = extract_provenance(manifest_uri.as_str()).unwrap();
                 assert_eq!(expected_manifest_uri, provenance);
             }
             _ => panic!("Expected to read a reference from the font file"),

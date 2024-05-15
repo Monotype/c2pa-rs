@@ -2815,7 +2815,7 @@ impl Store {
                             pc.update_data_hash(hash)?;
                         }
                     }
-                }   
+                }
             }
         }
 
