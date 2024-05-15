@@ -37,6 +37,7 @@ use crate::{
         RemoteRefEmbedType,
     },
     error::{Error, Result},
+    utils::xmp_inmemory_utils::{add_provenance, MIN_XMP},
 };
 
 static SUPPORTED_TYPES: [&str; 3] = ["jpg", "jpeg", "image/jpeg"];
@@ -55,7 +56,7 @@ fn vec_compare(va: &[u8], vb: &[u8]) -> bool {
        .all(|(a,b)| a == b)
 }
 
-// todo decide if want to keep this just for in-memory use cases
+// Return contents of APP1 segment if it is an XMP segment.
 fn extract_xmp(seg: &JpegSegment) -> Option<String> {
     let contents = seg.contents();
     if contents.starts_with(XMP_SIGNATURE) {
@@ -66,6 +67,7 @@ fn extract_xmp(seg: &JpegSegment) -> Option<String> {
     }
 }
 
+// Extract XMP from bytes.
 fn xmp_from_bytes(asset_bytes: &[u8]) -> Option<String> {
     if let Ok(jpeg) = Jpeg::from_bytes(Bytes::copy_from_slice(asset_bytes)) {
         let segs = jpeg.segments_by_marker(markers::APP1);
@@ -144,7 +146,7 @@ fn get_cai_segments(jpeg: &img_parts::jpeg::Jpeg) -> Result<Vec<usize>> {
                 if is_cai {
                     cai_segs.push(i);
                     cai_seg_cnt = 1;
-                    cai_en = en.clone(); // store the identifier
+                    cai_en.clone_from(&en); // store the identifier
                 }
             }
         }
@@ -225,7 +227,7 @@ impl CAIReader for JpegIO {
 
                                     buffer.append(&mut raw_vec.as_mut_slice()[8..].to_vec());
                                     cai_seg_cnt = 1;
-                                    cai_en = en.clone(); // store the identifier
+                                    cai_en.clone_from(&en); // store the identifier
 
                                     manifest_store_cnt += 1;
                                 }
@@ -379,7 +381,7 @@ impl CAIWriter for JpegIO {
                                     let is_cai = vec_compare(&C2PA_MARKER, &jumb_type);
                                     if is_cai {
                                         cai_seg_cnt = 1;
-                                        cai_en = en.clone(); // store the identifier
+                                        cai_en.clone_from(&en); // store the identifier
 
                                         let v = HashObjectPositions {
                                             offset: curr_offset,
@@ -554,17 +556,20 @@ impl RemoteRefEmbed for JpegIO {
         asset_path: &Path,
         embed_ref: crate::asset_io::RemoteRefEmbedType,
     ) -> Result<()> {
-        match embed_ref {
-            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
-                {
-                    crate::embedded_xmp::add_manifest_uri_to_file(asset_path, &manifest_uri)
-                }
-
-                #[cfg(not(feature = "xmp_write"))]
-                {
-                    Err(crate::error::Error::MissingFeature("xmp_write".to_string()))
-                }
+        match &embed_ref {
+            crate::asset_io::RemoteRefEmbedType::Xmp(_manifest_uri) => {
+                let mut file = std::fs::File::open(asset_path)?;
+                let mut temp = Cursor::new(Vec::new());
+                self.embed_reference_to_stream(&mut file, &mut temp, embed_ref)?;
+                let mut output = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(asset_path)
+                    .map_err(Error::IoError)?;
+                temp.set_position(0);
+                std::io::copy(&mut temp, &mut output).map_err(Error::IoError)?;
+                Ok(())
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -574,11 +579,53 @@ impl RemoteRefEmbed for JpegIO {
 
     fn embed_reference_to_stream(
         &self,
-        _source_stream: &mut dyn CAIRead,
-        _output_stream: &mut dyn CAIReadWrite,
-        _embed_ref: RemoteRefEmbedType,
+        source_stream: &mut dyn CAIRead,
+        output_stream: &mut dyn CAIReadWrite,
+        embed_ref: RemoteRefEmbedType,
     ) -> Result<()> {
-        Err(Error::UnsupportedType)
+        match embed_ref {
+            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
+                let mut buf = Vec::new();
+                // read the whole asset
+                source_stream.rewind()?;
+                source_stream
+                    .read_to_end(&mut buf)
+                    .map_err(Error::IoError)?;
+                let mut jpeg =
+                    Jpeg::from_bytes(buf.into()).map_err(|_err| Error::EmbeddingError)?;
+
+                // find any existing XMP segment and remember where it was
+                let mut xmp = MIN_XMP.to_string(); // default minimal XMP
+                let mut xmp_index = None;
+                let segments = jpeg.segments_mut();
+                for (i, seg) in segments.iter().enumerate() {
+                    if seg.marker() == markers::APP1 && seg.contents().starts_with(XMP_SIGNATURE) {
+                        xmp = extract_xmp(seg).unwrap_or_else(|| xmp.clone());
+                        xmp_index = Some(i);
+                        break;
+                    }
+                }
+                // add provenance and JPEG XMP prefix
+                let xmp = format!(
+                    "http://ns.adobe.com/xap/1.0/\0 {}",
+                    add_provenance(&xmp, &manifest_uri)?
+                );
+                let segment = JpegSegment::new_with_contents(markers::APP1, Bytes::from(xmp));
+                // insert or add the segment
+                match xmp_index {
+                    Some(i) => segments[i] = segment,
+                    None => segments.insert(1, segment),
+                }
+
+                jpeg.encoder()
+                    .write_to(output_stream)
+                    .map_err(|_err| Error::InvalidAsset("JPEG write error".to_owned()))?;
+                Ok(())
+            }
+            crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::Watermark(_) => Err(Error::UnsupportedType),
+        }
     }
 }
 
@@ -755,7 +802,7 @@ fn make_box_maps(input_stream: &mut dyn CAIRead) -> Result<Vec<BoxMap>> {
                         let is_cai = vec_compare(&C2PA_MARKER, &jumb_type);
                         if is_cai {
                             cai_seg_cnt = 1;
-                            cai_en = en.clone(); // store the identifier
+                            cai_en.clone_from(&en); // store the identifier
 
                             let c2pa_bm = BoxMap {
                                 names: vec![C2PA_BOXHASH.to_string()],
@@ -1035,6 +1082,9 @@ pub mod tests {
 
     use std::io::{Read, Seek};
 
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::*;
+
     use super::*;
     #[test]
     fn test_extract_xmp() {
@@ -1125,6 +1175,43 @@ pub mod tests {
             .get_reader()
             .read_xmp(&mut file_reader)
             .unwrap();
+
+        assert!(read_xmp.contains(test_msg));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), actix::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn test_xmp_read_write_stream() {
+        let source_bytes = include_bytes!("../../tests/fixtures/CA.jpg");
+
+        let test_msg = "this some test xmp data";
+        let handler = JpegIO::new("");
+
+        let assetio_handler = handler.get_handler("jpg");
+
+        let remote_ref_handler = assetio_handler.remote_ref_writer_ref().unwrap();
+
+        let mut source_stream = Cursor::new(source_bytes.to_vec());
+        let mut output_stream = Cursor::new(Vec::new());
+        remote_ref_handler
+            .embed_reference_to_stream(
+                &mut source_stream,
+                &mut output_stream,
+                RemoteRefEmbedType::Xmp(test_msg.to_string()),
+            )
+            .unwrap();
+
+        output_stream.set_position(0);
+
+        // read back in XMP
+        let read_xmp = assetio_handler
+            .get_reader()
+            .read_xmp(&mut output_stream)
+            .unwrap();
+
+        output_stream.set_position(0);
+
+        //std::fs::write("../target/xmp_write.jpg", output_stream.into_inner()).unwrap();
 
         assert!(read_xmp.contains(test_msg));
     }

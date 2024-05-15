@@ -14,7 +14,7 @@ use core::{cmp::Ordering, fmt, mem::size_of, num::Wrapping};
 use std::{
     collections::BTreeMap,
     fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom, Write},
+    io::{BufReader, Cursor, Read, Seek, Write},
     path::*,
 };
 
@@ -53,9 +53,10 @@ use crate::{
 /// This module depends on the `feature = "xmp_write"` to be enabled.
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
-    use xmp_toolkit::{FromStrOptions, XmpError, XmpErrorType, XmpMeta};
+    use std::io::SeekFrom;
 
     use super::*;
+    use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
 
     /// Creates a default `XmpMeta` object for fonts, using the specified
     /// document and instance identifiers.
@@ -66,36 +67,31 @@ mod font_xmp_support {
     fn default_font_xmp_meta(
         document_id: Option<String>,
         instance_id: Option<String>,
-    ) -> Result<XmpMeta> {
-        // But we could build up a default document/instance ID for a font and
-        // use it to seed the data. Doing this would only make sense if creating
-        // and writing the data to the font
-        let xmp_mm_namespace = "http://ns.adobe.com/xap/1.0/mm/";
-        // If there was no reference in the stream, then we build up
-        // a default XMP data
-        let mut xmp_meta = XmpMeta::new().map_err(xmp_write_err)?;
+    ) -> Result<String> {
+        // Start with the default key.
+        let mut xmp = MIN_XMP.to_string();
 
-        // Add a document ID
-        xmp_meta
-            .set_property(
-                xmp_mm_namespace,
-                "DocumentID",
-                // Use the supplied document ID or default to one if needed
-                &document_id.unwrap_or(SfntIO::default_document_id()).into(),
-            )
-            .map_err(xmp_write_err)?;
+        // Add in the namespace for DocumentID and InstanceID.
+        xmp =
+            add_xmp_key(&xmp, "xmlns:xmpMM", "http://ns.adobe.com/xap/1.0/mm/").map_err(|_e| {
+                FontError::XmpError("Unable to add media management namespace".to_string())
+            })?;
 
-        // Add an instance ID
-        xmp_meta
-            .set_property(
-                xmp_mm_namespace,
-                "InstanceID",
-                // Use the supplied instance ID or default to one if needed
-                &instance_id.unwrap_or(SfntIO::default_instance_id()).into(),
-            )
-            .map_err(xmp_write_err)?;
+        // Add in DocumentID and InstanceID.
+        xmp = add_xmp_key(
+            &xmp,
+            "xmpMM:DocumentID",
+            document_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
+        )
+        .map_err(|_e| FontError::XmpError("Unable to add DocumentID".to_string()))?;
+        xmp = add_xmp_key(
+            &xmp,
+            "xmpMM:InstanceID",
+            instance_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
+        )
+        .map_err(|_e| FontError::XmpError("Unable to add InstanceID".to_string()))?;
 
-        Ok(xmp_meta)
+        Ok(xmp)
     }
 
     /// Builds a `XmpMeta` element from the data within the source stream, based
@@ -104,38 +100,16 @@ mod font_xmp_support {
     /// # Remarks
     /// The use of this function really shouldn't be needed, but currently the SDK
     /// is tightly coupled to the use of XMP with assets.
-    pub(crate) fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<XmpMeta>
+    pub(crate) fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<String>
     where
         TSource: Read + Seek + ?Sized,
     {
         match read_reference_from_stream(source)? {
             // For now we pretend the reference read from the stream is really XMP
             // data
-            Some(xmp) => {
-                // If we did have reference data in the stream, we assume it is
-                // really XMP data, and will read as such
-                XmpMeta::from_str_with_options(xmp.as_str(), FromStrOptions::default())
-                    .map_err(xmp_write_err)
-            }
+            Some(xmp) => Ok(xmp),
             // Mention there is no data representing XMP found
             None => Err(FontError::XmpNotFound),
-        }
-    }
-
-    /// Maps the errors from the xmp_toolkit crate
-    ///
-    /// # Remarks
-    /// This is nearly a copy/paste from `embedded_xmp` crate, we should clean this
-    /// up at some point
-    fn xmp_write_err(err: XmpError) -> FontError {
-        match err.error_type {
-            // convert to OS permission error code so we can detect it correctly upstream
-            XmpErrorType::FilePermission => {
-                FontError::IoError(std::io::Error::from_raw_os_error(13))
-            }
-            XmpErrorType::NoFile => FontError::XmpNoFile(err),
-            XmpErrorType::NoFileHandler => FontError::XmpUnsupportedType(err),
-            _ => FontError::XmpWriteError(err),
         }
     }
 
@@ -170,10 +144,6 @@ mod font_xmp_support {
         TSource: Read + Seek + ?Sized,
         TDest: Write + ?Sized,
     {
-        // We must register the namespace for dcterms, to be able to set the
-        // provenance
-        XmpMeta::register_namespace("http://purl.org/dc/terms/", "dcterms")
-            .map_err(xmp_write_err)?;
         // Build a simple XMP meta element from the current source stream
         let mut xmp_meta = match build_xmp_from_stream(source) {
             // Use the data already available
@@ -186,18 +156,11 @@ mod font_xmp_support {
         };
         // Reset the source stream to the beginning
         source.seek(SeekFrom::Start(0))?;
-        // We don't really care if there was a provenance before, since we are
-        // writing a new one we will either be adding or overwriting what
-        // was there.
-        xmp_meta
-            .set_property(
-                "http://purl.org/dc/terms/",
-                "provenance",
-                &manifest_uri.into(),
-            )
-            .map_err(xmp_write_err)?;
+        // Add the provenance to the XMP data.
+        xmp_meta = add_provenance(&xmp_meta, manifest_uri)
+            .map_err(|_e| FontError::XmpError("Unable to add provenance".to_string()))?;
         // Finally write the XMP data as a string to the stream
-        add_reference_to_stream(source, destination, &xmp_meta.to_string())?;
+        add_reference_to_stream(source, destination, &xmp_meta)?;
 
         Ok(())
     }
@@ -934,7 +897,7 @@ where
     // Read the font from the input stream
     let mut font = SfntFont::from_reader(input_stream)?;
     // If the C2PA table does not exist...
-    if font.tables.get(&C2PA_TABLE_TAG).is_none() {
+    if !font.tables.contains_key(&C2PA_TABLE_TAG) {
         // ...install an empty one.
         font.append_empty_c2pa_table()?;
     }
@@ -1623,9 +1586,7 @@ pub mod tests {
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     fn add_c2pa_ref() {
-        use std::str::FromStr;
-
-        use xmp_toolkit::XmpMeta;
+        use crate::utils::xmp_inmemory_utils::extract_provenance;
 
         let c2pa_data = "test data";
 
@@ -1661,11 +1622,8 @@ pub mod tests {
 
         match read_reference_from_font(&output) {
             Ok(Some(manifest_uri)) => {
-                let xmp_meta = XmpMeta::from_str(manifest_uri.as_str()).unwrap();
-                let provenance = xmp_meta
-                    .property("http://purl.org/dc/terms/", "provenance")
-                    .unwrap();
-                assert_eq!(expected_manifest_uri, provenance.value.as_str());
+                let provenance = extract_provenance(manifest_uri.as_str()).unwrap();
+                assert_eq!(expected_manifest_uri, provenance);
             }
             _ => panic!("Expected to read a reference from the font file"),
         };
@@ -1966,11 +1924,10 @@ pub mod tests {
     #[cfg(feature = "xmp_write")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
-        use std::{fs::File, io::Cursor, path::Path, str::FromStr};
+        use std::{fs::File, io::Cursor, path::Path};
 
         use claims::*;
         use tempfile::tempdir;
-        use xmp_toolkit::XmpMeta;
 
         use super::{process_file_with_streams, remove_reference_from_stream};
         use crate::{
@@ -1979,7 +1936,7 @@ pub mod tests {
                 sfnt_io::{font_xmp_support, SfntIO},
             },
             asset_io::CAIReader,
-            utils::test::temp_dir_path,
+            utils::{test::temp_dir_path, xmp_inmemory_utils::extract_provenance},
         };
 
         /// Remove any remote manifest reference from any `C2PA` font table which
@@ -2024,11 +1981,8 @@ pub mod tests {
                 let mut f: File = File::open(&output).unwrap();
                 match otf_handler.read_xmp(&mut f) {
                     Some(xmp_data_str) => {
-                        let xmp_data = XmpMeta::from_str(&xmp_data_str).unwrap();
-                        match xmp_data.property("http://purl.org/dc/terms/", "provenance") {
-                            Some(xmp_value) => assert_eq!("new test data", xmp_value.value),
-                            None => panic!("Expected a value for provenance"),
-                        }
+                        let xmp_value = extract_provenance(xmp_data_str.as_str()).unwrap();
+                        assert_eq!("new test data", xmp_value);
                     }
                     None => panic!("Expected to read XMP from the resource."),
                 }

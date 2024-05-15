@@ -32,6 +32,7 @@ use crate::{
         RemoteRefEmbedType,
     },
     error::{Error, Result},
+    utils::xmp_inmemory_utils::{add_provenance, MIN_XMP},
 };
 
 const II: [u8; 2] = *b"II";
@@ -51,11 +52,12 @@ const TILEOFFSETS: u16 = 324;
 
 const SUBFILES: [u16; 3] = [SUBFILE_TAG, EXIFIFD_TAG, GPSIFD_TAG];
 
-static SUPPORTED_TYPES: [&str; 9] = [
+static SUPPORTED_TYPES: [&str; 10] = [
     "tif",
     "tiff",
     "image/tiff",
     "dng",
+    "image/dng",
     "image/x-adobe-dng",
     "arw",
     "image/x-sony-arw",
@@ -64,6 +66,7 @@ static SUPPORTED_TYPES: [&str; 9] = [
 ];
 
 // The type of an IFD entry
+#[derive(Debug, PartialEq)]
 enum IFDEntryType {
     Byte = 1,       // 8-bit unsigned integer
     Ascii = 2,      // 8-bit byte that contains a 7-bit ASCII code; the last byte must be zero
@@ -158,9 +161,9 @@ pub(crate) struct TiffStructure {
 
 impl TiffStructure {
     #[allow(dead_code)]
-    pub fn load<R: ?Sized>(reader: &mut R) -> Result<Self>
+    pub fn load<R>(reader: &mut R) -> Result<Self>
     where
-        R: Read + Seek,
+        R: Read + Seek + ?Sized,
     {
         let mut endianness = [0u8, 2];
         reader.read_exact(&mut endianness)?;
@@ -228,14 +231,14 @@ impl TiffStructure {
     }
 
     // read IFD entries, all value_offset are in source endianness
-    pub fn read_ifd_entries<R: ?Sized>(
+    pub fn read_ifd_entries<R>(
         byte_reader: &mut ByteOrdered<&mut R, Endianness>,
         big_tiff: bool,
         entry_cnt: u64,
         entries: &mut HashMap<u16, IfdEntry>,
     ) -> Result<()>
     where
-        R: Read + Seek,
+        R: Read + Seek + ?Sized,
     {
         for _ in 0..entry_cnt {
             let tag = byte_reader.read_u16()?;
@@ -287,14 +290,14 @@ impl TiffStructure {
     }
 
     // read IFD from reader
-    pub fn read_ifd<R: ?Sized>(
+    pub fn read_ifd<R>(
         reader: &mut R,
         byte_order: Endianness,
         big_tiff: bool,
         ifd_type: IfdType,
     ) -> Result<ImageFileDirectory>
     where
-        R: Read + Seek + ReadBytesExt,
+        R: Read + Seek + ReadBytesExt + ?Sized,
     {
         let mut byte_reader = ByteOrdered::runtime(reader, byte_order);
 
@@ -362,11 +365,9 @@ fn stream_len(reader: &mut dyn CAIRead) -> crate::Result<u64> {
     Ok(len)
 }
 // create tree of TIFF structure IFDs and IFD entries.
-fn map_tiff<R: ?Sized>(
-    input: &mut R,
-) -> Result<(Arena<ImageFileDirectory>, Token, Endianness, bool)>
+fn map_tiff<R>(input: &mut R) -> Result<(Arena<ImageFileDirectory>, Token, Endianness, bool)>
 where
-    R: Read + Seek,
+    R: Read + Seek + ?Sized,
 {
     let _size = input.seek(SeekFrom::End(0))?;
     input.rewind()?;
@@ -1012,7 +1013,7 @@ impl<T: Read + Write + Seek> TiffCloner<T> {
             self.writer.seek(SeekFrom::Start(curr_pos))?;
             self.writer.write_u32(0)?;
         }
-
+        self.writer.flush()?;
         Ok(())
     }
 
@@ -1326,9 +1327,9 @@ fn add_required_tags_to_stream(
     }
 }
 
-fn get_cai_data<R: ?Sized>(asset_reader: &mut R) -> Result<Vec<u8>>
+fn get_cai_data<R>(asset_reader: &mut R) -> Result<Vec<u8>>
 where
-    R: Read + Seek,
+    R: Read + Seek + ?Sized,
 {
     let (tiff_tree, page_0, e, big_tiff) = map_tiff(asset_reader)?;
 
@@ -1359,9 +1360,9 @@ where
     Ok(data)
 }
 
-fn get_xmp_data<R: ?Sized>(asset_reader: &mut R) -> Option<Vec<u8>>
+fn get_xmp_data<R>(asset_reader: &mut R) -> Option<Vec<u8>>
 where
-    R: Read + Seek,
+    R: Read + Seek + ?Sized,
 {
     let (tiff_tree, page_0, e, big_tiff) = map_tiff(asset_reader).ok()?;
     let first_ifd = &tiff_tree[page_0].data;
@@ -1370,6 +1371,11 @@ where
         Some(entry) => entry,
         None => return None,
     };
+
+    // make sure the tag type is correct
+    if IFDEntryType::from_u16(xmp_ifd_entry.entry_type)? != IFDEntryType::Byte {
+        return None;
+    }
 
     // move read point to start of entry
     let decoded_offset = decode_offset(xmp_ifd_entry.value_offset, e, big_tiff).ok()?;
@@ -1552,13 +1558,9 @@ impl CAIWriter for TiffIO {
         let mut bo = ByteOrdered::new(output_stream, e);
         let mut tc = TiffCloner::new(e, big_tiff, &mut bo)?;
 
-        match idfs[page_0].data.entries.remove(&C2PA_TAG) {
-            Some(_ifd) => {
-                tc.clone_tiff(&mut idfs, page_0, input_stream)?;
-                Ok(())
-            }
-            None => Ok(()),
-        }
+        idfs[page_0].data.entries.remove(&C2PA_TAG);
+        tc.clone_tiff(&mut idfs, page_0, input_stream)?;
+        Ok(())
     }
 }
 
@@ -1610,15 +1612,23 @@ impl RemoteRefEmbed for TiffIO {
     ) -> Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                let output_buf = Vec::new();
+                let mut output_stream = Cursor::new(output_buf);
+
+                // block so that source file is closed after embed
                 {
-                    crate::embedded_xmp::add_manifest_uri_to_file(asset_path, &manifest_uri)
+                    let mut source_stream = std::fs::File::open(asset_path)?;
+                    self.embed_reference_to_stream(
+                        &mut source_stream,
+                        &mut output_stream,
+                        RemoteRefEmbedType::Xmp(manifest_uri),
+                    )?;
                 }
 
-                #[cfg(not(feature = "xmp_write"))]
-                {
-                    Err(crate::error::Error::MissingFeature("xmp_write".to_string()))
-                }
+                // write will replace exisiting contents
+                output_stream.rewind()?;
+                std::fs::write(asset_path, output_stream.into_inner())?;
+                Ok(())
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -1628,11 +1638,35 @@ impl RemoteRefEmbed for TiffIO {
 
     fn embed_reference_to_stream(
         &self,
-        _source_stream: &mut dyn CAIRead,
-        _output_stream: &mut dyn CAIReadWrite,
-        _embed_ref: RemoteRefEmbedType,
+        source_stream: &mut dyn CAIRead,
+        output_stream: &mut dyn CAIReadWrite,
+        embed_ref: RemoteRefEmbedType,
     ) -> Result<()> {
-        Err(Error::UnsupportedType)
+        match embed_ref {
+            crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
+                let xmp = match self.get_reader().read_xmp(source_stream) {
+                    Some(xmp) => add_provenance(&xmp, &manifest_uri)?,
+                    None => {
+                        let xmp = format!("http://ns.adobe.com/xap/1.0/\0 {}", MIN_XMP);
+                        add_provenance(&xmp, &manifest_uri)?
+                    }
+                };
+
+                let l = u64::value_from(xmp.len())
+                    .map_err(|_err| Error::InvalidAsset("value out of range".to_string()))?;
+
+                let entry = IfdClonedEntry {
+                    entry_tag: XMP_TAG,
+                    entry_type: IFDEntryType::Byte as u16,
+                    value_count: l,
+                    value_bytes: xmp.as_bytes().to_vec(),
+                };
+                tiff_clone_with_tags(output_stream, source_stream, vec![entry])
+            }
+            crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
+            crate::asset_io::RemoteRefEmbedType::Watermark(_) => Err(Error::UnsupportedType),
+        }
     }
 }
 
@@ -1678,6 +1712,32 @@ pub mod tests {
     }
 
     #[test]
+    fn test_write_xmp() {
+        let data = "some data";
+
+        let source = crate::utils::test::fixture_path("TUSCANY.TIF");
+
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.tif");
+
+        std::fs::copy(source, &output).unwrap();
+
+        let tiff_io = TiffIO {};
+
+        // save data to tiff
+        let eh = tiff_io.remote_ref_writer_ref().unwrap();
+        eh.embed_reference(&output, RemoteRefEmbedType::Xmp(data.to_string()))
+            .unwrap();
+
+        // read data back
+        let mut output_stream = std::fs::File::open(&output).unwrap();
+        let xmp = tiff_io.read_xmp(&mut output_stream).unwrap();
+        let loaded = crate::utils::xmp_inmemory_utils::extract_provenance(&xmp).unwrap();
+
+        assert_eq!(&loaded, data);
+    }
+
+    #[test]
     fn test_remove_manifest() {
         let data = "some data";
 
@@ -1689,6 +1749,9 @@ pub mod tests {
         std::fs::copy(source, &output).unwrap();
 
         let tiff_io = TiffIO {};
+
+        // first make sure that calling this without a manifest does not error
+        tiff_io.remove_cai_store(&output).unwrap();
 
         // save data to tiff
         tiff_io.save_cai_store(&output, data.as_bytes()).unwrap();
