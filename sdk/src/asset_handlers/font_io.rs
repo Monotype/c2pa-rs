@@ -346,6 +346,8 @@ pub(crate) fn u32_from_u16_pair(hi: u16, lo: u16) -> Wrapping<u32> {
 pub(crate) trait Table {
     /// Serializes this instance to the given writer.
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()>;
+    /// Calculate the number of bytes of SFNT storage this table will require.
+    fn len(&self) -> u32;
 }
 
 /// 'C2PA' font table as it appears in storage
@@ -549,19 +551,6 @@ impl TableC2PA {
         };
         header_cksum + uri_cksum + manifest_cksum
     }
-
-    /// Calculate the number of bytes of SFNT table storage we require.
-    pub(crate) fn len(&self) -> usize {
-        size_of::<TableC2PARaw>()
-            + match &self.active_manifest_uri {
-                Some(uri) => uri.len(),
-                None => 0,
-            }
-            + match &self.manifest_store {
-                Some(store) => store.len(),
-                None => 0,
-            }
-    }
 }
 
 impl Table for TableC2PA {
@@ -580,6 +569,20 @@ impl Table for TableC2PA {
         }
         // Done
         Ok(())
+    }
+
+    fn len(&self) -> u32 {
+        let length = size_of::<TableC2PARaw>()
+        + match &self.active_manifest_uri {
+            Some(uri) => uri.len(),
+            None => 0,
+        }
+        + match &self.manifest_store {
+            Some(store) => store.len(),
+            None => 0,
+        };
+
+        length as u32
     }
 }
 
@@ -728,6 +731,11 @@ impl Table for TableHead {
         // 0x38 - two bytes to get 54-byte 'head' up to nice round 56 bytes
         Ok(())
     }
+
+    fn len(&self) -> u32 {
+        // Length is the size of our structure plus two padding bytes.
+        size_of::<TableHead>() as u32 + 2
+    }
 }
 
 /// 'DSIG' font table.
@@ -779,6 +787,10 @@ impl Table for TableDSIG {
         destination.write_u16::<BigEndian>(self.flags)?;
         Ok(())
     }
+
+    fn len(&self) -> u32 {
+        size_of::<TableDSIG>() as u32
+    }
 }
 
 /// Generic font table with unknown contents.
@@ -817,6 +829,10 @@ impl Table for TableUnspecified {
                 .map_err(FontSaveError::FailedToWrite)?;
         }
         Ok(())
+    }
+
+    fn len(&self) -> u32 {
+        self.data.len() as u32
     }
 }
 
@@ -865,6 +881,15 @@ impl Table for NamedTable {
             NamedTable::Head(head) => head.write(destination),
             NamedTable::DSIG(dsig) => dsig.write(destination),
             NamedTable::Unspecified(un) => un.write(destination),
+        }
+    }
+
+    fn len(&self) -> u32 {
+        match self {
+            NamedTable::C2PA(c2pa) => c2pa.len(),
+            NamedTable::Head(head) => head.len(),
+            NamedTable::DSIG(dsig) => dsig.len(),
+            NamedTable::Unspecified(un) => un.len(),
         }
     }
 }

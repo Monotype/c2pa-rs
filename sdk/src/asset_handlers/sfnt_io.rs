@@ -355,7 +355,7 @@ impl SfntFont {
                         },
                         length: match tag {
                             &C2PA_TABLE_TAG => match table {
-                                NamedTable::C2PA(c2pa) => c2pa.len() as u32,
+                                NamedTable::C2PA(c2pa) => c2pa.len(),
                                 _ => {
                                     return Err(FontError::SaveError(
                                         FontSaveError::UnexpectedTable(format!("{:?}", tag)),
@@ -388,7 +388,7 @@ impl SfntFont {
                             tag: *tag,
                             offset: align_to_four(new_data_offset) as u32,
                             checksum: c2pa.checksum().0,
-                            length: c2pa.len() as u32,
+                            length: c2pa.len(),
                         };
                         neo_directory.entries.push(neo_entry);
                         // Note - new_data_offset is never actually used after
@@ -833,6 +833,7 @@ where
     };
     // If we had a DSIG table, replace it with a dummy DSIG table.
     if font.tables.contains_key(&DSIG_TABLE_TAG) {
+        println!("Removing DSIG table");
         font.tables.remove(&DSIG_TABLE_TAG);
         font.tables.insert(
             DSIG_TABLE_TAG,
