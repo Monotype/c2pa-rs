@@ -59,6 +59,10 @@ pub enum FontError {
     #[error("head table claimed sizes exceed actual")]
     LoadHeadTableTruncated,
 
+    /// The font's 'DSIG' table is truncated.
+    #[error("DSIG table claimed sizes exceed actual")]
+    LoadDSIGTableTruncated,
+
     #[error("Failed to save font: {0}")]
     SaveError(#[from] FontSaveError),
 
@@ -209,6 +213,10 @@ pub(crate) const C2PA_TABLE_TAG: SfntTag = SfntTag { data: *b"C2PA" };
 /// Tag for the 'head' table in a font.
 #[allow(dead_code)]
 pub(crate) const HEAD_TABLE_TAG: SfntTag = SfntTag { data: *b"head" };
+
+/// Tag for the 'DSIG' table in a font.
+#[allow(dead_code)]
+pub(crate) const DSIG_TABLE_TAG: SfntTag = SfntTag { data: *b"DSIG" };
 
 /// Spec-mandated value for 'head'::magicNumber
 pub(crate) const HEAD_TABLE_MAGICNUMBER: u32 = 0x5f0f3cf5;
@@ -722,6 +730,57 @@ impl Table for TableHead {
     }
 }
 
+/// 'DSIG' font table.
+#[allow(non_snake_case)] // As named by Open Font Format / OpenType.
+pub(crate) struct TableDSIG {
+    pub version: u32,
+    pub numSignatures: u16,
+    pub flags: u16,
+    // We don't care about actual signatures; we ignore incoming signatures and
+    // only ever write dummy DSIG tables.
+}
+
+impl TableDSIG {
+    /// Make the DSIG table into an empty dummy DSIG table.
+    pub(crate) fn dummy() -> Self {
+        Self {
+            version: 1,
+            numSignatures: 0,
+            flags: 0,
+        }
+    }
+
+    /// Creates a new instance, using data from the provided source at a
+    /// specific offset.
+    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+        offset: u64,
+        size: usize,
+    ) -> Result<TableDSIG> {
+        reader.seek(SeekFrom::Start(offset))?;
+        let minimum_size = size_of::<TableDSIG>();
+        if size < minimum_size {
+            Err(FontError::LoadDSIGTableTruncated)
+        } else {
+            let dsig = Self {
+                version: reader.read_u32::<BigEndian>()?,
+                numSignatures: reader.read_u16::<BigEndian>()?,
+                flags: reader.read_u16::<BigEndian>()?,
+            };
+            Ok(dsig)
+        }
+    }
+}
+
+impl Table for TableDSIG {
+    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
+        destination.write_u32::<BigEndian>(self.version)?;
+        destination.write_u16::<BigEndian>(self.numSignatures)?;
+        destination.write_u16::<BigEndian>(self.flags)?;
+        Ok(())
+    }
+}
+
 /// Generic font table with unknown contents.
 pub(crate) struct TableUnspecified {
     pub data: Vec<u8>,
@@ -767,6 +826,8 @@ pub(crate) enum NamedTable {
     C2PA(TableC2PA),
     /// 'head' table
     Head(TableHead),
+    /// 'DSIG' table,
+    DSIG(TableDSIG),
     /// any other table
     Unspecified(TableUnspecified),
 }
@@ -787,6 +848,9 @@ impl NamedTable {
             HEAD_TABLE_TAG => Ok(NamedTable::Head(TableHead::from_reader(
                 reader, offset, length,
             )?)),
+            DSIG_TABLE_TAG => Ok(NamedTable::DSIG(TableDSIG::from_reader(
+                reader, offset, length,
+            )?)),
             _ => Ok(NamedTable::Unspecified(TableUnspecified::from_reader(
                 reader, offset, length,
             )?)),
@@ -799,6 +863,7 @@ impl Table for NamedTable {
         match self {
             NamedTable::C2PA(c2pa) => c2pa.write(destination),
             NamedTable::Head(head) => head.write(destination),
+            NamedTable::DSIG(dsig) => dsig.write(destination),
             NamedTable::Unspecified(un) => un.write(destination),
         }
     }

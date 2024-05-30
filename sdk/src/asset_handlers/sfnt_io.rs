@@ -831,6 +831,14 @@ where
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
+    // If we had a DSIG table, replace it with a dummy DSIG table.
+    if font.tables.contains_key(&DSIG_TABLE_TAG) {
+        font.tables.remove(&DSIG_TABLE_TAG);
+        font.tables.insert(
+            DSIG_TABLE_TAG,
+            NamedTable::DSIG(TableDSIG::dummy()),
+        );
+    }
     font.write(destination)?;
     Ok(())
 }
