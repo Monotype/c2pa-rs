@@ -875,11 +875,11 @@ impl Table for TableUnspecified {
 /// Possible tables
 pub(crate) enum NamedTable {
     /// 'C2PA' table
-    C2PA(TableC2PA),
+    C2pa(TableC2PA),
     /// 'head' table
     Head(TableHead),
     /// 'DSIG' table,
-    DSIG(TableDSIG),
+    Dsig(TableDSIG),
     /// any other table
     Unspecified(TableUnspecified),
 }
@@ -894,13 +894,13 @@ impl NamedTable {
         length: usize,
     ) -> Result<Self> {
         match *tag {
-            C2PA_TABLE_TAG => Ok(NamedTable::C2PA(TableC2PA::from_reader(
+            C2PA_TABLE_TAG => Ok(NamedTable::C2pa(TableC2PA::from_reader(
                 reader, offset, length,
             )?)),
             HEAD_TABLE_TAG => Ok(NamedTable::Head(TableHead::from_reader(
                 reader, offset, length,
             )?)),
-            DSIG_TABLE_TAG => Ok(NamedTable::DSIG(TableDSIG::from_reader(
+            DSIG_TABLE_TAG => Ok(NamedTable::Dsig(TableDSIG::from_reader(
                 reader, offset, length,
             )?)),
             _ => Ok(NamedTable::Unspecified(TableUnspecified::from_reader(
@@ -913,27 +913,27 @@ impl NamedTable {
 impl Table for NamedTable {
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
         match self {
-            NamedTable::C2PA(c2pa) => c2pa.write(destination),
+            NamedTable::C2pa(c2pa) => c2pa.write(destination),
             NamedTable::Head(head) => head.write(destination),
-            NamedTable::DSIG(dsig) => dsig.write(destination),
+            NamedTable::Dsig(dsig) => dsig.write(destination),
             NamedTable::Unspecified(un) => un.write(destination),
         }
     }
 
     fn len(&self) -> u32 {
         match self {
-            NamedTable::C2PA(c2pa) => c2pa.len(),
+            NamedTable::C2pa(c2pa) => c2pa.len(),
             NamedTable::Head(head) => head.len(),
-            NamedTable::DSIG(dsig) => dsig.len(),
+            NamedTable::Dsig(dsig) => dsig.len(),
             NamedTable::Unspecified(un) => un.len(),
         }
     }
 
     fn checksum(&self) -> Wrapping<u32> {
         match self {
-            NamedTable::C2PA(c2pa) => c2pa.checksum(),
+            NamedTable::C2pa(c2pa) => c2pa.checksum(),
             NamedTable::Head(head) => head.checksum(),
-            NamedTable::DSIG(dsig) => dsig.checksum(),
+            NamedTable::Dsig(dsig) => dsig.checksum(),
             NamedTable::Unspecified(un) => un.checksum(),
         }
     }

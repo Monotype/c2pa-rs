@@ -368,7 +368,7 @@ impl WoffFont {
         // Store the new directory entry & table.
         self.directory.entries.push(c2pa_entry);
         self.tables
-            .insert(C2PA_TABLE_TAG, NamedTable::C2PA(c2pa_table));
+            .insert(C2PA_TABLE_TAG, NamedTable::C2pa(c2pa_table));
         // Count the table, grow the total size, grow, the "SFNT size"
         self.header.numTables += 1;
         // (TBD compression - conflating comp/uncomp sizes here.)
@@ -731,10 +731,10 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                NamedTable::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+                NamedTable::C2pa(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
-        Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
+        Some(NamedTable::C2pa(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
@@ -773,12 +773,12 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                NamedTable::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+                NamedTable::C2pa(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
+        Some(NamedTable::C2pa(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
@@ -906,7 +906,7 @@ where
         None => None,
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
-        Some(NamedTable::C2PA(c2pa)) => {
+        Some(NamedTable::C2pa(c2pa)) => {
             if c2pa.active_manifest_uri.is_none() {
                 None
             } else {
@@ -1036,7 +1036,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => Ok(c2pa.clone()),
+        Some(NamedTable::C2pa(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
     }
