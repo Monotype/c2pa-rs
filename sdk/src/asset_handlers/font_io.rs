@@ -92,10 +92,6 @@ pub enum FontError {
 /// Errors that can occur when saving a font.
 #[derive(Debug, thiserror::Error)]
 pub enum FontSaveError {
-    /// Failed to save a font file with an invalid table directory.
-    #[error("Invalid derived table offset bias, an unexpected state.")]
-    InvalidDerivedTableOffsetBias,
-
     /// Failed to save a font file due to the fact the write operation
     /// failed.
     #[error("Failed to save font because the write operation failed; {0}")]
@@ -115,6 +111,10 @@ pub enum FontSaveError {
     /// table directory.
     #[error("Unexpected table found in the table directory: {0}")]
     UnexpectedTable(String),
+
+    // Failed to save a font file with a new table which wasn't C2PA.
+    #[error("New table added which wasn't C2PA")]
+    NonC2PATableAdded,
 }
 
 /// Helper method for wrapping a FontError into a crate level error.
@@ -179,7 +179,7 @@ impl std::fmt::Debug for SfntTag {
 /// assert_eq!(thirty_six_or_forty.2, 40);
 /// assert_eq!(thirty_six_or_forty.3, 40);
 /// ```
-pub(crate) fn align_to_four(size: usize) -> usize {
+pub(crate) fn align_to_four(size: u32) -> u32 {
     (size + 3) & (!3)
 }
 
@@ -348,6 +348,8 @@ pub(crate) trait Table {
     fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()>;
     /// Calculate the number of bytes of SFNT storage this table will require.
     fn len(&self) -> u32;
+    /// Compute the SFNT-style checksum value of our data.
+    fn checksum(&self) -> Wrapping<u32>;
 }
 
 /// 'C2PA' font table as it appears in storage
@@ -529,28 +531,6 @@ impl TableC2PA {
     pub(crate) fn get_manifest_store(&self) -> Option<&[u8]> {
         self.manifest_store.as_deref()
     }
-
-    /// Compute the SFNT-style checksum value of our data.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        // Set up the structured data
-        let raw_table = TableC2PARaw::from_table(self);
-        let header_cksum = raw_table.checksum();
-        // Add remote-manifest URI if present.
-        let uri_cksum = if let Some(uri_string) = self.active_manifest_uri.as_ref() {
-            checksum(uri_string.as_bytes())
-        } else {
-            Wrapping(0_u32)
-        };
-        let manifest_cksum = if let Some(manifest_store) = self.manifest_store.as_ref() {
-            checksum_biased(
-                manifest_store.as_bytes(),
-                raw_table.activeManifestUriLength as u32,
-            )
-        } else {
-            Wrapping(0_u32)
-        };
-        header_cksum + uri_cksum + manifest_cksum
-    }
 }
 
 impl Table for TableC2PA {
@@ -583,6 +563,27 @@ impl Table for TableC2PA {
         };
 
         length as u32
+    }
+
+    fn checksum(&self) -> Wrapping<u32> {
+        // Set up the structured data
+        let raw_table = TableC2PARaw::from_table(self);
+        let header_cksum = raw_table.checksum();
+        // Add remote-manifest URI if present.
+        let uri_cksum = if let Some(uri_string) = self.active_manifest_uri.as_ref() {
+            checksum(uri_string.as_bytes())
+        } else {
+            Wrapping(0_u32)
+        };
+        let manifest_cksum = if let Some(manifest_store) = self.manifest_store.as_ref() {
+            checksum_biased(
+                manifest_store.as_bytes(),
+                raw_table.activeManifestUriLength as u32,
+            )
+        } else {
+            Wrapping(0_u32)
+        };
+        header_cksum + uri_cksum + manifest_cksum
     }
 }
 
@@ -733,23 +734,33 @@ impl Table for TableHead {
     }
 
     fn len(&self) -> u32 {
-        // Length is the size of our structure plus two padding bytes.
-        size_of::<TableHead>() as u32 + 2
+        // Length is the size of our structure.
+        size_of::<Self>() as u32
+    }
+
+    fn checksum(&self) -> Wrapping<u32> {
+        // Write to a temporary buffer.
+        let mut buffer: Vec<u8> = Vec::with_capacity(size_of::<Self>());
+        // TODO: This could fail -- how do we want to handle that?  We could
+        // return a result.. but in doing so we can't call this from the closure
+        // of the foreach anymore (because it can't return a result)...
+        self.write(&mut buffer).unwrap();
+        // Compute the checksum.
+        checksum(&buffer)
     }
 }
 
-/// 'DSIG' font table.
+/// 'DSIG' font table, ignores actual signatures as we intend to only use this
+/// as a dummy DSIG table.
 #[allow(non_snake_case)] // As named by Open Font Format / OpenType.
 pub(crate) struct TableDSIG {
     pub version: u32,
     pub numSignatures: u16,
     pub flags: u16,
-    // We don't care about actual signatures; we ignore incoming signatures and
-    // only ever write dummy DSIG tables.
 }
 
 impl TableDSIG {
-    /// Make the DSIG table into an empty dummy DSIG table.
+    /// Create an empty DSIG dummy table.
     pub(crate) fn dummy() -> Self {
         Self {
             version: 1,
@@ -766,7 +777,7 @@ impl TableDSIG {
         size: usize,
     ) -> Result<TableDSIG> {
         reader.seek(SeekFrom::Start(offset))?;
-        let minimum_size = size_of::<TableDSIG>();
+        let minimum_size = size_of::<Self>();
         if size < minimum_size {
             Err(FontError::LoadDSIGTableTruncated)
         } else {
@@ -789,7 +800,19 @@ impl Table for TableDSIG {
     }
 
     fn len(&self) -> u32 {
-        size_of::<TableDSIG>() as u32
+        size_of::<Self>() as u32
+    }
+
+    // Note: This assumes that the DSIG table is always a dummy table.
+    fn checksum(&self) -> Wrapping<u32> {
+        // Write to a temporary buffer.
+        let mut buffer: Vec<u8> = Vec::with_capacity(size_of::<Self>());
+        // TODO: This could fail -- how do we want to handle that?  We could
+        // return a result.. but in doing so we can't call this from the closure
+        // of the foreach anymore (because it can't return a result)...
+        self.write(&mut buffer).unwrap();
+        // Compute the checksum.
+        checksum(&buffer)
     }
 }
 
@@ -833,6 +856,11 @@ impl Table for TableUnspecified {
 
     fn len(&self) -> u32 {
         self.data.len() as u32
+    }
+
+    fn checksum(&self) -> Wrapping<u32> {
+        // Compute the checksum.
+        checksum(&self.data)
     }
 }
 
@@ -890,6 +918,15 @@ impl Table for NamedTable {
             NamedTable::Head(head) => head.len(),
             NamedTable::DSIG(dsig) => dsig.len(),
             NamedTable::Unspecified(un) => un.len(),
+        }
+    }
+
+    fn checksum(&self) -> Wrapping<u32> {
+        match self {
+            NamedTable::C2PA(c2pa) => c2pa.checksum(),
+            NamedTable::Head(head) => head.checksum(),
+            NamedTable::DSIG(dsig) => dsig.checksum(),
+            NamedTable::Unspecified(un) => un.checksum(),
         }
     }
 }
