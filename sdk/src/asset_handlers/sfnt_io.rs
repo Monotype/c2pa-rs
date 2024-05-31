@@ -335,6 +335,9 @@ impl SfntFont {
             None => {}
         }
 
+        // Sort our directory entries by tag.
+        neo_directory.entries.sort_by_key(|entry| entry.tag);
+
         // Figure the checksum for the whole font - the header, the directory,
         // and then all the tables; we can just use the per-table checksums,
         // since the only one we alter is C2PA, and we just refreshed it...
