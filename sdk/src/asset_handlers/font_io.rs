@@ -816,16 +816,11 @@ impl Table for TableDSIG {
         size_of::<Self>() as u32
     }
 
-    // Note: This assumes that the DSIG table is always a dummy table.
     fn checksum(&self) -> Wrapping<u32> {
-        // Write to a temporary buffer.
-        let mut buffer: Vec<u8> = Vec::with_capacity(size_of::<Self>());
-        // TODO: This could fail -- how do we want to handle that?  We could
-        // return a result.. but in doing so we can't call this from the closure
-        // of the foreach anymore (because it can't return a result)...
-        self.write(&mut buffer).unwrap();
-        // Compute the checksum.
-        checksum(&buffer)
+        let mut cksum = Wrapping(self.version);
+        cksum += u32_from_u16_pair(self.numSignatures, self.flags);
+
+        cksum
     }
 }
 
