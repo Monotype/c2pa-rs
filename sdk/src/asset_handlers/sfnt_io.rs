@@ -10,7 +10,7 @@
 // implied. See the LICENSE-MIT and LICENSE-APACHE files for the
 // specific language governing permissions and limitations under
 // each license.
-use core::{cmp::Ordering, fmt, mem::size_of, num::Wrapping};
+use core::{fmt, mem::size_of, num::Wrapping};
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -265,146 +265,79 @@ impl SfntFont {
         };
         neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
         neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
-        // At the moment, font editing services are limited. We make the
-        // assumption that the *only* permissible font mutation is one of the
-        // following:
-        //
-        // - An existing C2PA table has been altered: table count unchanged
-        // - An existing C2PA table has been removed: num_tables -= 1
-        // - A new C2PA table has been added: num_tables += 1
 
-        // If our actual table count has increased by one since the file was
-        // read, it's because we've added a C2PA table; we'll need to add a
-        // directory entry for it; shoving all the data in the file down a bit
-        // to make room...
-        let orig_table_count = self.header.numTables as usize;
-        let td_derived_offset_bias: i64 = match self.tables.len().cmp(&orig_table_count) {
-            Ordering::Greater => {
-                if (self.tables.len() as u16) - self.header.numTables == 1 {
-                    // We added exactly one table
-                    size_of::<SfntDirectoryEntry>() as i64
-                } else {
-                    // We added some other number of tables
-                    return Err(FontError::SaveError(FontSaveError::TooManyTablesAdded));
-                }
+        // Currently we only allow a single C2PA table to be removed or added.
+        // Table modifications are allowed (notably DSIG).  Verify that this is
+        // the case.
+        let orig_table_count = self.header.numTables;
+        let new_table_count = self.tables.len() as u16;
+        let table_diff = new_table_count as i32 - orig_table_count as i32;
+        let had_c2pa_before = self
+            .directory
+            .entries
+            .iter()
+            .any(|entry| entry.tag == C2PA_TABLE_TAG);
+        let have_c2pa_now = self.tables.contains_key(&C2PA_TABLE_TAG);
+        // Make sure we only removed at most one table.
+        if table_diff < -1 {
+            return Err(FontError::SaveError(FontSaveError::TooManyTablesRemoved));
+        }
+        // Make sure we only added at most one table.
+        else if table_diff > 1 {
+            return Err(FontError::SaveError(FontSaveError::TooManyTablesAdded));
+        }
+        // If we only removed one table, make sure it's the C2PA table.
+        else if table_diff == -1 && (!had_c2pa_before || have_c2pa_now) {
+            return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
+                format!("{:?}", C2PA_TABLE_TAG),
+            )));
+        }
+        // If we only added one table, make sure it's the C2PA table.
+        else if table_diff == 1 && (had_c2pa_before || !have_c2pa_now) {
+            return Err(FontError::SaveError(FontSaveError::NonC2PATableAdded));
+        }
+
+        // Keep a running offset as we encounter our tables in physical order.
+        let mut running_offset = size_of::<SfntHeader>() as u32
+            + size_of::<SfntDirectoryEntry>() as u32 * new_table_count as u32;
+
+        // Walk our old directory in physical order, adding new entries for each
+        // table we still have.
+        self.directory.physical_order().iter().for_each(|entry| {
+            // If we have this entry in our current table list, create new entry
+            if self.tables.contains_key(&entry.tag) {
+                let neo_entry = SfntDirectoryEntry {
+                    tag: entry.tag,
+                    offset: running_offset,
+                    checksum: self.tables[&entry.tag].checksum().0,
+                    length: self.tables[&entry.tag].len(),
+                };
+                neo_directory.entries.push(neo_entry);
+                // Update our running offset.
+                running_offset += align_to_four(self.tables[&entry.tag].len());
             }
-            Ordering::Equal => 0,
-            Ordering::Less => {
-                if self.header.numTables - (self.tables.len() as u16) == 1 {
-                    // Therefore, the actual table list should not contain
-                    // the C2PA table - that's the only one we should ever
-                    // be removing.
-                    if self.tables.contains_key(&C2PA_TABLE_TAG) {
-                        return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
-                            format!("{:?}", C2PA_TABLE_TAG),
-                        )));
-                    }
-                    // We removed exactly one table
-                    -(size_of::<SfntDirectoryEntry>() as i64)
-                } else {
-                    // We removed some other number of tables. Weird, right?
-                    return Err(FontError::SaveError(FontSaveError::TooManyTablesRemoved));
-                }
-            }
-        };
+        });
 
-        // Figure out the size of the tables we know about already; any new
-        // tables will have to follow.
-        let new_data_offset = match self.directory.physical_order().last() {
-            Some(&entry) => align_to_four(
-                (entry.offset as i64 + entry.length as i64 + td_derived_offset_bias) as usize,
-            ),
-            None => 0_usize,
-        };
-
-        // Enumerate the Tables and ensure each one has a Directory Entry.
-        for (tag, table) in &self.tables {
-            // 😕 There is logical entanglement between this `match` and the
-            // code above which figures out whether we added or removed (or
-            // neither) a C2PA table, and figures out the table data bias.
-            //
-            // As example, see the explicit error returns when td_derived_offset_bias is the "wrong" sign.
-            match self
+        // If we have a new C2PA table, add a directory entry for it.
+        if let Some(c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
+            if !self
                 .directory
                 .entries
                 .iter()
-                .find(|&entry| entry.tag == *tag)
+                .any(|entry| entry.tag == C2PA_TABLE_TAG)
             {
-                Some(entry) => {
-                    // Check - if this is the C2PA table, then this *must not*
-                    // be the case where we're removing the C2PA table; the
-                    // bias *must not* be negative.
-                    if entry.tag == C2PA_TABLE_TAG && td_derived_offset_bias < 0 {
-                        return Err(FontError::SaveError(
-                            FontSaveError::InvalidDerivedTableOffsetBias,
-                        ));
-                    }
-                    let neo_entry = SfntDirectoryEntry {
-                        tag: entry.tag,
-                        offset: ((entry.offset as i64) + td_derived_offset_bias) as u32,
-                        checksum: match *tag {
-                            C2PA_TABLE_TAG => match table {
-                                NamedTable::C2PA(c2pa) => c2pa.checksum().0,
-                                _ => {
-                                    return Err(FontError::SaveError(
-                                        FontSaveError::UnexpectedTable(format!("{:?}", tag)),
-                                    ));
-                                }
-                            },
-                            _ => entry.checksum,
-                        },
-                        length: match tag {
-                            &C2PA_TABLE_TAG => match table {
-                                NamedTable::C2PA(c2pa) => c2pa.len() as u32,
-                                _ => {
-                                    return Err(FontError::SaveError(
-                                        FontSaveError::UnexpectedTable(format!("{:?}", tag)),
-                                    ));
-                                }
-                            },
-                            _ => entry.length,
-                        },
-                    };
-                    neo_directory.entries.push(neo_entry);
-                }
-                None => match *tag {
-                    C2PA_TABLE_TAG => {
-                        // Check - this *must* be the case where we're adding
-                        // a C2PA table - therefore the bias should be positive.
-                        if td_derived_offset_bias <= 0 {
-                            return Err(FontError::SaveError(
-                                FontSaveError::InvalidDerivedTableOffsetBias,
-                            ));
-                        }
-                        let c2pa = match table {
-                            NamedTable::C2PA(c2pa) => c2pa,
-                            _ => {
-                                return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
-                                    format!("{:?}", tag),
-                                )));
-                            }
-                        };
-                        let neo_entry = SfntDirectoryEntry {
-                            tag: *tag,
-                            offset: align_to_four(new_data_offset) as u32,
-                            checksum: c2pa.checksum().0,
-                            length: c2pa.len() as u32,
-                        };
-                        neo_directory.entries.push(neo_entry);
-                        // Note - new_data_offset is never actually used after
-                        // this point, but _if it were_, it would need to be
-                        // mutable, and we would move it ahead like so:
-                        // new_data_offset =
-                        //    align_to_four(entry.offset as usize + entry.length as usize);
-                    }
-                    _ => {
-                        return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
-                            format!("{:?}", tag),
-                        )))
-                    }
-                },
+                let neo_entry = SfntDirectoryEntry {
+                    tag: C2PA_TABLE_TAG,
+                    offset: running_offset,
+                    checksum: c2pa.checksum().0,
+                    length: c2pa.len(),
+                };
+                neo_directory.entries.push(neo_entry);
             }
         }
+
+        // Sort our directory entries by tag.
+        neo_directory.entries.sort_by_key(|entry| entry.tag);
 
         // Figure the checksum for the whole font - the header, the directory,
         // and then all the tables; we can just use the per-table checksums,
@@ -443,7 +376,7 @@ impl SfntFont {
     fn append_empty_c2pa_table(&mut self) -> Result<()> {
         // Just add an empty table...
         self.tables
-            .insert(C2PA_TABLE_TAG, NamedTable::C2PA(TableC2PA::default()));
+            .insert(C2PA_TABLE_TAG, NamedTable::C2pa(TableC2PA::default()));
         // ...and then later, when the .write() function is invoked, it will
         // notice that self.tables.len() no longer matches
         // self.header.numTables, and regenerate the header & directory.
@@ -820,17 +753,23 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                NamedTable::C2PA(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
+                NamedTable::C2pa(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
             );
         }
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
+        Some(NamedTable::C2pa(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
+    // If we had a DSIG table, replace it with a dummy DSIG table.
+    if font.tables.contains_key(&DSIG_TABLE_TAG) {
+        font.tables.remove(&DSIG_TABLE_TAG);
+        font.tables
+            .insert(DSIG_TABLE_TAG, NamedTable::Dsig(TableDSIG::dummy()));
+    }
     font.write(destination)?;
     Ok(())
 }
@@ -864,12 +803,12 @@ where
         None => {
             font.tables.insert(
                 C2PA_TABLE_TAG,
-                NamedTable::C2PA(TableC2PA::new(Some(manifest_uri.to_string()), None)),
+                NamedTable::C2pa(TableC2PA::new(Some(manifest_uri.to_string()), None)),
             );
         }
         // If there is, replace its `active_manifest_uri` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
+        Some(NamedTable::C2pa(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => {
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
@@ -996,7 +935,7 @@ where
         None => None,
         // If there is, and it has Some `active_manifest_uri`, then mutate that
         // to None, and return the former value.
-        Some(NamedTable::C2PA(c2pa)) => {
+        Some(NamedTable::C2pa(c2pa)) => {
             if c2pa.active_manifest_uri.is_none() {
                 None
             } else {
@@ -1085,7 +1024,7 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Tabl
         None => Err(FontError::JumbfNotFound),
         // If there is, replace its `manifest_store` value with the
         // provided one.
-        Some(NamedTable::C2PA(c2pa)) => Ok(c2pa.clone()),
+        Some(NamedTable::C2pa(c2pa)) => Ok(c2pa.clone()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
     }
