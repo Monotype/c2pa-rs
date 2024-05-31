@@ -320,20 +320,20 @@ impl SfntFont {
 
         // If we have a new C2PA table, add a directory entry for it.
         if let Some(c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
-                if !self
-                    .directory
-                    .entries
-                    .iter()
-                    .any(|entry| entry.tag == C2PA_TABLE_TAG)
-                {
-                    let neo_entry = SfntDirectoryEntry {
-                        tag: C2PA_TABLE_TAG,
-                        offset: running_offset,
-                        checksum: c2pa.checksum().0,
-                        length: c2pa.len(),
-                    };
-                    neo_directory.entries.push(neo_entry);
-                }
+            if !self
+                .directory
+                .entries
+                .iter()
+                .any(|entry| entry.tag == C2PA_TABLE_TAG)
+            {
+                let neo_entry = SfntDirectoryEntry {
+                    tag: C2PA_TABLE_TAG,
+                    offset: running_offset,
+                    checksum: c2pa.checksum().0,
+                    length: c2pa.len(),
+                };
+                neo_directory.entries.push(neo_entry);
+            }
         }
 
         // Sort our directory entries by tag.
