@@ -600,7 +600,7 @@ impl Default for TableC2PA {
 
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[repr(C, packed(1))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly
 // support exotics like FIXED).
