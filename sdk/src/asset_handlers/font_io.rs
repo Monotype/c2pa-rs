@@ -739,29 +739,27 @@ impl Table for TableHead {
     }
 
     fn checksum(&self) -> Wrapping<u32> {
-        let mut modified_head = self.clone();
-        modified_head.checksumAdjustment = 0;
-
-        // Write to a temporary buffer.
-        let mut buffer: Vec<u8> = Vec::with_capacity(size_of::<Self>());
-        // TODO: This could fail -- how do we want to handle that?  We could
-        // return a result.. but in doing so we can't call this from the closure
-        // of the foreach anymore (because it can't return a result)...
-        modified_head.write(&mut buffer).unwrap();
-        // Compute the checksum.
-        checksum(&buffer)
-
-        /*
         let mut cksum = u32_from_u16_pair(self.majorVersion, self.minorVersion);
         cksum += self.fontRevision;
         // Skip checksum adjustment (calculated as zero)
         cksum += self.magicNumber;
         cksum += u32_from_u16_pair(self.flags, self.unitsPerEm);
-        chsum += u32_
 
-        cksum += self.manifestStoreOffset + self.manifestStoreLength;
+        let (low, high) = (self.created as u32, (self.created >> 32) as u32);
+        cksum += low;
+        cksum += high;
+
+        let (low, high) = (self.modified as u32, (self.modified >> 32) as u32);
+        cksum += low;
+        cksum += high;
+
+        cksum += u32_from_u16_pair(self.xMin as u16, self.yMin as u16);
+        cksum += u32_from_u16_pair(self.xMax as u16, self.yMax as u16);
+        cksum += u32_from_u16_pair(self.macStyle, self.lowestRecPPEM);
+        cksum += u32_from_u16_pair(self.fontDirectionHint as u16, self.indexToLocFormat as u16);
+        cksum += u32_from_u16_pair(self.glyphDataFormat as u16, 0_u16);
+
         cksum
-        */
     }
 }
 
