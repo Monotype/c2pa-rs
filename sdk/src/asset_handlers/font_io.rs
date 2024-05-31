@@ -600,7 +600,7 @@ impl Default for TableC2PA {
 
 /// 'head' font table. For now, there is no need for a 'raw' variant, since only
 /// byte-swapping is needed.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C, packed(1))]
 // As defined by Open Font Format / OpenType (though we don't as yet directly
 // support exotics like FIXED).
@@ -739,14 +739,29 @@ impl Table for TableHead {
     }
 
     fn checksum(&self) -> Wrapping<u32> {
+        let mut modified_head = self.clone();
+        modified_head.checksumAdjustment = 0;
+
         // Write to a temporary buffer.
         let mut buffer: Vec<u8> = Vec::with_capacity(size_of::<Self>());
         // TODO: This could fail -- how do we want to handle that?  We could
         // return a result.. but in doing so we can't call this from the closure
         // of the foreach anymore (because it can't return a result)...
-        self.write(&mut buffer).unwrap();
+        modified_head.write(&mut buffer).unwrap();
         // Compute the checksum.
         checksum(&buffer)
+
+        /*
+        let mut cksum = u32_from_u16_pair(self.majorVersion, self.minorVersion);
+        cksum += self.fontRevision;
+        // Skip checksum adjustment (calculated as zero)
+        cksum += self.magicNumber;
+        cksum += u32_from_u16_pair(self.flags, self.unitsPerEm);
+        chsum += u32_
+
+        cksum += self.manifestStoreOffset + self.manifestStoreLength;
+        cksum
+        */
     }
 }
 
