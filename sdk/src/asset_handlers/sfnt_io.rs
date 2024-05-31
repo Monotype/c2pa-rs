@@ -265,16 +265,19 @@ impl SfntFont {
         };
         neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
         neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
-        // At the moment, font editing services are limited. We make the
-        // assumption that the *only* permissible font mutation is one of the
-        // following:
-        //
-        // - An existing C2PA table has been altered: table count unchanged
-        // - An existing C2PA table has been removed: num_tables -= 1
-        // - A new C2PA table has been added: num_tables += 1
+
+        // Currently we only allow a single C2PA table to be removed or added.
+        // Table modifications are allowed (notably DSIG).  Verify that this is
+        // the case.
         let orig_table_count = self.header.numTables;
         let new_table_count = self.tables.len() as u16;
         let table_diff = new_table_count as i32 - orig_table_count as i32;
+        let had_c2pa_before = self
+            .directory
+            .entries
+            .iter()
+            .any(|entry| entry.tag == C2PA_TABLE_TAG);
+        let have_c2pa_now = self.tables.contains_key(&C2PA_TABLE_TAG);
         // Make sure we only removed at most one table.
         if table_diff < -1 {
             return Err(FontError::SaveError(FontSaveError::TooManyTablesRemoved));
@@ -285,7 +288,7 @@ impl SfntFont {
         }
         // If we only removed one table, make sure it's the C2PA table.
         else if table_diff == -1 {
-            if self.tables.contains_key(&C2PA_TABLE_TAG) {
+            if !had_c2pa_before || have_c2pa_now {
                 return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
                     format!("{:?}", C2PA_TABLE_TAG),
                 )));
@@ -293,17 +296,17 @@ impl SfntFont {
         }
         // If we only added one table, make sure it's the C2PA table.
         else if table_diff == 1 {
-            if !self.tables.contains_key(&C2PA_TABLE_TAG) {
+            if had_c2pa_before || !have_c2pa_now {
                 return Err(FontError::SaveError(FontSaveError::NonC2PATableAdded));
             }
         }
 
         // Keep a running offset as we encounter our tables in physical order.
-        let mut running_offset =
-            size_of::<SfntHeader>() as u32 +
-            size_of::<SfntDirectoryEntry>() as u32 * new_table_count as u32;
-        
-        // Walk our old directory, adding new entries for each table we have.
+        let mut running_offset = size_of::<SfntHeader>() as u32
+            + size_of::<SfntDirectoryEntry>() as u32 * new_table_count as u32;
+
+        // Walk our old directory in physical order, adding new entries for each
+        // table we still have.
         self.directory.physical_order().iter().for_each(|entry| {
             // If we have this entry in our current table list, create new entry
             if self.tables.contains_key(&entry.tag) {
@@ -322,7 +325,12 @@ impl SfntFont {
         // If we have a new C2PA table, add a directory entry for it.
         match self.tables.get(&C2PA_TABLE_TAG) {
             Some(c2pa) => {
-                if !self.directory.entries.iter().any(|entry| entry.tag == C2PA_TABLE_TAG) {
+                if !self
+                    .directory
+                    .entries
+                    .iter()
+                    .any(|entry| entry.tag == C2PA_TABLE_TAG)
+                {
                     let neo_entry = SfntDirectoryEntry {
                         tag: C2PA_TABLE_TAG,
                         offset: running_offset,
@@ -766,10 +774,8 @@ where
     // If we had a DSIG table, replace it with a dummy DSIG table.
     if font.tables.contains_key(&DSIG_TABLE_TAG) {
         font.tables.remove(&DSIG_TABLE_TAG);
-        font.tables.insert(
-            DSIG_TABLE_TAG,
-            NamedTable::DSIG(TableDSIG::dummy()),
-        );
+        font.tables
+            .insert(DSIG_TABLE_TAG, NamedTable::DSIG(TableDSIG::dummy()));
     }
     font.write(destination)?;
     Ok(())

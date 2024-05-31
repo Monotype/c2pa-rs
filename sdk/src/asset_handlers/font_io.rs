@@ -553,14 +553,14 @@ impl Table for TableC2PA {
 
     fn len(&self) -> u32 {
         let length = size_of::<TableC2PARaw>()
-        + match &self.active_manifest_uri {
-            Some(uri) => uri.len(),
-            None => 0,
-        }
-        + match &self.manifest_store {
-            Some(store) => store.len(),
-            None => 0,
-        };
+            + match &self.active_manifest_uri {
+                Some(uri) => uri.len(),
+                None => 0,
+            }
+            + match &self.manifest_store {
+                Some(store) => store.len(),
+                None => 0,
+            };
 
         length as u32
     }
