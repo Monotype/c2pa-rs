@@ -30,7 +30,9 @@ const SAMPLE_TEXT_ID: u16 = 19;
 /// The MIME type for the thumbnail
 const THUMBNAIL_MIME_TYPE: &str = "image/png";
 /// The text color for the thumbnail
-const TEXT_COLOR: Color = Color::rgb(255, 255, 255);
+const TEXT_COLOR: Color = Color::rgb(0, 0, 0);
+/// The background color for the thumbnail
+const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -380,7 +382,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let mut final_img =
         Pixmap::new(width as u32, height as u32).ok_or(FontThumbnailError::FailedToCreatePixmap)?;
     // Fill the image in with black to start
-    final_img.fill(tiny_skia::Color::BLACK);
+    final_img.fill(BACKGROUND_COLOR);
     // Draw the main text into the final image
     final_img.draw_pixmap(
         0,
