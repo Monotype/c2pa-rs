@@ -25,7 +25,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["v1_api", "add_font_thumbnails", "add_thumbnails", "file_io"]
+default = ["v1_api"]
 add_thumbnails = ["image"]
 add_font_thumbnails = ["dep:tiny-skia", "dep:cosmic-text", "add_thumbnails", "font"]
 psxxx_ocsp_stapling_experimental = []
