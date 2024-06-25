@@ -190,8 +190,6 @@ fn get_buffer_with_pt_size_fits_width(
             if size.w > 0.0 && size.w <= width && size.h <= height {
                 borrowed_buffer.set_size(size.w, size.h);
                 return Ok(buffer);
-            } else {
-                println!("Size is invalid: {:?}", size);
             }
         }
         // Adjust and prepare to try again
@@ -200,8 +198,6 @@ fn get_buffer_with_pt_size_fits_width(
 
         // Update the buffer with the new font size
         borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
-
-        println!("Font too big, trying point size: {}", font_size);
     }
     Err(FontThumbnailError::FailedToFindAppropriateSize)
 }
