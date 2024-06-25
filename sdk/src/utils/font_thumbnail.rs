@@ -1,3 +1,4 @@
+// Copyright 2024 Monotype Imaging Inc.
 use std::{
     io::{Read, Seek},
     sync::Arc,
@@ -98,24 +99,6 @@ pub struct FontMetrics {
     /// If you are used to using Windows or Mac APIs, beware, as the sign
     /// is reversed from what those APIs return.
     pub descent: f32,
-
-    /// Distance between baselines, in font units.
-    pub line_gap: f32,
-
-    /// The approximate amount that uppercase letters rise above the baseline,
-    /// in font units.
-    pub cap_height: f32,
-
-    /// The approximate amount that non-ascending lowercase letters rise above
-    /// the baseline, in font units.
-    pub x_height: f32,
-
-    /// A rectangle that surrounds all bounding boxes of all glyphs, in font
-    /// units.
-    ///
-    /// This corresponds to the `xMin`/`xMax`/`yMin`/`yMax` values in the
-    /// OpenType `head` table.
-    pub bounding_box: Rect,
 }
 
 impl FontMetrics {
@@ -272,16 +255,10 @@ impl From<Arc<Font>> for FontMetrics {
     fn from(font: Arc<Font>) -> Self {
         // Get the font metrics
         let font_metrics = font.as_swash().metrics(&[]);
-        // Grab  information from the rusty buzz interface
-        let rusty_buzz = font.rustybuzz();
         FontMetrics {
             units_per_em: font_metrics.units_per_em as u32,
             ascent: font_metrics.ascent,
             descent: font_metrics.descent,
-            line_gap: rusty_buzz.line_gap() as f32,
-            cap_height: font_metrics.cap_height,
-            x_height: font_metrics.x_height,
-            bounding_box: rusty_buzz.global_bounding_box(),
         }
     }
 }
