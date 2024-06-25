@@ -6,7 +6,6 @@ use std::{
 
 use cosmic_text::{
     fontdb::{Database, ID},
-    rustybuzz::ttf_parser::Rect,
     Attrs, BorrowedWithFontSystem, Buffer, Color, Font, FontSystem, Metrics, SwashCache,
 };
 use image::{ImageFormat, ImageOutputFormat, Pixel};
