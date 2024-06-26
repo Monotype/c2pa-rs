@@ -1,6 +1,8 @@
 // Copyright 2024 Monotype Imaging Inc.
 use std::{
-    ffi::OsStr, io::{Read, Seek}, sync::Arc
+    ffi::OsStr,
+    io::{Read, Seek},
+    sync::Arc,
 };
 
 use cosmic_text::{
