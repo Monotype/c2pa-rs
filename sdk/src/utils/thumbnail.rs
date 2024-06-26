@@ -28,7 +28,8 @@ pub fn make_thumbnail(path: &std::path::Path) -> Result<(String, Vec<u8>)> {
     #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
     if path
         .extension()
-        .map_or(false, |ext| ext == "otf" || ext == "ttf")
+        .map(font_thumbnail::get_format_from_extension)
+        .is_some()
     {
         return font_thumbnail::make_thumbnail(path);
     }

@@ -1,7 +1,6 @@
 // Copyright 2024 Monotype Imaging Inc.
 use std::{
-    io::{Read, Seek},
-    sync::Arc,
+    ffi::OsStr, io::{Read, Seek}, sync::Arc
 };
 
 use cosmic_text::{
@@ -20,6 +19,8 @@ const DEFAULT_LOCALE: &str = "en-US";
 const STARTING_POINT_SIZE: f32 = 512.0;
 /// Step size for the point size
 const POINT_SIZE_STEP: f32 = 8.0;
+/// Minimum point size for a font
+const MINIMUM_POINT_SIZE: f32 = 72.0;
 /// Maximum width for the PNG
 const MAXIMUM_WIDTH: u32 = 1024;
 
@@ -118,11 +119,10 @@ struct FontNameInfo {
     sample_text: Option<String>,
 }
 
-/// Get the image format from the extension
-#[allow(dead_code)]
-pub fn get_format_from_extension(ext: &str) -> Option<ImageFormat> {
-    match ext {
-        "otf" | "ttf" => Some(ImageFormat::Png),
+/// Get the font format from the extension
+pub fn get_format_from_extension<T: AsRef<OsStr>>(ext: T) -> Option<ImageFormat> {
+    match ext.as_ref().to_str() {
+        Some("otf") | Some("ttf") => Some(ImageFormat::Png),
         _ => None,
     }
 }
@@ -141,8 +141,7 @@ const MIME_TYPE_MAP: &[(&str, ImageFormat)] = &[
     ("ttf", ImageFormat::Png),
 ];
 
-/// Get the image format from the MIME type
-#[allow(dead_code)]
+/// Get the font format from the MIME type
 pub fn get_format_from_mime_type(mime: &str) -> Option<ImageFormat> {
     MIME_TYPE_MAP
         .iter()
@@ -161,6 +160,7 @@ fn get_buffer_with_pt_size_fits_width(
     font_size: f32,
     font_height: f32,
     width: f32,
+    minimum_point_size: f32,
 ) -> Result<Buffer> {
     // Starting point size
     let mut font_size: f32 = font_size;
@@ -176,7 +176,7 @@ fn get_buffer_with_pt_size_fits_width(
     let mut borrowed_buffer = buffer.borrow_with(font_system);
 
     // Loop until we find the right size to fit within the maximum width
-    while font_size > 0.0 {
+    while font_size > minimum_point_size {
         borrowed_buffer.set_size(width, height);
         borrowed_buffer.set_wrap(cosmic_text::Wrap::Glyph);
         borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
@@ -198,6 +198,19 @@ fn get_buffer_with_pt_size_fits_width(
 
         // Update the buffer with the new font size
         borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
+    }
+    // At this point we have reached our minimum size, so setup to use it
+    // which will result in text clipping, but that is fine
+    font_size = minimum_point_size;
+    line_height = (font_height * font_size).ceil();
+    borrowed_buffer.set_size(width, line_height);
+    borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
+    let size = measure_text(text, attrs, &mut borrowed_buffer)?;
+    // We still run the chance of an invalid size returned, so take that into
+    // account
+    if size.w > 0.0 && size.w <= width && size.h <= height {
+        borrowed_buffer.set_size(size.w, size.h);
+        return Ok(buffer);
     }
     Err(FontThumbnailError::FailedToFindAppropriateSize)
 }
@@ -293,8 +306,9 @@ fn get_skia_paint_for_color<'a>(color: Color) -> tiny_skia::Paint<'a> {
     }
 }
 
-///  utility to generate a thumbnail from a file at path
-/// returns Result (format, image_bits) if successful, otherwise Error
+/// Generates a PNG thumbnail from a font file
+/// # Returns
+/// Returns Result `(format, image_bits)` if successful, otherwise `Error`
 #[cfg(feature = "file_io")]
 pub fn make_thumbnail(
     path: &std::path::Path,
@@ -304,7 +318,9 @@ pub fn make_thumbnail(
     make_thumbnail_from_stream(&mut font_data)
 }
 
-/// Make a thumbnail from a stream
+/// Make a PNG thumbnail from a stream, which should be font data bits.
+/// # Returns
+/// Returns Result `(format, image_bits)` if successful, otherwise `Error`
 pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     stream: &mut R,
 ) -> std::result::Result<(String, Vec<u8>), crate::error::Error> {
@@ -343,6 +359,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         STARTING_POINT_SIZE,
         font_height,
         MAXIMUM_WIDTH as f32,
+        MINIMUM_POINT_SIZE,
     )?;
     // Borrow the buffer with the font system, to make things easier to make
     // calls
