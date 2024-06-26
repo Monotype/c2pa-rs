@@ -29,7 +29,7 @@ pub fn make_thumbnail(path: &std::path::Path) -> Result<(String, Vec<u8>)> {
     {
         if path
             .extension()
-            .map_or(None, font_thumbnail::get_format_from_extension)
+            .and_then(font_thumbnail::get_format_from_extension)
             .is_some()
         {
             return font_thumbnail::make_thumbnail(path);
