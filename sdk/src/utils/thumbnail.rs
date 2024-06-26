@@ -26,12 +26,14 @@ const THUMBNAIL_JPEG_QUALITY: u8 = 80;
 #[cfg(feature = "file_io")]
 pub fn make_thumbnail(path: &std::path::Path) -> Result<(String, Vec<u8>)> {
     #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
-    if path
-        .extension()
-        .map(font_thumbnail::get_format_from_extension)
-        .is_some()
     {
-        return font_thumbnail::make_thumbnail(path);
+        if path
+            .extension()
+            .map_or(None, font_thumbnail::get_format_from_extension)
+            .is_some()
+        {
+            return font_thumbnail::make_thumbnail(path);
+        }
     }
     let format = ImageFormat::from_path(path)?;
 
@@ -66,11 +68,13 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     stream: &mut R,
 ) -> Result<(String, Vec<u8>)> {
     #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
-    if font_thumbnail::get_format_from_extension(format)
-        .or_else(|| font_thumbnail::get_format_from_mime_type(format))
-        .is_some()
     {
-        return font_thumbnail::make_thumbnail_from_stream(stream);
+        if font_thumbnail::get_format_from_extension(format)
+            .or_else(|| font_thumbnail::get_format_from_mime_type(format))
+            .is_some()
+        {
+            return font_thumbnail::make_thumbnail_from_stream(stream);
+        }
     }
 
     let format = ImageFormat::from_extension(format)
