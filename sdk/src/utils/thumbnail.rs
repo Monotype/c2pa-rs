@@ -25,6 +25,16 @@ const THUMBNAIL_JPEG_QUALITY: u8 = 80;
 /// returns Result (format, image_bits) if successful, otherwise Error
 #[cfg(feature = "file_io")]
 pub fn make_thumbnail(path: &std::path::Path) -> Result<(String, Vec<u8>)> {
+    #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
+    {
+        if path
+            .extension()
+            .and_then(font_thumbnail::get_format_from_extension)
+            .is_some()
+        {
+            return font_thumbnail::make_thumbnail(path);
+        }
+    }
     let format = ImageFormat::from_path(path)?;
 
     let mut img = image::open(path)?;
@@ -57,6 +67,16 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     format: &str,
     stream: &mut R,
 ) -> Result<(String, Vec<u8>)> {
+    #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
+    {
+        if font_thumbnail::get_format_from_extension(format)
+            .or_else(|| font_thumbnail::get_format_from_mime_type(format))
+            .is_some()
+        {
+            return font_thumbnail::make_thumbnail_from_stream(stream);
+        }
+    }
+
     let format = ImageFormat::from_extension(format)
         .or_else(|| ImageFormat::from_mime_type(format))
         .ok_or(Error::UnsupportedType)?;
@@ -87,3 +107,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let format = format.to_owned();
     Ok((format, cursor.into_inner()))
 }
+
+#[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
+#[path = "font_thumbnail.rs"]
+mod font_thumbnail;
