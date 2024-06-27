@@ -326,7 +326,7 @@ fn get_skia_paint_for_color<'a>(color: Color) -> tiny_skia::Paint<'a> {
             let (r, g, b, a) = color.as_rgba_tuple();
             tiny_skia::Color::from_rgba8(r, g, b, a)
         }),
-        blend_mode: tiny_skia::BlendMode::Source,
+        blend_mode: tiny_skia::BlendMode::Color,
         anti_alias: false,
         ..Default::default()
     }
