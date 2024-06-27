@@ -7,7 +7,8 @@ use std::{
 
 use cosmic_text::{
     fontdb::{Database, ID},
-    Attrs, BorrowedWithFontSystem, Buffer, Color, Font, FontSystem, Metrics, SwashCache,
+    Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
+    SwashCache,
 };
 use image::{ImageFormat, ImageOutputFormat, Pixel};
 use tiny_skia::Pixmap;
@@ -121,6 +122,14 @@ struct FontNameInfo {
     sample_text: Option<String>,
 }
 
+/// Information about a loaded font
+struct LoadedFont<'a> {
+    /// ID of the font
+    id: ID,
+    /// Attributes of the font
+    attrs: Attrs<'a>,
+}
+
 /// Get the font format from the extension
 pub fn get_format_from_extension<T: AsRef<OsStr>>(ext: T) -> Option<ImageFormat> {
     match ext.as_ref().to_str() {
@@ -218,14 +227,29 @@ fn get_buffer_with_pt_size_fits_width(
 }
 
 /// Load font data into the font database, returning the ID of the last font
-fn load_font_data(font_db: &mut Database, data: Vec<u8>) -> Result<ID> {
+fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFont<'a>> {
     font_db.load_font_data(data);
     // Find the last font face loaded
     let face = font_db
         .faces()
         .last()
         .ok_or(FontThumbnailError::NoFontFound)?;
-    Ok(face.id)
+    let weight = face.weight;
+    let style = face.style;
+    let stretch = face.stretch;
+    let attrs: Attrs = Attrs {
+        color_opt: None,
+        family: cosmic_text::Family::Serif,
+        stretch,
+        style,
+        weight,
+        metadata: 0,
+        cache_key_flags: CacheKeyFlags::empty(),
+    };
+    Ok(LoadedFont {
+        id: face.id,
+        attrs: attrs.clone(),
+    })
 }
 
 /// Measure the text to get the size of the bounding box required
@@ -331,7 +355,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let mut font_db = Database::new();
     // Load the given font file into the font database, getting the ID of the
     // font to use with the font system
-    let font_id = load_font_data(&mut font_db, font_data)?;
+    let LoadedFont { id: font_id, attrs } = load_font_data(&mut font_db, font_data)?;
 
     // And build a font system from this local database
     let mut font_system = cosmic_text::FontSystem::new_with_locale_and_db(
@@ -356,7 +380,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // Find a buffer that fits the width
     let mut buffer = get_buffer_with_pt_size_fits_width(
         &full_name,
-        Attrs::new(),
+        attrs.clone(),
         &mut font_system,
         STARTING_POINT_SIZE,
         font_height,
