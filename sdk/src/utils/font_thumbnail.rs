@@ -246,10 +246,7 @@ fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFon
         metadata: 0,
         cache_key_flags: CacheKeyFlags::empty(),
     };
-    Ok(LoadedFont {
-        id: face.id,
-        attrs: attrs.clone(),
-    })
+    Ok(LoadedFont { id: face.id, attrs })
 }
 
 /// Measure the text to get the size of the bounding box required
@@ -380,7 +377,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // Find a buffer that fits the width
     let mut buffer = get_buffer_with_pt_size_fits_width(
         &full_name,
-        attrs.clone(),
+        attrs,
         &mut font_system,
         STARTING_POINT_SIZE,
         font_height,
