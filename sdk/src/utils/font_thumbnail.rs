@@ -37,6 +37,10 @@ const THUMBNAIL_MIME_TYPE: &str = "image/png";
 const TEXT_COLOR: Color = Color::rgba(0, 0, 0, 0xff);
 /// The background color for the thumbnail
 const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
+/// The line height factor for the thumbnail
+const LINE_HEIGHT_FACTOR: f32 = 1.1;
+/// How much padding to use on the left and right sides of the text
+const TOTAL_WIDTH_PADDING: f32 = 0.1;
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -145,8 +149,7 @@ fn get_buffer_with_pt_size_fits_width(
     // Starting point size
     let mut font_size: f32 = font_size;
     // Generate the line height from the font height
-    //let mut line_height: f32 = (font_height * font_size).ceil();
-    let mut line_height: f32 = (1.1 * font_size).ceil();
+    let mut line_height: f32 = (LINE_HEIGHT_FACTOR * font_size).ceil();
 
     // Make sure there is a enough room for line wrapping to account for the
     // width being too small
@@ -169,14 +172,14 @@ fn get_buffer_with_pt_size_fits_width(
             let size = measure_text(text, attrs, &mut borrowed_buffer)?;
             // There instances where the measured width was 0, but maybe this is
             // caught now by counting the number of layout runs?
-            if size.w > 0.0 && size.w * 1.2 <= width {
+            if size.w > 0.0 && size.w <= width {
                 borrowed_buffer.set_size(size.w, size.h);
                 return Ok(buffer);
             }
         }
         // Adjust and prepare to try again
         font_size -= POINT_SIZE_STEP;
-        line_height = (1.1 * font_size).ceil();
+        line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
 
         // Update the buffer with the new font size
         borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
@@ -184,12 +187,18 @@ fn get_buffer_with_pt_size_fits_width(
     // At this point we have reached our minimum size, so setup to use it
     // which will result in text clipping, but that is fine
     font_size = minimum_point_size;
-    line_height = (1.1 * font_size).ceil();
+    line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
     borrowed_buffer.set_size(width, line_height);
     borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
     borrowed_buffer.shape_until_scroll(true);
-    borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
-    let size = measure_text(text, attrs, &mut borrowed_buffer)?;
+    // get the text replacing the last 3 characters with ellipsis
+    let text = if text.len() > 3 {
+        format!("{}...", text.split_at(text.len() - 3).0)
+    } else {
+        text.to_string()
+    };
+    borrowed_buffer.set_text(&text, attrs, cosmic_text::Shaping::Advanced);
+    let size = measure_text(&text, attrs, &mut borrowed_buffer)?;
     // We still run the chance of an invalid size returned, so take that into
     // account
     if size.w > 0.0 && size.w <= width && size.h <= height {
@@ -343,7 +352,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         attrs,
         &mut font_system,
         STARTING_POINT_SIZE,
-        MAXIMUM_WIDTH as f32,
+        MAXIMUM_WIDTH as f32 * (1.0 - TOTAL_WIDTH_PADDING),
         MINIMUM_POINT_SIZE,
     )?;
 
