@@ -7,7 +7,8 @@ use std::{
 
 use cosmic_text::{
     fontdb::{Database, ID},
-    Attrs, BorrowedWithFontSystem, Buffer, Color, Font, FontSystem, Metrics, SwashCache,
+    Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
+    SwashCache,
 };
 use image::{ImageFormat, ImageOutputFormat, Pixel};
 use tiny_skia::Pixmap;
@@ -33,9 +34,13 @@ const SAMPLE_TEXT_ID: u16 = 19;
 /// The MIME type for the thumbnail
 const THUMBNAIL_MIME_TYPE: &str = "image/png";
 /// The text color for the thumbnail
-const TEXT_COLOR: Color = Color::rgb(0, 0, 0);
+const TEXT_COLOR: Color = Color::rgba(0, 0, 0, 0xff);
 /// The background color for the thumbnail
 const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
+/// The line height factor for the thumbnail
+const LINE_HEIGHT_FACTOR: f32 = 1.1;
+/// How much padding to use on the left and right sides of the text
+const TOTAL_WIDTH_PADDING: f32 = 0.1;
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -82,36 +87,6 @@ struct Size {
     h: f32,
 }
 
-/// Various metrics that apply to the entire font.
-///
-/// For OpenType fonts, these mostly come from the `OS/2` table.
-#[derive(Clone, Copy, Debug)]
-pub struct FontMetrics {
-    /// The number of font units per em.
-    ///
-    /// Font sizes are usually expressed in pixels per em; e.g. `12px` means 12
-    /// pixels per em.
-    pub units_per_em: u32,
-
-    /// The maximum amount the font rises above the baseline, in font units.
-    pub ascent: f32,
-
-    /// The maximum amount the font descends below the baseline, in font units.
-    ///
-    /// NB: This is typically a negative value to match the definition of
-    /// `sTypoDescender` in the `OS/2` table in the OpenType specification.
-    /// If you are used to using Windows or Mac APIs, beware, as the sign
-    /// is reversed from what those APIs return.
-    pub descent: f32,
-}
-
-impl FontMetrics {
-    /// Returns the height of the font in pixels.
-    pub fn px_font_height(&self) -> f32 {
-        (self.ascent + self.descent.abs()) / self.units_per_em as f32
-    }
-}
-
 /// Information about the font
 struct FontNameInfo {
     /// Full name of the font
@@ -119,6 +94,14 @@ struct FontNameInfo {
     /// Sample text for the font
     #[allow(unused)]
     sample_text: Option<String>,
+}
+
+/// Information about a loaded font
+struct LoadedFont<'a> {
+    /// ID of the font
+    id: ID,
+    /// Attributes of the font
+    attrs: Attrs<'a>,
 }
 
 /// Get the font format from the extension
@@ -160,14 +143,13 @@ fn get_buffer_with_pt_size_fits_width(
     attrs: Attrs,
     font_system: &mut FontSystem,
     font_size: f32,
-    font_height: f32,
     width: f32,
     minimum_point_size: f32,
 ) -> Result<Buffer> {
     // Starting point size
     let mut font_size: f32 = font_size;
     // Generate the line height from the font height
-    let mut line_height: f32 = (font_height * font_size).ceil();
+    let mut line_height: f32 = (LINE_HEIGHT_FACTOR * font_size).ceil();
 
     // Make sure there is a enough room for line wrapping to account for the
     // width being too small
@@ -182,6 +164,7 @@ fn get_buffer_with_pt_size_fits_width(
         borrowed_buffer.set_size(width, height);
         borrowed_buffer.set_wrap(cosmic_text::Wrap::Glyph);
         borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
+        borrowed_buffer.shape_until_scroll(true);
         // Get the number of layout runs, we expect one if it fits on one line
         let count = borrowed_buffer.layout_runs().count();
         // If it is one, we have found the right size
@@ -189,14 +172,14 @@ fn get_buffer_with_pt_size_fits_width(
             let size = measure_text(text, attrs, &mut borrowed_buffer)?;
             // There instances where the measured width was 0, but maybe this is
             // caught now by counting the number of layout runs?
-            if size.w > 0.0 && size.w <= width && size.h <= height {
+            if size.w > 0.0 && size.w <= width {
                 borrowed_buffer.set_size(size.w, size.h);
                 return Ok(buffer);
             }
         }
         // Adjust and prepare to try again
         font_size -= POINT_SIZE_STEP;
-        line_height = (font_height * font_size).ceil();
+        line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
 
         // Update the buffer with the new font size
         borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
@@ -204,10 +187,18 @@ fn get_buffer_with_pt_size_fits_width(
     // At this point we have reached our minimum size, so setup to use it
     // which will result in text clipping, but that is fine
     font_size = minimum_point_size;
-    line_height = (font_height * font_size).ceil();
+    line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
     borrowed_buffer.set_size(width, line_height);
-    borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
-    let size = measure_text(text, attrs, &mut borrowed_buffer)?;
+    borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
+    borrowed_buffer.shape_until_scroll(true);
+    // get the text replacing the last 3 characters with ellipsis
+    let text = if text.len() > 3 {
+        format!("{}...", text.split_at(text.len() - 3).0)
+    } else {
+        text.to_string()
+    };
+    borrowed_buffer.set_text(&text, attrs, cosmic_text::Shaping::Advanced);
+    let size = measure_text(&text, attrs, &mut borrowed_buffer)?;
     // We still run the chance of an invalid size returned, so take that into
     // account
     if size.w > 0.0 && size.w <= width && size.h <= height {
@@ -218,14 +209,26 @@ fn get_buffer_with_pt_size_fits_width(
 }
 
 /// Load font data into the font database, returning the ID of the last font
-fn load_font_data(font_db: &mut Database, data: Vec<u8>) -> Result<ID> {
+fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFont<'a>> {
     font_db.load_font_data(data);
     // Find the last font face loaded
     let face = font_db
         .faces()
         .last()
         .ok_or(FontThumbnailError::NoFontFound)?;
-    Ok(face.id)
+    let weight = face.weight;
+    let style = face.style;
+    let stretch = face.stretch;
+    let attrs: Attrs = Attrs {
+        color_opt: None,
+        family: cosmic_text::Family::Serif,
+        stretch,
+        style,
+        weight,
+        metadata: 0,
+        cache_key_flags: CacheKeyFlags::empty(),
+    };
+    Ok(LoadedFont { id: face.id, attrs })
 }
 
 /// Measure the text to get the size of the bounding box required
@@ -248,31 +251,21 @@ fn measure_text(
 /// The width may come back as `0.0` if the text is empty or the buffer width is
 /// too small.
 fn measure_text_in_buffer(buffer: &mut BorrowedWithFontSystem<Buffer>) -> Result<Size> {
+    // Error if the buffer is not a valid/sane looking size
     if buffer.size().0 < 0. || buffer.size().1 < 0. {
         return Err(FontThumbnailError::InvalidBufferSize);
     }
-    let mut run_width: f32 = 0.0;
-    let line_height = buffer.lines.len() as f32 * buffer.metrics().line_height;
-    let layout_runs = buffer.layout_runs();
-    for run in layout_runs {
-        run_width = run_width.max(run.line_w);
-    }
+    // Find the maximum width of the layout lines and keep track of the total number
+    // of lines
+    let (width, total_lines) = buffer
+        .layout_runs()
+        .fold((0.0, 0usize), |(width, total_lines), run| {
+            (run.line_w.max(width), total_lines + 1)
+        });
     Ok(Size {
-        w: run_width.ceil(),
-        h: line_height,
+        w: width,
+        h: total_lines as f32 * buffer.metrics().line_height,
     })
-}
-
-impl From<Arc<Font>> for FontMetrics {
-    fn from(font: Arc<Font>) -> Self {
-        // Get the font metrics
-        let font_metrics = font.as_swash().metrics(&[]);
-        FontMetrics {
-            units_per_em: font_metrics.units_per_em as u32,
-            ascent: font_metrics.ascent,
-            descent: font_metrics.descent,
-        }
-    }
 }
 
 impl From<Arc<Font>> for FontNameInfo {
@@ -302,8 +295,8 @@ fn get_skia_paint_for_color<'a>(color: Color) -> tiny_skia::Paint<'a> {
             let (r, g, b, a) = color.as_rgba_tuple();
             tiny_skia::Color::from_rgba8(r, g, b, a)
         }),
-        blend_mode: tiny_skia::BlendMode::Source,
-        anti_alias: false,
+        blend_mode: tiny_skia::BlendMode::Color,
+        anti_alias: true,
         ..Default::default()
     }
 }
@@ -331,7 +324,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let mut font_db = Database::new();
     // Load the given font file into the font database, getting the ID of the
     // font to use with the font system
-    let font_id = load_font_data(&mut font_db, font_data)?;
+    let LoadedFont { id: font_id, attrs } = load_font_data(&mut font_db, font_data)?;
 
     // And build a font system from this local database
     let mut font_system = cosmic_text::FontSystem::new_with_locale_and_db(
@@ -342,8 +335,10 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let f = font_system
         .get_font(font_id)
         .ok_or(FontThumbnailError::NoFontFound)?;
+    // Grab the potential italic angle of the font to calculate the width
+    // of the slant later
+    let angle = f.rustybuzz().italic_angle();
     let font_info = FontNameInfo::from(f.clone());
-    let font_metrics = FontMetrics::from(f.clone());
     let full_name = font_info
         .full_name
         .ok_or(FontThumbnailError::NoFullNameFound)?;
@@ -351,18 +346,42 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // Create a swash cache for the font system, to cache rendering
     let mut swash_cache = SwashCache::new();
 
-    // Get the font height in pixels
-    let font_height = font_metrics.px_font_height();
     // Find a buffer that fits the width
     let mut buffer = get_buffer_with_pt_size_fits_width(
         &full_name,
-        Attrs::new(),
+        attrs,
         &mut font_system,
         STARTING_POINT_SIZE,
-        font_height,
-        MAXIMUM_WIDTH as f32,
+        MAXIMUM_WIDTH as f32 * (1.0 - TOTAL_WIDTH_PADDING),
         MINIMUM_POINT_SIZE,
     )?;
+
+    // Got some reason, the `swash` library used by `cosmic-text` puts pixels at negative
+    // x values, so we need to find the amount we need to offset the image by
+    // to include all pixels.
+    let layout_run = buffer
+        .layout_runs()
+        .next()
+        .ok_or(FontThumbnailError::InvalidBufferSize)?;
+    // Grab the cache key for the first glyph, so we can get the image information from
+    // the swash cache
+    let x = layout_run
+        .glyphs
+        .first()
+        .ok_or(FontThumbnailError::InvalidBufferSize)?
+        .physical((0., 0.), 1.0)
+        .cache_key;
+    let image = swash_cache
+        .get_image(&mut font_system, x)
+        .as_ref()
+        .ok_or(FontThumbnailError::FailedToCreatePixmap)?;
+    // Only offset if the left is negative
+    let offset = if image.placement.left < 0 {
+        image.placement.left.abs()
+    } else {
+        0
+    };
+
     // Borrow the buffer with the font system, to make things easier to make
     // calls
     let mut buffer = buffer.borrow_with(&mut font_system);
@@ -370,14 +389,29 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // Grab the actual width and height of the buffer for the image
     let (width, height) = buffer.size();
 
+    // Calculate the width taken up by the italic angle
+    let width_italic_buffer = match angle {
+        // If we have an angle get the tangent of the angle
+        Some(angle) => height * ((std::f32::consts::PI / 180.0) * angle).tan(),
+        // Otherwise, use 0
+        _ => 0.0,
+    }
+    .abs();
+
+    // The total width will be our specified width + the width from the italic angle.
+    // QUESTION: Should not the `cosmic-text` library really already include this in the
+    //           width calculation? Are we doing something wrong?
+    let width = width + width_italic_buffer + offset as f32;
+
     // Create a new pixel map for the main text
     let mut img =
         Pixmap::new(width as u32, height as u32).ok_or(FontThumbnailError::FailedToCreatePixmap)?;
     // Draw the text into the pixel map
     buffer.draw(&mut swash_cache, TEXT_COLOR, |x, y, w, h, color| {
-        if let Some(rect) = tiny_skia::Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)
-            .map(Some)
-            .unwrap_or_default()
+        if let Some(rect) =
+            tiny_skia::Rect::from_xywh((x + offset) as f32, y as f32, w as f32, h as f32)
+                .map(Some)
+                .unwrap_or_default()
         {
             img.fill_rect(
                 rect,
