@@ -392,7 +392,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // The total width will be our specified width + the width from the italic angle.
     // QUESTION: Should not the `cosmic-text` library really already include this in the
     //           width calculation? Are we doing something wrong?
-    let width = width + width_italic_buffer;
+    let width = width + width_italic_buffer + offset as f32;
 
     // Create a new pixel map for the main text
     let mut img =
