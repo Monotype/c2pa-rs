@@ -38,7 +38,7 @@ const TEXT_COLOR: Color = Color::rgba(0, 0, 0, 0xff);
 /// The background color for the thumbnail
 const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
 /// The line height factor for the thumbnail
-const LINE_HEIGHT_FACTOR: f32 = 1.1;
+const LINE_HEIGHT_FACTOR: f32 = 1.075;
 /// How much padding to use on the left and right sides of the text
 const TOTAL_WIDTH_PADDING: f32 = 0.1;
 
@@ -136,20 +136,23 @@ pub fn get_format_from_mime_type(mime: &str) -> Option<ImageFormat> {
 
 /// Finds the point size that fits the width and creates a buffer with the text and has it
 /// ready for rendering.
+///
 /// # Remarks
-/// The `font_height` parameter should be in font units.
-fn get_buffer_with_pt_size_fits_width(
+/// The `line_height_fn` is a function that takes the font size and should be used to
+/// calculate the line height.
+fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
     text: &str,
     attrs: Attrs,
     font_system: &mut FontSystem,
     font_size: f32,
     width: f32,
     minimum_point_size: f32,
+    line_height_fn: T,
 ) -> Result<Buffer> {
     // Starting point size
     let mut font_size: f32 = font_size;
     // Generate the line height from the font height
-    let mut line_height: f32 = (LINE_HEIGHT_FACTOR * font_size).ceil();
+    let mut line_height: f32 = line_height_fn(font_size);
 
     // Make sure there is a enough room for line wrapping to account for the
     // width being too small
@@ -179,7 +182,7 @@ fn get_buffer_with_pt_size_fits_width(
         }
         // Adjust and prepare to try again
         font_size -= POINT_SIZE_STEP;
-        line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
+        line_height = line_height_fn(font_size);
 
         // Update the buffer with the new font size
         borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
@@ -187,7 +190,7 @@ fn get_buffer_with_pt_size_fits_width(
     // At this point we have reached our minimum size, so setup to use it
     // which will result in text clipping, but that is fine
     font_size = minimum_point_size;
-    line_height = (LINE_HEIGHT_FACTOR * font_size).ceil();
+    line_height = line_height_fn(font_size);
     borrowed_buffer.set_size(width, line_height);
     borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
     borrowed_buffer.shape_until_scroll(true);
@@ -242,6 +245,7 @@ fn measure_text(
     buffer: &mut BorrowedWithFontSystem<Buffer>,
 ) -> Result<Size> {
     buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
+    buffer.shape_until_scroll(true);
     measure_text_in_buffer(buffer)
 }
 
@@ -346,6 +350,10 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     // Create a swash cache for the font system, to cache rendering
     let mut swash_cache = SwashCache::new();
 
+    let ascender = f.rustybuzz().ascender() as i32;
+    let descender = f.rustybuzz().descender() as i32;
+    let max_height: f32 = (ascender - descender) as f32 / f.rustybuzz().units_per_em() as f32;
+
     // Find a buffer that fits the width
     let mut buffer = get_buffer_with_pt_size_fits_width(
         &full_name,
@@ -354,6 +362,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         STARTING_POINT_SIZE,
         MAXIMUM_WIDTH as f32 * (1.0 - TOTAL_WIDTH_PADDING),
         MINIMUM_POINT_SIZE,
+        |x| (max_height * LINE_HEIGHT_FACTOR * x).ceil(),
     )?;
 
     // Got some reason, the `swash` library used by `cosmic-text` puts pixels at negative
