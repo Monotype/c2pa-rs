@@ -11,6 +11,7 @@ use cosmic_text::{
     SwashCache,
 };
 use image::{ImageFormat, ImageOutputFormat, Pixel};
+use svg::Node;
 use tiny_skia::Pixmap;
 
 /// The result type for the font thumbnail creation
@@ -346,6 +347,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let full_name = font_info
         .full_name
         .ok_or(FontThumbnailError::NoFullNameFound)?;
+    let full_name = format!("{}Abg", full_name);
 
     // Create a swash cache for the font system, to cache rendering
     let mut swash_cache = SwashCache::new();
@@ -365,6 +367,96 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         |x| (max_height * LINE_HEIGHT_FACTOR * x).ceil(),
     )?;
 
+    let mut svg_doc = svg::Document::new();
+    let mut smallest_x: f32 = 0.0;
+    let mut smallest_y: f32 = 0.0;
+    for layout_run in buffer.layout_runs() {
+        let mut group = svg::node::element::Group::new();
+        for glyph in layout_run.glyphs {
+            let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
+            let mut data = svg::node::element::path::Data::new();
+            let physical_glyph = glyph.physical((0., 0.), 1.0);
+            let cache_key = physical_glyph.cache_key;
+            let outline_commands = swash_cache.get_outline_commands(&mut font_system, cache_key);
+            if let Some(commands) = outline_commands {
+                for command in commands {
+                    match command {
+                        cosmic_text::Command::MoveTo(p1) => {
+                            println!("MoveTo: x: {}, y: {}", p1.x, p1.y);
+                            data = data.move_to((p1.x, p1.y));
+                            smallest_x = smallest_x.min(p1.x);
+                            smallest_y = smallest_y.min(p1.y);
+                        }
+                        cosmic_text::Command::LineTo(p1) => {
+                            println!("LineTo: x: {}, y: {}", p1.x, p1.y);
+                            data = data.line_to((p1.x, p1.y));
+                            smallest_x = smallest_x.min(p1.x);
+                            smallest_y = smallest_y.min(p1.y);
+                        }
+                        cosmic_text::Command::CurveTo(p1, p2, p3) => {
+                            println!(
+                                "CubicTo: x1: {}, y1: {}, x2: {}, y2: {}, x: {}, y: {}",
+                                p1.x, p1.y, p2.x, p2.y, p3.x, p3.y
+                            );
+                            data = data.cubic_curve_to((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y));
+                            smallest_x = smallest_x.min(p1.x);
+                            smallest_y = smallest_y.min(p1.y);
+                            smallest_x = smallest_x.min(p2.x);
+                            smallest_y = smallest_y.min(p2.y);
+                            smallest_x = smallest_x.min(p3.x);
+                            smallest_y = smallest_y.min(p3.y);
+                        }
+                        cosmic_text::Command::QuadTo(p1, p2) => {
+                            println!(
+                                "QuadTo: x1: {}, y1: {}, x: {}, y: {}",
+                                p1.x, p1.y, p2.x, p2.y
+                            );
+                            data = data.quadratic_curve_to((p1.x, p1.y, p2.x, p2.y));
+                            smallest_x = smallest_x.min(p1.x);
+                            smallest_y = smallest_y.min(p1.y);
+                            smallest_x = smallest_x.min(p2.x);
+                            smallest_y = smallest_y.min(p2.y);
+                        }
+                        cosmic_text::Command::Close => {
+                            println!("Close");
+                            data = data.close();
+                        }
+                    }
+                }
+            }
+            let path = svg::node::element::Path::new()
+                .set("fill", "black")
+                .set("stroke", "black")
+                .set("stroke-width", 1)
+                .set(
+                    "transform",
+                    format!("translate({}, {})", x_offset, y_offset),
+                )
+                .set("d", data.clone());
+            group = group.add(path);
+        }
+        // Transform by flipping the y axis
+        let mut transform = format!("scale(1, -1) translate(0, -{})", buffer.size().1);
+        if let Some(existing_transform) = group.get_attributes().get("transform") {
+            transform = format!("{} {}", existing_transform, transform);
+        }
+        group.assign("transform", transform);
+        group = group.set("stroke", "black");
+        group = group.set("stroke-width", 1);
+        svg_doc.append(group);
+    }
+    let svg_file = std::fs::File::create("font.svg")?;
+    svg_doc = svg_doc.set(
+        "viewBox",
+        (
+            0,
+            0,
+            smallest_x.abs().ceil() as u32 + buffer.size().0 as u32,
+            smallest_y.abs().ceil() as u32 + buffer.size().1 as u32,
+        ),
+    );
+
+    svg::write(svg_file, &svg_doc)?;
     // Got some reason, the `swash` library used by `cosmic-text` puts pixels at negative
     // x values, so we need to find the amount we need to offset the image by
     // to include all pixels.
