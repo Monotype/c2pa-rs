@@ -391,10 +391,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
     for layout_run in buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
-        // We will keep track of all the different paths so we can calculate the view box
-        let mut p_paths = Vec::new();
         for glyph in layout_run.glyphs {
-            let mut path = tiny_skia::PathBuilder::new();
             let mut data = svg::node::element::path::Data::new();
             // Get the x/y offsets
             let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
@@ -408,28 +405,22 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
                     match command {
                         cosmic_text::Command::MoveTo(p1) => {
                             data = data.move_to((p1.x, p1.y));
-                            path.move_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::LineTo(p1) => {
                             data = data.line_to((p1.x, p1.y));
-                            path.line_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::CurveTo(p1, p2, p3) => {
                             data = data.cubic_curve_to((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y));
-                            path.cubic_to(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
                         }
                         cosmic_text::Command::QuadTo(p1, p2) => {
                             data = data.quadratic_curve_to((p1.x, p1.y, p2.x, p2.y));
-                            path.quad_to(p1.x, p1.y, p2.x, p2.y);
                         }
                         cosmic_text::Command::Close => {
                             data = data.close();
-                            path.close();
                         }
                     }
                 }
             }
-            p_paths.push(path.finish().ok_or(FontThumbnailError::InvalidRect)?);
             let path = svg::node::element::Path::new()
                 .set("fill", "black")
                 .set("stroke", "black")
@@ -450,11 +441,23 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         // Set the stroke and fill
         group = group.set("stroke", "black");
         group = group.set("stroke-width", 1);
-
-        for path in p_paths.iter() {
-            bounding_box = path.compute_tight_bounds()
-            .ok_or(FontThumbnailError::InvalidRect)?.max(bounding_box)?;
-        }
+        let tmp_doc = svg::Document::new().add(group.clone());
+        let tree = resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
+        /*
+            .and_then(|tree| {
+                let tree = resvg::usvg::Tree::optimize(&tree, &resvg::usvg::Options::default());
+                let bbox = tree.svg_node().view_box.rect();
+                bounding_box = bounding_box.max(tiny_skia::Rect::from_xywh(
+                    bbox.x(),
+                    bbox.y(),
+                    bbox.width(),
+                    bbox.height(),
+                )?);
+                Ok(())
+            }
+            */
+            .map_err(|_e|FontThumbnailError::FailedToCreatePixmap)?;
+        bounding_box = tree.root().abs_bounding_box().max(bounding_box)?;
         svg_doc.append(group);
     }
     let svg_file = std::fs::File::create("font.svg")?;
