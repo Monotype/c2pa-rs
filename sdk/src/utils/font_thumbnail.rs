@@ -442,24 +442,21 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         group = group.set("stroke", "black");
         group = group.set("stroke-width", 1);
         let tmp_doc = svg::Document::new().add(group.clone());
-        let tree = resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
-        /*
-            .and_then(|tree| {
-                let tree = resvg::usvg::Tree::optimize(&tree, &resvg::usvg::Options::default());
-                let bbox = tree.svg_node().view_box.rect();
-                bounding_box = bounding_box.max(tiny_skia::Rect::from_xywh(
-                    bbox.x(),
-                    bbox.y(),
-                    bbox.width(),
-                    bbox.height(),
-                )?);
-                Ok(())
-            }
-            */
-            .map_err(|_e|FontThumbnailError::FailedToCreatePixmap)?;
+        let tree =
+            resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
+                .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
         bounding_box = tree.root().abs_bounding_box().max(bounding_box)?;
         svg_doc.append(group);
     }
+    let rect = svg::node::element::Rectangle::new()
+        .set("x", bounding_box.x() + 1.0)
+        .set("y", bounding_box.y() + 1.0)
+        .set("width", bounding_box.width() - 1.0)
+        .set("height", bounding_box.height() - 1.0)
+        .set("fill", "none")
+        .set("stroke", "black")
+        .set("stroke-width", 1);
+    svg_doc = svg_doc.add(rect);
     let svg_file = std::fs::File::create("font.svg")?;
     svg_doc = svg_doc.set(
         "viewBox",
