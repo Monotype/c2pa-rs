@@ -391,45 +391,38 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
     for layout_run in buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
+        // We will keep track of all the different paths so we can calculate the view box
         let mut p_paths = Vec::new();
         for glyph in layout_run.glyphs {
-            let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
+            let mut path = tiny_skia::PathBuilder::new();
             let mut data = svg::node::element::path::Data::new();
+            // Get the x/y offsets
+            let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
+            // We will need the physical glyph to get the outline commands
             let physical_glyph = glyph.physical((0., 0.), 1.0);
             let cache_key = physical_glyph.cache_key;
             let outline_commands = swash_cache.get_outline_commands(&mut font_system, cache_key);
-            let mut path = tiny_skia::PathBuilder::new();
+            // Go through each command and build the path
             if let Some(commands) = outline_commands {
                 for command in commands {
                     match command {
                         cosmic_text::Command::MoveTo(p1) => {
-                            println!("MoveTo: x: {}, y: {}", p1.x, p1.y);
                             data = data.move_to((p1.x, p1.y));
                             path.move_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::LineTo(p1) => {
-                            println!("LineTo: x: {}, y: {}", p1.x, p1.y);
                             data = data.line_to((p1.x, p1.y));
                             path.line_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::CurveTo(p1, p2, p3) => {
-                            println!(
-                                "CubicTo: x1: {}, y1: {}, x2: {}, y2: {}, x: {}, y: {}",
-                                p1.x, p1.y, p2.x, p2.y, p3.x, p3.y
-                            );
                             data = data.cubic_curve_to((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y));
                             path.cubic_to(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
                         }
                         cosmic_text::Command::QuadTo(p1, p2) => {
-                            println!(
-                                "QuadTo: x1: {}, y1: {}, x: {}, y: {}",
-                                p1.x, p1.y, p2.x, p2.y
-                            );
                             data = data.quadratic_curve_to((p1.x, p1.y, p2.x, p2.y));
                             path.quad_to(p1.x, p1.y, p2.x, p2.y);
                         }
                         cosmic_text::Command::Close => {
-                            println!("Close");
                             data = data.close();
                             path.close();
                         }
