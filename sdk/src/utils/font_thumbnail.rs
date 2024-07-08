@@ -62,6 +62,9 @@ enum FontThumbnailError {
     /// Error when the buffer size is invalid
     #[error("The buffer size is invalid")]
     InvalidBufferSize,
+    /// Could not create a [`tiny_skia::Rect`] from the given values
+    #[error("Invalid values for Rect")]
+    InvalidRect,
     /// Failed to find a point size that would accommodate the width and text
     #[error("Failed to find an appropriate font point size to fit the width")]
     FailedToFindAppropriateSize,
@@ -318,6 +321,21 @@ pub fn make_thumbnail(
     make_thumbnail_from_stream(&mut font_data)
 }
 
+/// Determines the maximum viewable bounding box from a the tiny_skia rect object
+trait MaxBoundingBox: Sized {
+    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error>;
+}
+
+impl MaxBoundingBox for tiny_skia::Rect {
+    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error> {
+        let x = self.x().min(other.x());
+        let y = self.y().min(other.y());
+        let w = self.width().max(other.width());
+        let h = self.height().max(other.height());
+        tiny_skia::Rect::from_xywh(x, y, w, h).ok_or(FontThumbnailError::InvalidRect.into())
+    }
+}
+
 /// Make a PNG thumbnail from a stream, which should be font data bits.
 /// # Returns
 /// Returns Result `(format, image_bits)` if successful, otherwise `Error`
@@ -368,30 +386,31 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     )?;
 
     let mut svg_doc = svg::Document::new();
-    let mut smallest_x: f32 = 0.0;
-    let mut smallest_y: f32 = 0.0;
+    // Start with the smallest possible view box
+    let mut bounding_box: tiny_skia::Rect =
+        tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
     for layout_run in buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
+        let mut p_paths = Vec::new();
         for glyph in layout_run.glyphs {
             let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
             let mut data = svg::node::element::path::Data::new();
             let physical_glyph = glyph.physical((0., 0.), 1.0);
             let cache_key = physical_glyph.cache_key;
             let outline_commands = swash_cache.get_outline_commands(&mut font_system, cache_key);
+            let mut path = tiny_skia::PathBuilder::new();
             if let Some(commands) = outline_commands {
                 for command in commands {
                     match command {
                         cosmic_text::Command::MoveTo(p1) => {
                             println!("MoveTo: x: {}, y: {}", p1.x, p1.y);
                             data = data.move_to((p1.x, p1.y));
-                            smallest_x = smallest_x.min(p1.x);
-                            smallest_y = smallest_y.min(p1.y);
+                            path.move_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::LineTo(p1) => {
                             println!("LineTo: x: {}, y: {}", p1.x, p1.y);
                             data = data.line_to((p1.x, p1.y));
-                            smallest_x = smallest_x.min(p1.x);
-                            smallest_y = smallest_y.min(p1.y);
+                            path.line_to(p1.x, p1.y);
                         }
                         cosmic_text::Command::CurveTo(p1, p2, p3) => {
                             println!(
@@ -399,12 +418,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
                                 p1.x, p1.y, p2.x, p2.y, p3.x, p3.y
                             );
                             data = data.cubic_curve_to((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y));
-                            smallest_x = smallest_x.min(p1.x);
-                            smallest_y = smallest_y.min(p1.y);
-                            smallest_x = smallest_x.min(p2.x);
-                            smallest_y = smallest_y.min(p2.y);
-                            smallest_x = smallest_x.min(p3.x);
-                            smallest_y = smallest_y.min(p3.y);
+                            path.cubic_to(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
                         }
                         cosmic_text::Command::QuadTo(p1, p2) => {
                             println!(
@@ -412,18 +426,17 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
                                 p1.x, p1.y, p2.x, p2.y
                             );
                             data = data.quadratic_curve_to((p1.x, p1.y, p2.x, p2.y));
-                            smallest_x = smallest_x.min(p1.x);
-                            smallest_y = smallest_y.min(p1.y);
-                            smallest_x = smallest_x.min(p2.x);
-                            smallest_y = smallest_y.min(p2.y);
+                            path.quad_to(p1.x, p1.y, p2.x, p2.y);
                         }
                         cosmic_text::Command::Close => {
                             println!("Close");
                             data = data.close();
+                            path.close();
                         }
                     }
                 }
             }
+            p_paths.push(path.finish().ok_or(FontThumbnailError::InvalidRect)?);
             let path = svg::node::element::Path::new()
                 .set("fill", "black")
                 .set("stroke", "black")
@@ -441,18 +454,24 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
             transform = format!("{} {}", existing_transform, transform);
         }
         group.assign("transform", transform);
+        // Set the stroke and fill
         group = group.set("stroke", "black");
         group = group.set("stroke-width", 1);
+
+        for path in p_paths.iter() {
+            bounding_box = path.compute_tight_bounds()
+            .ok_or(FontThumbnailError::InvalidRect)?.max(bounding_box)?;
+        }
         svg_doc.append(group);
     }
     let svg_file = std::fs::File::create("font.svg")?;
     svg_doc = svg_doc.set(
         "viewBox",
         (
-            0,
-            0,
-            smallest_x.abs().ceil() as u32 + buffer.size().0 as u32,
-            smallest_y.abs().ceil() as u32 + buffer.size().1 as u32,
+            bounding_box.x().floor() as i32,
+            bounding_box.y().floor() as i32,
+            bounding_box.width().ceil() as u32,
+            bounding_box.height().ceil() as u32,
         ),
     );
 
