@@ -32,7 +32,10 @@ pub fn make_thumbnail(path: &std::path::Path) -> Result<(String, Vec<u8>)> {
             .and_then(font_thumbnail::get_format_from_extension)
             .is_some()
         {
-            return font_thumbnail::make_thumbnail(path, Some(cfg!(feature = "add_svg_font_thumbnails")));
+            return font_thumbnail::make_thumbnail(
+                path,
+                Some(cfg!(feature = "add_svg_font_thumbnails")),
+            );
         }
     }
     let format = ImageFormat::from_path(path)?;
@@ -73,7 +76,10 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
             .or_else(|| font_thumbnail::get_format_from_mime_type(format))
             .is_some()
         {
-            return font_thumbnail::make_thumbnail_from_stream(stream, Some(cfg!(feature = "add_svg_font_thumbnails")));
+            return font_thumbnail::make_thumbnail_from_stream(
+                stream,
+                Some(cfg!(feature = "add_svg_font_thumbnails")),
+            );
         }
     }
 

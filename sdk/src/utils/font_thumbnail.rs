@@ -43,6 +43,8 @@ const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
 const LINE_HEIGHT_FACTOR: f32 = 1.075;
 /// How much padding to use on the left and right sides of the text
 const TOTAL_WIDTH_PADDING: f32 = 0.1;
+/// The default SVG precision
+const DEFAULT_SVG_PRECISION: u16 = 2;
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -334,6 +336,26 @@ impl MaxBoundingBox for tiny_skia::Rect {
     }
 }
 
+#[cfg(feature = "add_svg_font_thumbnails")]
+trait PrecisionRound {
+    fn round_to(&self, precision: u16) -> Self;
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+impl PrecisionRound for f32 {
+    fn round_to(&self, precision: u16) -> Self {
+        let factor = 10u16.pow(precision as u32) as f32;
+        (self * factor).round() / factor
+    }
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+impl PrecisionRound for (f32, f32) {
+    fn round_to(&self, precision: u16) -> Self {
+        (self.0.round_to(precision), self.1.round_to(precision))
+    }
+}
+
 /// Generates a PNG thumbnail from a font file
 /// # Returns
 /// Returns Result `(format, image_bits)` if successful, otherwise `Error`
@@ -554,16 +576,27 @@ pub fn make_svg(
                 for command in commands {
                     match command {
                         cosmic_text::Command::MoveTo(p1) => {
-                            data = data.move_to((p1.x, p1.y));
+                            let rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.move_to(rounded_data);
                         }
                         cosmic_text::Command::LineTo(p1) => {
-                            data = data.line_to((p1.x, p1.y));
+                            let rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.line_to(rounded_data);
                         }
                         cosmic_text::Command::CurveTo(p1, p2, p3) => {
-                            data = data.cubic_curve_to((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y));
+                            let p1_rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p2_rounded_data = (p2.x, p2.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p3_rounded_data = (p3.x, p3.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.cubic_curve_to((
+                                p1_rounded_data,
+                                p2_rounded_data,
+                                p3_rounded_data,
+                            ));
                         }
                         cosmic_text::Command::QuadTo(p1, p2) => {
-                            data = data.quadratic_curve_to((p1.x, p1.y, p2.x, p2.y));
+                            let p1_rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p2_rounded_data = (p2.x, p2.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.quadratic_curve_to((p1_rounded_data, p2_rounded_data));
                         }
                         cosmic_text::Command::Close => {
                             data = data.close();
@@ -575,8 +608,6 @@ pub fn make_svg(
             if !data.is_empty() {
                 let path = svg::node::element::Path::new()
                     .set("fill", "black")
-                    .set("stroke", "black")
-                    .set("stroke-width", 1)
                     .set(
                         "transform",
                         format!("translate({}, {})", x_offset, y_offset),
@@ -592,12 +623,16 @@ pub fn make_svg(
             resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
                 .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
         bounding_box = tree.root().abs_bounding_box().max(bounding_box)?;
+        // Setup the y translate
         let y_translate = if bounding_box.y() < 0.0 {
-            bounding_box.height() + (2.0 * bounding_box.y())
-        } else {
+            // We need the height of the bounding box, minus the absolute value of the y
+            // origin. The reason for the 2nd part is that the y origin is negative, so
+            // so we need the data to be positive
+            bounding_box.height() - (2.0 * bounding_box.y().abs())
+        } else {    
             bounding_box.height()
         };
-        let mut transform = format!("scale(1, -1) translate(0, -{})", y_translate);
+        let mut transform = format!("translate(0, {}) scale(1, -1)", y_translate);
         if let Some(existing_transform) = group.get_attributes().get("transform") {
             transform = format!("{} {}", existing_transform, transform);
         }
@@ -607,11 +642,19 @@ pub fn make_svg(
     svg_doc = svg_doc.set(
         "viewBox",
         (
-            bounding_box.x() + -10.0,
-            bounding_box.y() + -10.0,
-            bounding_box.width() + 10.0,
-            bounding_box.height() + 10.0,
+            bounding_box.x().floor(),
+            bounding_box.y().floor(),
+            bounding_box.width().ceil(),
+            bounding_box.height().ceil(),
         ),
+        /*
+        (
+            bounding_box.x().floor() + -10.0,
+            bounding_box.y().floor() + -10.0,
+            bounding_box.width().ceil() + 10.0,
+            bounding_box.height().ceil() + 10.0,
+        ),
+        */
     );
 
     let mut svg_buffer = Vec::new();
