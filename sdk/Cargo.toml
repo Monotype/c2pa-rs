@@ -27,7 +27,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = ["v1_api"]
 add_thumbnails = ["image"]
-add_font_thumbnails = ["dep:tiny-skia", "dep:cosmic-text", "add_thumbnails", "font", "svg"]
+add_font_thumbnails = ["dep:tiny-skia", "dep:cosmic-text", "add_thumbnails", "font"]
+add_svg_font_thumbnails = ["add_font_thumbnails", "dep:svg", "dep:resvg"]
 psxxx_ocsp_stapling_experimental = []
 file_io = ["openssl_sign"]
 serialize_thumbnails = []
@@ -114,7 +115,7 @@ range-set = "0.0.9"
 rasn-ocsp = "0.12.5"
 rasn-pkix = "0.12.5"
 rasn = "0.12.5"
-resvg = { version = "0.42.0", default-features = 	false }
+resvg = { version = "0.42.0", default-features = 	false, optional = true }
 riff = "1.0.1"
 schemars = { version = "0.8.13", optional = true }
 serde = { version = "1.0.197", features = ["derive"] }
