@@ -10,7 +10,7 @@ use cosmic_text::{
     Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
     SwashCache,
 };
-use image::{ImageFormat, ImageOutputFormat, Pixel};
+use image::{ImageOutputFormat, Pixel};
 use tiny_skia::Pixmap;
 
 /// The result type for the font thumbnail creation
@@ -119,34 +119,28 @@ struct LoadedFont<'a> {
     attrs: Attrs<'a>,
 }
 
-/// Get the font format from the extension
-pub fn get_format_from_extension<T: AsRef<OsStr>>(ext: T) -> Option<ImageFormat> {
-    match ext.as_ref().to_str() {
-        Some("otf") | Some("ttf") => Some(ImageFormat::Png),
-        _ => None,
-    }
-}
-
 /// The MIME type map for the image format of the thumbnail
-const MIME_TYPE_MAP: &[(&str, ImageFormat)] = &[
-    ("application/font-sfnt", ImageFormat::Png),
-    ("application/x-font-ttf", ImageFormat::Png),
-    ("application/x-font-opentype", ImageFormat::Png),
-    ("application/x-font-truetype", ImageFormat::Png),
-    ("font/otf", ImageFormat::Png),
-    ("font/sfnt", ImageFormat::Png),
-    ("font/ttf", ImageFormat::Png),
-    ("otf", ImageFormat::Png),
-    ("sfnt", ImageFormat::Png),
-    ("ttf", ImageFormat::Png),
+const SUPPORTED_MIME_TYPES: &[&str] = &[
+    "application/font-sfnt",
+    "application/x-font-ttf",
+    "application/x-font-opentype",
+    "application/x-font-truetype",
+    "font/otf",
+    "font/sfnt",
+    "font/ttf",
+    "otf",
+    "sfnt",
+    "ttf",
 ];
 
-/// Get the font format from the MIME type
-pub fn get_format_from_mime_type(mime: &str) -> Option<ImageFormat> {
-    MIME_TYPE_MAP
-        .iter()
-        .find_map(|(m, f)| if m == &mime { Some(f) } else { None })
-        .copied()
+/// Checks if the file is a supported font type
+pub fn is_supported_font_file<T: AsRef<OsStr>>(ext: T) -> bool {
+    matches!(ext.as_ref().to_ascii_lowercase().to_str(), Some("otf") | Some("ttf"))
+}
+
+/// Checks of the mime type is a valid supported font mime type
+pub fn is_font_mime_type(mime: &str) -> bool {
+    SUPPORTED_MIME_TYPES.iter().any(|m| m == &mime)
 }
 
 /// Finds the point size that fits the width and creates a buffer with the text and has it
