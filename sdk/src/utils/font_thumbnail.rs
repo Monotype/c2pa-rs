@@ -44,7 +44,9 @@ const LINE_HEIGHT_FACTOR: f32 = 1.075;
 /// How much padding to use on the left and right sides of the text
 const TOTAL_WIDTH_PADDING: f32 = 0.1;
 /// The default SVG precision
-const DEFAULT_SVG_PRECISION: u16 = 2;
+const DEFAULT_SVG_PRECISION: u32 = 5;
+/// The fill color for the SVG thumbnail
+const SVG_GLYPH_FILL_COLOR: &str = "black";
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -338,20 +340,20 @@ impl MaxBoundingBox for tiny_skia::Rect {
 
 #[cfg(feature = "add_svg_font_thumbnails")]
 trait PrecisionRound {
-    fn round_to(&self, precision: u16) -> Self;
+    fn round_to(&self, precision: u32) -> Self;
 }
 
 #[cfg(feature = "add_svg_font_thumbnails")]
 impl PrecisionRound for f32 {
-    fn round_to(&self, precision: u16) -> Self {
-        let factor = 10u16.pow(precision as u32) as f32;
+    fn round_to(&self, precision: u32) -> Self {
+        let factor = 10u32.pow(precision) as f32;
         (self * factor).round() / factor
     }
 }
 
 #[cfg(feature = "add_svg_font_thumbnails")]
 impl PrecisionRound for (f32, f32) {
-    fn round_to(&self, precision: u16) -> Self {
+    fn round_to(&self, precision: u32) -> Self {
         (self.0.round_to(precision), self.1.round_to(precision))
     }
 }
@@ -399,7 +401,6 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let full_name = font_info
         .full_name
         .ok_or(FontThumbnailError::NoFullNameFound)?;
-    let full_name = format!("{}Abg", full_name);
 
     // Create a swash cache for the font system, to cache rendering
     let mut swash_cache = SwashCache::new();
@@ -607,7 +608,7 @@ pub fn make_svg(
             // Don't add empty data paths
             if !data.is_empty() {
                 let path = svg::node::element::Path::new()
-                    .set("fill", "black")
+                    .set("fill", SVG_GLYPH_FILL_COLOR)
                     .set(
                         "transform",
                         format!("translate({}, {})", x_offset, y_offset),
@@ -632,11 +633,7 @@ pub fn make_svg(
         } else {    
             bounding_box.height()
         };
-        let mut transform = format!("translate(0, {}) scale(1, -1)", y_translate);
-        if let Some(existing_transform) = group.get_attributes().get("transform") {
-            transform = format!("{} {}", existing_transform, transform);
-        }
-        group.assign("transform", transform);
+        group.assign("transform", format!("translate(0, {}) scale(1, -1)", y_translate));
         svg_doc.append(group);
     }
     svg_doc = svg_doc.set(
@@ -647,14 +644,6 @@ pub fn make_svg(
             bounding_box.width().ceil(),
             bounding_box.height().ceil(),
         ),
-        /*
-        (
-            bounding_box.x().floor() + -10.0,
-            bounding_box.y().floor() + -10.0,
-            bounding_box.width().ceil() + 10.0,
-            bounding_box.height().ceil() + 10.0,
-        ),
-        */
     );
 
     let mut svg_buffer = Vec::new();
