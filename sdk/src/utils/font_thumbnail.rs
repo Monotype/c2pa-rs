@@ -135,7 +135,10 @@ const SUPPORTED_MIME_TYPES: &[&str] = &[
 
 /// Checks if the file is a supported font type
 pub fn is_supported_font_file<T: AsRef<OsStr>>(ext: T) -> bool {
-    matches!(ext.as_ref().to_ascii_lowercase().to_str(), Some("otf") | Some("ttf"))
+    matches!(
+        ext.as_ref().to_ascii_lowercase().to_str(),
+        Some("otf") | Some("ttf")
+    )
 }
 
 /// Checks of the mime type is a valid supported font mime type
@@ -624,10 +627,13 @@ pub fn make_svg(
             // origin. The reason for the 2nd part is that the y origin is negative, so
             // so we need the data to be positive
             bounding_box.height() - (2.0 * bounding_box.y().abs())
-        } else {    
+        } else {
             bounding_box.height()
         };
-        group.assign("transform", format!("translate(0, {}) scale(1, -1)", y_translate));
+        group.assign(
+            "transform",
+            format!("translate(0, {}) scale(1, -1)", y_translate),
+        );
         svg_doc.append(group);
     }
     svg_doc = svg_doc.set(
