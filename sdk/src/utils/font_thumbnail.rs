@@ -557,8 +557,12 @@ pub fn make_svg(
     use svg::Node;
     let mut svg_doc = svg::Document::new();
     // Start with the smallest possible view box
+    /*
     let mut bounding_box: tiny_skia::Rect =
-        tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
+        tiny_skia::Rect::from_xywh(100.0, 100.0, 100.0, 100.0).ok_or(FontThumbnailError::InvalidRect)?;
+        */
+    let mut bounding_box: Option<tiny_skia::Rect> = None;
+        //tiny_skia::Rect::from_xywh(100.0, 100.0, 100.0, 100.0).ok_or(FontThumbnailError::InvalidRect)?;
     for layout_run in text_buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
         for glyph in layout_run.glyphs {
@@ -567,6 +571,7 @@ pub fn make_svg(
             let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
             // We will need the physical glyph to get the outline commands
             let physical_glyph = glyph.physical((0., 0.), 1.0);
+            //let physical_glyph = glyph.physical((x_offset, y_offset), 1.0);
             let cache_key = physical_glyph.cache_key;
             let outline_commands = swash_cache.get_outline_commands(font_system, cache_key);
             // Go through each command and build the path
@@ -620,15 +625,21 @@ pub fn make_svg(
         let tree =
             resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
                 .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
-        bounding_box = tree.root().abs_bounding_box().max(bounding_box)?;
+        let this_bounding_box = tree.root().abs_bounding_box();
+        if let Some(bbox) = bounding_box {
+            bounding_box = Some(bbox.max(this_bounding_box)?);
+        } else {
+            bounding_box = Some(this_bounding_box);
+        }
+        
         // Setup the y translate
-        let y_translate = if bounding_box.y() < 0.0 {
+        let y_translate = if this_bounding_box.y() < 0.0 {
             // We need the height of the bounding box, minus the absolute value of the y
             // origin. The reason for the 2nd part is that the y origin is negative, so
             // so we need the data to be positive
-            bounding_box.height() - (2.0 * bounding_box.y().abs())
+            this_bounding_box.height() - (2.0 * this_bounding_box.y().abs())
         } else {
-            bounding_box.height()
+            this_bounding_box.height()
         };
         group.assign(
             "transform",
@@ -636,15 +647,20 @@ pub fn make_svg(
         );
         svg_doc.append(group);
     }
-    svg_doc = svg_doc.set(
-        "viewBox",
-        (
-            bounding_box.x().floor(),
-            bounding_box.y().floor(),
-            bounding_box.width().ceil(),
-            bounding_box.height().ceil(),
-        ),
-    );
+    if let Some(bounding_box) = bounding_box {
+        svg_doc = svg_doc.set(
+            "viewBox",
+            (
+                bounding_box.x().floor(),
+                bounding_box.y().floor(),
+                bounding_box.width().ceil(),
+                bounding_box.height().ceil(),
+            ),
+        );
+    } else {
+        // TODO: Add a specific error
+        return Err(FontThumbnailError::InvalidRect.into());
+    }
 
     let mut svg_buffer = Vec::new();
     let svg_cursor = std::io::Cursor::new(&mut svg_buffer);
