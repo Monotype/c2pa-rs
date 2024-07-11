@@ -44,7 +44,7 @@ const LINE_HEIGHT_FACTOR: f32 = 1.075;
 /// How much padding to use on the left and right sides of the text
 const TOTAL_WIDTH_PADDING: f32 = 0.1;
 /// The default SVG precision
-const DEFAULT_SVG_PRECISION: u32 = 5;
+const DEFAULT_SVG_PRECISION: u32 = 2;
 /// The fill color for the SVG thumbnail
 const SVG_GLYPH_FILL_COLOR: &str = "black";
 
