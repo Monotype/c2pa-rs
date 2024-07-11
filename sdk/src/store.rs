@@ -2734,6 +2734,13 @@ impl Store {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
                 // get the final hash ranges, but not for update manifests
                 output_stream.rewind()?;
+                // Still need to use an intermediate stream because the box hash
+                // generator expects a CAIRead.  We also must reset it here
+                // because the previous JUMBF may have been larger, causing
+                // extra data to try and be interpreted.
+                intermediate_stream = Cursor::new(Vec::new());
+                std::io::copy(output_stream, &mut intermediate_stream)?;
+
                 if let Some(handler) = get_assetio_handler(format) {
                     // If our asset supports box hashing, generate and update
                     // the existing box hash assertion.
