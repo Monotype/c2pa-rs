@@ -10,7 +10,7 @@ use cosmic_text::{
     Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
     SwashCache,
 };
-use image::{ImageFormat, ImageOutputFormat, Pixel};
+use image::{ImageOutputFormat, Pixel};
 use tiny_skia::Pixmap;
 
 /// The result type for the font thumbnail creation
@@ -32,7 +32,9 @@ const FULL_NAME_ID: u16 = 4;
 /// The name ID for the sample text of the font from the name table
 const SAMPLE_TEXT_ID: u16 = 19;
 /// The MIME type for the thumbnail
-const THUMBNAIL_MIME_TYPE: &str = "image/png";
+const THUMBNAIL_IMG_MIME_TYPE: &str = "image/png";
+/// The MIME type for an SVG thumbnail
+const THUMBNAIL_SVG_MIME_TYPE: &str = "image/svg+xml";
 /// The text color for the thumbnail
 const TEXT_COLOR: Color = Color::rgba(0, 0, 0, 0xff);
 /// The background color for the thumbnail
@@ -41,6 +43,12 @@ const BACKGROUND_COLOR: tiny_skia::Color = tiny_skia::Color::WHITE;
 const LINE_HEIGHT_FACTOR: f32 = 1.075;
 /// How much padding to use on the left and right sides of the text
 const TOTAL_WIDTH_PADDING: f32 = 0.1;
+#[cfg(feature = "add_svg_font_thumbnails")]
+/// The default SVG precision
+const DEFAULT_SVG_PRECISION: u32 = 2;
+#[cfg(feature = "add_svg_font_thumbnails")]
+/// The fill color for the SVG thumbnail
+const SVG_GLYPH_FILL_COLOR: &str = "black";
 
 /// Errors that can occur when creating a font thumbnail
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +69,10 @@ enum FontThumbnailError {
     /// Error when the buffer size is invalid
     #[error("The buffer size is invalid")]
     InvalidBufferSize,
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    /// Could not create a Rect from the given values
+    #[error("Invalid values for Rect")]
+    InvalidRect,
     /// Failed to find a point size that would accommodate the width and text
     #[error("Failed to find an appropriate font point size to fit the width")]
     FailedToFindAppropriateSize,
@@ -70,6 +82,10 @@ enum FontThumbnailError {
     /// Failed to get a pixel from the image
     #[error("Failed to get pixel from image; x: {x}, y: {y}")]
     FailedToGetPixel { x: u32, y: u32 },
+    #[cfg(not(feature = "add_svg_font_thumbnails"))]
+    /// The SVG feature is not enabled
+    #[error("The SVG feature is not enabled")]
+    SvgFeatureNotEnabled,
 }
 
 impl From<FontThumbnailError> for crate::Error {
@@ -104,34 +120,31 @@ struct LoadedFont<'a> {
     attrs: Attrs<'a>,
 }
 
-/// Get the font format from the extension
-pub fn get_format_from_extension<T: AsRef<OsStr>>(ext: T) -> Option<ImageFormat> {
-    match ext.as_ref().to_str() {
-        Some("otf") | Some("ttf") => Some(ImageFormat::Png),
-        _ => None,
-    }
-}
-
 /// The MIME type map for the image format of the thumbnail
-const MIME_TYPE_MAP: &[(&str, ImageFormat)] = &[
-    ("application/font-sfnt", ImageFormat::Png),
-    ("application/x-font-ttf", ImageFormat::Png),
-    ("application/x-font-opentype", ImageFormat::Png),
-    ("application/x-font-truetype", ImageFormat::Png),
-    ("font/otf", ImageFormat::Png),
-    ("font/sfnt", ImageFormat::Png),
-    ("font/ttf", ImageFormat::Png),
-    ("otf", ImageFormat::Png),
-    ("sfnt", ImageFormat::Png),
-    ("ttf", ImageFormat::Png),
+const SUPPORTED_MIME_TYPES: &[&str] = &[
+    "application/font-sfnt",
+    "application/x-font-ttf",
+    "application/x-font-opentype",
+    "application/x-font-truetype",
+    "font/otf",
+    "font/sfnt",
+    "font/ttf",
+    "otf",
+    "sfnt",
+    "ttf",
 ];
 
-/// Get the font format from the MIME type
-pub fn get_format_from_mime_type(mime: &str) -> Option<ImageFormat> {
-    MIME_TYPE_MAP
-        .iter()
-        .find_map(|(m, f)| if m == &mime { Some(f) } else { None })
-        .copied()
+/// Checks if the file is a supported font type
+pub fn is_supported_font_file<T: AsRef<OsStr>>(ext: T) -> bool {
+    matches!(
+        ext.as_ref().to_ascii_lowercase().to_str(),
+        Some("otf") | Some("ttf")
+    )
+}
+
+/// Checks of the mime type is a valid supported font mime type
+pub fn is_font_mime_type(mime: &str) -> bool {
+    SUPPORTED_MIME_TYPES.iter().any(|m| m == &mime)
 }
 
 /// Finds the point size that fits the width and creates a buffer with the text and has it
@@ -305,16 +318,63 @@ fn get_skia_paint_for_color<'a>(color: Color) -> tiny_skia::Paint<'a> {
     }
 }
 
+/// Determines the maximum viewable bounding box from a the tiny_skia rect object
+#[cfg(feature = "add_svg_font_thumbnails")]
+trait MaxBoundingBox: Sized {
+    /// Finds the maximum bounding box from the given rect
+    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error>;
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+impl MaxBoundingBox for tiny_skia::Rect {
+    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error> {
+        // If the width and height are 0, then we can just return the other rect
+        if self.width() == 0.0 && self.height() == 0.0 {
+            Ok(other)
+        } else if other.width() == 0.0 && other.height() == 0.0 {
+            Ok(*self)
+        } else {
+            let left = self.left().min(other.left());
+            let top = self.top().min(other.top());
+            let right = self.right().max(other.right());
+            let bottom = self.bottom().max(other.bottom());
+            tiny_skia::Rect::from_ltrb(left, top, right, bottom)
+                .ok_or(FontThumbnailError::InvalidRect.into())
+        }
+    }
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+trait PrecisionRound {
+    fn round_to(&self, precision: u32) -> Self;
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+impl PrecisionRound for f32 {
+    fn round_to(&self, precision: u32) -> Self {
+        let factor = 10u32.pow(precision) as f32;
+        (self * factor).round() / factor
+    }
+}
+
+#[cfg(feature = "add_svg_font_thumbnails")]
+impl PrecisionRound for (f32, f32) {
+    fn round_to(&self, precision: u32) -> Self {
+        (self.0.round_to(precision), self.1.round_to(precision))
+    }
+}
+
 /// Generates a PNG thumbnail from a font file
 /// # Returns
 /// Returns Result `(format, image_bits)` if successful, otherwise `Error`
 #[cfg(feature = "file_io")]
 pub fn make_thumbnail(
     path: &std::path::Path,
+    use_svg: Option<bool>,
 ) -> std::result::Result<(String, Vec<u8>), crate::error::Error> {
     let mut font_data = std::fs::read(path)?;
     let mut font_data = std::io::Cursor::new(&mut font_data);
-    make_thumbnail_from_stream(&mut font_data)
+    make_thumbnail_from_stream(&mut font_data, use_svg)
 }
 
 /// Make a PNG thumbnail from a stream, which should be font data bits.
@@ -322,6 +382,7 @@ pub fn make_thumbnail(
 /// Returns Result `(format, image_bits)` if successful, otherwise `Error`
 pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     stream: &mut R,
+    use_svg: Option<bool>,
 ) -> std::result::Result<(String, Vec<u8>), crate::error::Error> {
     let font_data = std::io::Read::bytes(stream).collect::<std::io::Result<Vec<u8>>>()?;
     // Create a local font database, which only contains the font we loaded
@@ -365,10 +426,26 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         |x| (max_height * LINE_HEIGHT_FACTOR * x).ceil(),
     )?;
 
+    if use_svg.unwrap_or(false) {
+        let svg_buffer = make_svg(&mut buffer, &mut font_system, &mut swash_cache)?;
+        Ok((THUMBNAIL_SVG_MIME_TYPE.to_string(), svg_buffer))
+    } else {
+        let png_buffer = make_png(&mut buffer, &mut font_system, &mut swash_cache, angle)?;
+        Ok((THUMBNAIL_IMG_MIME_TYPE.to_string(), png_buffer))
+    }
+}
+
+/// Make a PNG thumbnail from the buffer
+pub fn make_png(
+    text_buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    angle: Option<f32>,
+) -> std::result::Result<Vec<u8>, crate::error::Error> {
     // Got some reason, the `swash` library used by `cosmic-text` puts pixels at negative
     // x values, so we need to find the amount we need to offset the image by
     // to include all pixels.
-    let layout_run = buffer
+    let layout_run = text_buffer
         .layout_runs()
         .next()
         .ok_or(FontThumbnailError::InvalidBufferSize)?;
@@ -381,7 +458,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
         .physical((0., 0.), 1.0)
         .cache_key;
     let image = swash_cache
-        .get_image(&mut font_system, x)
+        .get_image(font_system, x)
         .as_ref()
         .ok_or(FontThumbnailError::FailedToCreatePixmap)?;
     // Only offset if the left is negative
@@ -393,7 +470,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
 
     // Borrow the buffer with the font system, to make things easier to make
     // calls
-    let mut buffer = buffer.borrow_with(&mut font_system);
+    let mut buffer = text_buffer.borrow_with(font_system);
 
     // Grab the actual width and height of the buffer for the image
     let (width, height) = buffer.size();
@@ -416,7 +493,7 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let mut img =
         Pixmap::new(width as u32, height as u32).ok_or(FontThumbnailError::FailedToCreatePixmap)?;
     // Draw the text into the pixel map
-    buffer.draw(&mut swash_cache, TEXT_COLOR, |x, y, w, h, color| {
+    buffer.draw(swash_cache, TEXT_COLOR, |x, y, w, h, color| {
         if let Some(rect) =
             tiny_skia::Rect::from_xywh((x + offset) as f32, y as f32, w as f32, h as f32)
                 .map(Some)
@@ -468,5 +545,180 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let mut png_buffer = Vec::new();
     let mut png_cursor = std::io::Cursor::new(&mut png_buffer);
     total_img.write_to(&mut png_cursor, ImageOutputFormat::Png)?;
-    Ok((THUMBNAIL_MIME_TYPE.to_string(), png_buffer))
+    Ok(png_buffer)
+}
+
+#[cfg(not(feature = "add_svg_font_thumbnails"))]
+pub fn make_svg(
+    _text_buffer: &mut Buffer,
+    _font_system: &mut FontSystem,
+    _swash_cache: &mut SwashCache,
+) -> std::result::Result<Vec<u8>, crate::error::Error> {
+    Err(FontThumbnailError::SvgFeatureNotEnabled.into())
+}
+/// Make an SVG thumbnail from the buffer
+#[cfg(feature = "add_svg_font_thumbnails")]
+pub fn make_svg(
+    text_buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+) -> std::result::Result<Vec<u8>, crate::error::Error> {
+    use svg::Node;
+    let mut svg_doc = svg::Document::new();
+    // Start with a zero width/height box
+    let mut bounding_box: tiny_skia::Rect =
+        tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
+    for layout_run in text_buffer.layout_runs() {
+        let mut group = svg::node::element::Group::new();
+        for glyph in layout_run.glyphs {
+            let mut data = svg::node::element::path::Data::new();
+            // Get the x/y offsets
+            let (x_offset, y_offset) = (glyph.x + glyph.x_offset, glyph.y + glyph.y_offset);
+            // We will need the physical glyph to get the outline commands
+            let physical_glyph = glyph.physical((0., 0.), 1.0);
+            let cache_key = physical_glyph.cache_key;
+            let outline_commands = swash_cache.get_outline_commands(font_system, cache_key);
+            // Go through each command and build the path
+            if let Some(commands) = outline_commands {
+                for command in commands {
+                    match command {
+                        cosmic_text::Command::MoveTo(p1) => {
+                            let rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.move_to(rounded_data);
+                        }
+                        cosmic_text::Command::LineTo(p1) => {
+                            let rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.line_to(rounded_data);
+                        }
+                        cosmic_text::Command::CurveTo(p1, p2, p3) => {
+                            let p1_rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p2_rounded_data = (p2.x, p2.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p3_rounded_data = (p3.x, p3.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.cubic_curve_to((
+                                p1_rounded_data,
+                                p2_rounded_data,
+                                p3_rounded_data,
+                            ));
+                        }
+                        cosmic_text::Command::QuadTo(p1, p2) => {
+                            let p1_rounded_data = (p1.x, p1.y).round_to(DEFAULT_SVG_PRECISION);
+                            let p2_rounded_data = (p2.x, p2.y).round_to(DEFAULT_SVG_PRECISION);
+                            data = data.quadratic_curve_to((p1_rounded_data, p2_rounded_data));
+                        }
+                        cosmic_text::Command::Close => {
+                            data = data.close();
+                        }
+                    }
+                }
+            }
+            // Don't add empty data paths
+            if !data.is_empty() {
+                let path = svg::node::element::Path::new()
+                    .set("fill", SVG_GLYPH_FILL_COLOR)
+                    .set(
+                        "transform",
+                        format!("translate({}, {})", x_offset, y_offset),
+                    )
+                    .set("d", data.clone());
+                group = group.add(path);
+            }
+        }
+        // We will need to create a temporary document to get the bounding box
+        // of the entire group
+        let tmp_doc = svg::Document::new().add(group.clone());
+        let tree =
+            resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
+                .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
+        bounding_box = bounding_box.max(tree.root().abs_bounding_box())?;
+
+        // Setup the y translate
+        let y_translate = if bounding_box.y() < 0.0 {
+            // We need the height of the bounding box, minus the absolute value of the y
+            // origin. The reason for the 2nd part is that the y origin is negative, so
+            // so we need the data to be positive
+            bounding_box.height() - (2.0 * bounding_box.y().abs())
+        } else {
+            bounding_box.height()
+        };
+        group.assign(
+            "transform",
+            format!("translate(0, {}) scale(1, -1)", y_translate),
+        );
+        svg_doc.append(group);
+    }
+    svg_doc = svg_doc.set(
+        "viewBox",
+        (
+            bounding_box.x().floor(),
+            bounding_box.y().floor(),
+            bounding_box.width().ceil(),
+            bounding_box.height().ceil(),
+        ),
+    );
+
+    let mut svg_buffer = Vec::new();
+    let svg_cursor = std::io::Cursor::new(&mut svg_buffer);
+    svg::write(svg_cursor, &svg_doc)?;
+    Ok(svg_buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn test_is_supported_font_file() {
+        assert!(is_supported_font_file("ttf"));
+        assert!(is_supported_font_file("TTF"));
+        assert!(is_supported_font_file("otf"));
+        assert!(is_supported_font_file("OTF"));
+        assert!(!is_supported_font_file("woff"));
+    }
+
+    #[test]
+    fn test_is_font_mime_type() {
+        assert!(is_font_mime_type("application/font-sfnt"));
+        assert!(is_font_mime_type("application/x-font-ttf"));
+        assert!(is_font_mime_type("application/x-font-opentype"));
+        assert!(is_font_mime_type("application/x-font-truetype"));
+        assert!(is_font_mime_type("font/otf"));
+        assert!(is_font_mime_type("font/sfnt"));
+        assert!(is_font_mime_type("font/ttf"));
+        assert!(is_font_mime_type("otf"));
+        assert!(is_font_mime_type("sfnt"));
+        assert!(is_font_mime_type("ttf"));
+        assert!(!is_font_mime_type("woff"));
+    }
+
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    #[test]
+    fn test_max_rect() {
+        let rect1 = tiny_skia::Rect::from_ltrb(0.0, 0.0, 10.0, 10.0).unwrap();
+        let rect2 = tiny_skia::Rect::from_ltrb(5.0, 5.0, 10.0, 10.0).unwrap();
+        let max = rect1.max(rect2).unwrap();
+        assert_eq!(max.x(), 0.0);
+        assert_eq!(max.y(), 0.0);
+        assert_eq!(max.width(), 10.0);
+        assert_eq!(max.height(), 10.0);
+
+        let empty_rect = tiny_skia::Rect::from_ltrb(0.0, 0.0, 0.0, 0.0).unwrap();
+        let max = rect2.max(empty_rect).unwrap();
+        assert_eq!(max.x(), 5.0);
+        assert_eq!(max.y(), 5.0);
+        assert_eq!(max.width(), 5.0);
+        assert_eq!(max.height(), 5.0);
+        let max = empty_rect.max(rect2).unwrap();
+        assert_eq!(max.x(), 5.0);
+        assert_eq!(max.y(), 5.0);
+        assert_eq!(max.width(), 5.0);
+        assert_eq!(max.height(), 5.0);
+
+        let neg_rect = tiny_skia::Rect::from_ltrb(-5.0, -5.0, 10.0, 10.0).unwrap();
+        let max = rect2.max(neg_rect).unwrap();
+        assert_eq!(max.x(), -5.0);
+        assert_eq!(max.y(), -5.0);
+        assert_eq!(max.width(), 15.0);
+        assert_eq!(max.height(), 15.0);
+    }
 }
