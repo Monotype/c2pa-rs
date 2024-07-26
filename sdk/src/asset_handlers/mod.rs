@@ -15,6 +15,7 @@ pub mod bmff_io;
 pub mod c2pa_io;
 #[cfg(feature = "font")]
 pub mod font_io;
+pub mod gif_io;
 pub mod jpeg_io;
 pub mod mp3_io;
 pub mod png_io;

@@ -31,8 +31,8 @@ use crate::asset_handlers::sfnt_io::SfntIO;
 use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
-        bmff_io::BmffIO, c2pa_io::C2paIO, jpeg_io::JpegIO, mp3_io::Mp3IO, png_io::PngIO,
-        riff_io::RiffIO, svg_io::SvgIO, tiff_io::TiffIO,
+        bmff_io::BmffIO, c2pa_io::C2paIO, gif_io::GifIO, jpeg_io::JpegIO, mp3_io::Mp3IO,
+        png_io::PngIO, riff_io::RiffIO, svg_io::SvgIO, tiff_io::TiffIO,
     },
     asset_io::{AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashObjectPositions},
     error::{Error, Result},
@@ -52,6 +52,7 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(GifIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
             #[cfg(feature = "woff")]
@@ -84,6 +85,7 @@ lazy_static! {
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(GifIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
             #[cfg(feature = "woff")]
@@ -419,6 +421,7 @@ pub mod tests {
             Box::new(Mp3IO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(RiffIO::new("")),
+            Box::new(GifIO::new("")),
         ];
 
         // build handler map

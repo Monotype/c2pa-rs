@@ -42,24 +42,25 @@ The library has been tested on the following operating systems:
 
 ## Supported file formats
 
- | Extensions    | MIME type                                           |
- | ------------- | --------------------------------------------------- |
- | `avi`         | `video/msvideo`, `video/avi`, `application-msvideo` |
- | `avif`        | `image/avif`                                        |
- | `c2pa`        | `application/x-c2pa-manifest-store`                 |
- | `dng`         | `image/x-adobe-dng`                                 |
- | `heic`        | `image/heic`                                        |
- | `heif`        | `image/heif`                                        |
- | `jpg`, `jpeg` | `image/jpeg`                                        |
- | `m4a`         | `audio/mp4`                                         |
- | `mp4`         | `video/mp4`, `application/mp4`                      |
- | `mov`         | `video/quicktime`                                   |
- | `png`         | `image/png`                                         |
- | `svg`         | `image/svg+xml`                                     |
- | `tif`,`tiff`  | `image/tiff`                                        |
- | `wav`         | `audio/wav`                                         |
- | `webp`        | `image/webp`                                        |
- | `mp3`         | `audio/mpeg`                                        |
+ | Extensions    | MIME type                                                                     |
+ | ------------- | ----------------------------------------------------------------------------- |
+ | `avi`         | `video/msvideo`, `video/x-msvideo`, `video/avi`, `application/x-troff-msvideo`|
+ | `avif`        | `image/avif`                                                                  |
+ | `c2pa`        | `application/x-c2pa-manifest-store`                                           |
+ | `dng`         | `image/x-adobe-dng`                                                           |
+ | `heic`        | `image/heic`                                                                  |
+ | `heif`        | `image/heif`                                                                  |
+ | `jpg`, `jpeg` | `image/jpeg`                                                                  |
+ | `m4a`         | `audio/mp4`                                                                   |
+ | `mp4`         | `video/mp4`, `application/mp4`                                                |
+ | `mov`         | `video/quicktime`                                                             |
+ | `png`         | `image/png`                                                                   |
+ | `svg`         | `image/svg+xml`                                                               |
+ | `tif`,`tiff`  | `image/tiff`                                                                  |
+ | `wav`         | `audio/wav`                                                                   |
+ | `webp`        | `image/webp`                                                                  |
+ | `mp3`         | `audio/mpeg`                                                                  |
+ | `gif`         | `image/gif`                                                                   |
 
 ## Usage
 
@@ -67,7 +68,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-c2pa = "0.32.5"
+c2pa = "0.33.0"
 ```
 
 If you want to read or write a manifest file, add the `file_io` dependency to your `Cargo.toml`.
@@ -100,7 +101,7 @@ The Rust library crate provides:
 * `fetch_remote_manifests` enables the verification step to retrieve externally referenced manifest stores.  External manifests are only fetched if there is no embedded manifest store and no locally adjacent .c2pa manifest store file of the same name.
 * `json_schema` is used by `make schema` to produce a JSON schema document that represents the `ManifestStore` data structures.
 * `psxxx_ocsp_stapling_experimental` this is an demonstration feature that will attempt to fetch the OCSP data from the OCSP responders listed in the manifest signing certificate.  The response becomes part of the manifest and is used to prove the certificate was not revoked at the time of signing.  This is only implemented for PS256, PS384 and PS512 signatures and is intended as a demonstration.
-
+* `openssl_ffi_mutex` prevents multiple threads from accessing the C OpenSSL library simultaneously. (This library is not re-entrant.) In a multi-threaded process (such as Cargo's test runner), this can lead to unpredictable behavior.
 
 ## Example code
 

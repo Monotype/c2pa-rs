@@ -270,6 +270,12 @@ pub enum Error {
 
     // --- third-party errors ---
     #[error(transparent)]
+    Utf8Error(#[from] std::str::Utf8Error),
+
+    #[error(transparent)]
+    TryFromIntError(#[from] std::num::TryFromIntError),
+
+    #[error(transparent)]
     IoError(#[from] std::io::Error),
 
     #[error(transparent)]
@@ -281,6 +287,9 @@ pub enum Error {
 
     #[error(transparent)]
     CborError(#[from] serde_cbor::Error),
+
+    #[error("could not acquire OpenSSL FFI mutex")]
+    OpenSslMutexError,
 
     #[error(transparent)]
     #[cfg(feature = "openssl")]
