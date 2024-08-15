@@ -2933,7 +2933,7 @@ impl Store {
             }
         } else {
             let mut needs_hashing = false;
-            let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
+            let ext = get_file_extension(&asset_path).ok_or(Error::UnsupportedType)?;
             // 2) If we have no hash assertions (and aren't an update manifest),
             // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
