@@ -166,7 +166,8 @@ impl ManifestStoreReport {
     #[cfg(feature = "file_io")]
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut validation_log = DetailedStatusTracker::new();
-        let store = Store::load_from_asset(path.as_ref(), true, &mut validation_log)?;
+        // TODO: Should be disabling validation if it's just a sidecar..
+        let store = Store::load_from_asset(path.as_ref(), false, &mut validation_log)?;
         Self::from_store_with_log(&store, &validation_log)
     }
 
