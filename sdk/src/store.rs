@@ -2944,7 +2944,7 @@ impl Store {
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
-                            &output_path,
+                            &asset_path,
                             pc.alg(),
                             box_hash_handler,
                             false,
@@ -2991,7 +2991,7 @@ impl Store {
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
-                            &output_path,
+                            &asset_path,
                             pc.alg(),
                             box_hash_handler,
                             false,
