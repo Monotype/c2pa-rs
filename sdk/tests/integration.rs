@@ -153,7 +153,7 @@ mod integration_1 {
         manifest.embed(&parent_path, &output_path, signer.as_ref())?;
 
         // read our new file with embedded manifest
-        let manifest_store = ManifestStore::from_file(&output_path)?;
+        let manifest_store = ManifestStore::from_file(&output_path, true)?;
 
         println!("{manifest_store}");
 
@@ -192,7 +192,7 @@ mod integration_1 {
         manifest.embed(&parent_path, &output_path, signer.as_ref())?;
 
         // read our new file with embedded manifest
-        let manifest_store = ManifestStore::from_file(&output_path)?;
+        let manifest_store = ManifestStore::from_file(&output_path, true)?;
 
         println!("{manifest_store}");
         // std::fs::copy(&output_path, "test_file.jpg")?; // for debugging to get copy of the file

@@ -148,7 +148,7 @@ fn user_data_hash_with_sdk_hashing() {
     output_file.write_all(&final_manifest).unwrap();
 
     // make sure the output file is correct
-    let manifest_store = ManifestStore::from_file(&dest).unwrap();
+    let manifest_store = ManifestStore::from_file(&dest, true).unwrap();
 
     // example of how to print out the whole manifest as json
     println!("{manifest_store}\n");
@@ -263,7 +263,7 @@ fn user_data_hash_with_user_hashing() {
     output_file.write_all(&after_buf).unwrap();
 
     // make sure the output file is correct
-    let manifest_store = ManifestStore::from_file(&dest).unwrap();
+    let manifest_store = ManifestStore::from_file(&dest, true).unwrap();
 
     // example of how to print out the whole manifest as json
     println!("{manifest_store}\n");
