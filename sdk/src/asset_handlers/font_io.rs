@@ -773,15 +773,6 @@ pub(crate) struct TableDSIG {
 }
 
 impl TableDSIG {
-    /// Create an empty DSIG dummy table.
-    pub(crate) fn dummy() -> Self {
-        Self {
-            version: 1,
-            numSignatures: 0,
-            flags: 0,
-        }
-    }
-
     /// Creates a new instance, using data from the provided source at a
     /// specific offset.
     pub(crate) fn from_reader<T: Read + Seek + ?Sized>(

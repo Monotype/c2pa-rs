@@ -410,6 +410,13 @@ mod tests {
     }
 
     #[test]
+    fn manifest_store_report_without_verify() {
+        let path = fixture_path("CIE-sig-CA.jpg");
+        let report = ManifestStoreReport::from_file(path, false).expect("load_from_asset");
+        println!("{report}");
+    }
+
+    #[test]
     #[cfg(feature = "v1_api")]
     fn manifest_get_certchain_from_bytes() {
         let bytes = fs::read(fixture_path("CA.jpg")).expect("missing test asset");
