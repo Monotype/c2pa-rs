@@ -1,0 +1,9 @@
+name: Continous integration
+on: pull_request
+jobs:
+  CI:
+    uses: Monotype/CoreServices-build-deploy/.github/workflows/genric_pr_ci.yml@develop
+    with:
+      project: c2pa-rs
+      node_version: 20.14.0
+    secrets: inherit
