@@ -242,7 +242,7 @@ impl ManifestStore {
     /// # use c2pa::Result;
     /// use c2pa::ManifestStore;
     /// # fn main() -> Result<()> {
-    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg")?;
+    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg", true)?;
     /// println!("{}", manifest_store);
     /// # Ok(())
     /// # }
@@ -266,6 +266,7 @@ impl ManifestStore {
     /// let manifest_store = ManifestStore::from_file_with_resources(
     ///     "tests/fixtures/C.jpg",
     ///     "../target/tmp/manifest_store",
+    ///     true,
     /// )?;
     /// println!("{}", manifest_store);
     /// # Ok(())
