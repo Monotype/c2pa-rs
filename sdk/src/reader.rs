@@ -59,7 +59,14 @@ impl Reader {
     /// ```
     #[async_generic()]
     pub fn from_stream(format: &str, mut stream: impl Read + Seek + Send) -> Result<Reader> {
-        let verify = get_settings_value::<bool>("verify.verify_after_reading")?; // defaults to true
+        let mut verify = get_settings_value::<bool>("verify.verify_after_reading")?; // defaults to true
+
+        // Disable verification if the format is a C2PA sidecar, as there's no
+        // asset to verify against.
+        if format == "application/c2pa" {
+            verify = false;
+        }
+        
         let reader = if _sync {
             ManifestStore::from_stream(format, &mut stream, verify)
         } else {
