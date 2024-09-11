@@ -3730,7 +3730,7 @@ pub mod tests {
 
         // read from new file
         let new_store =
-            Store::load_from_asset(&op, true, &mut OneShotStatusTracker::new()).unwrap();
+            Store::load_from_asset(&op, false, &mut OneShotStatusTracker::new()).unwrap();
 
         // can  we get by the ingredient data back
 
