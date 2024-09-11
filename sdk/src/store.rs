@@ -2933,7 +2933,7 @@ impl Store {
             }
         } else {
             let mut needs_hashing = false;
-            let ext = get_file_extension(&dest_path).ok_or(Error::UnsupportedType)?;
+            let ext = get_file_extension(dest_path).ok_or(Error::UnsupportedType)?;
             // 2) If we have no hash assertions (and aren't an update manifest),
             // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
@@ -2944,7 +2944,7 @@ impl Store {
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
-                            &dest_path,
+                            dest_path,
                             pc.alg(),
                             box_hash_handler,
                             false,
@@ -2991,7 +2991,7 @@ impl Store {
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
                         box_hash.generate_box_hash(
-                            &dest_path,
+                            dest_path,
                             pc.alg(),
                             box_hash_handler,
                             false,
