@@ -571,7 +571,7 @@ mod tests {
         let manifest_store = ManifestStore::from_file_with_resources(
             "tests/fixtures/CIE-sig-CA.jpg",
             "../target/ms",
-            true
+            true,
         )
         .expect("from_store_with_resources");
         println!("{manifest_store}");

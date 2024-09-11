@@ -2943,12 +2943,7 @@ impl Store {
                     // hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(
-                            dest_path,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
+                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
                         pc.add_assertion(&box_hash)?;
                     // Otherwise, fall back to data hashing.
                     } else {
@@ -2990,12 +2985,7 @@ impl Store {
                     // the existing box hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(
-                            dest_path,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
+                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
                         pc.replace_box_hash(box_hash)?;
                     }
                     // Otherwise, fall back to data hashing.

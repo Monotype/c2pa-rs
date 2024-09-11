@@ -66,7 +66,7 @@ impl Reader {
         if format == "application/c2pa" {
             verify = false;
         }
-        
+
         let reader = if _sync {
             ManifestStore::from_stream(format, &mut stream, verify)
         } else {
