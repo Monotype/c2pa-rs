@@ -94,7 +94,7 @@ config = { version = "0.14.0", default-features = false, features = [
 ] }
 conv = "0.3.3"
 coset = "0.3.1"
-cosmic-text = { version = "0.11.2", optional = true }
+cosmic-text = { version = "0.12.1", optional = true }
 extfmt = "0.1.1"
 ed25519-dalek = "2.1.1"
 fast-xml = "0.23.1"

@@ -177,7 +177,7 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
 
     // Loop until we find the right size to fit within the maximum width
     while font_size > minimum_point_size {
-        borrowed_buffer.set_size(width, height);
+        borrowed_buffer.set_size(Some(width), Some(height));
         borrowed_buffer.set_wrap(cosmic_text::Wrap::Glyph);
         borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
         borrowed_buffer.shape_until_scroll(true);
@@ -189,7 +189,7 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
             // There instances where the measured width was 0, but maybe this is
             // caught now by counting the number of layout runs?
             if size.w > 0.0 && size.w <= width {
-                borrowed_buffer.set_size(size.w, size.h);
+                borrowed_buffer.set_size(Some(size.w), Some(size.h));
                 return Ok(buffer);
             }
         }
@@ -204,7 +204,7 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
     // which will result in text clipping, but that is fine
     font_size = minimum_point_size;
     line_height = line_height_fn(font_size);
-    borrowed_buffer.set_size(width, line_height);
+    borrowed_buffer.set_size(Some(width), Some(line_height));
     borrowed_buffer.set_metrics(Metrics::new(font_size, line_height));
     borrowed_buffer.shape_until_scroll(true);
     // get the text replacing the last 3 characters with ellipsis
@@ -218,7 +218,7 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
     // We still run the chance of an invalid size returned, so take that into
     // account
     if size.w > 0.0 && size.w <= width && size.h <= height {
-        borrowed_buffer.set_size(size.w, size.h);
+        borrowed_buffer.set_size(Some(size.w), Some(size.h));
         return Ok(buffer);
     }
     Err(FontThumbnailError::FailedToFindAppropriateSize)
@@ -243,6 +243,7 @@ fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFon
         weight,
         metadata: 0,
         cache_key_flags: CacheKeyFlags::empty(),
+        metrics_opt: None,
     };
     Ok(LoadedFont { id: face.id, attrs })
 }
@@ -268,8 +269,11 @@ fn measure_text(
 /// The width may come back as `0.0` if the text is empty or the buffer width is
 /// too small.
 fn measure_text_in_buffer(buffer: &mut BorrowedWithFontSystem<Buffer>) -> Result<Size> {
+    let buffer_width = buffer.size().0.unwrap_or(-1.0);
+    let buffer_height = buffer.size().1.unwrap_or(-1.0);
+
     // Error if the buffer is not a valid/sane looking size
-    if buffer.size().0 < 0. || buffer.size().1 < 0. {
+    if buffer_width < 0.0 || buffer_height < 0.0 {
         return Err(FontThumbnailError::InvalidBufferSize);
     }
     // Find the maximum width of the layout lines and keep track of the total number
@@ -472,8 +476,13 @@ pub fn make_png(
     // calls
     let mut buffer = text_buffer.borrow_with(font_system);
 
-    // Grab the actual width and height of the buffer for the image
-    let (width, height) = buffer.size();
+    // Grab the actual width and height of the buffer for the image, verifying
+    // that the sizes are sane.
+    let width = buffer.size().0.unwrap_or(-1.0);
+    let height = buffer.size().1.unwrap_or(-1.0);
+    if width < 0.0 || height < 0.0 {
+        return Err(FontThumbnailError::InvalidBufferSize.into());
+    }
 
     // Calculate the width taken up by the italic angle
     let width_italic_buffer = match angle {
