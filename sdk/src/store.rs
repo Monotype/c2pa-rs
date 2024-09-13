@@ -1599,18 +1599,25 @@ impl Store {
                 if item.htype == HashBlockObjectType::Cai {
                     // Make sure we have a valid range
                     if item.offset <= (item.offset + item.length) {
-                        let mut exclusion = (item.offset, item.offset + item.length);
-                        // Setup to defragment sections that are contiguous but may have
-                        // been listed as separate
-                        if let Some(last_exclusion) = exclusions.last() {
-                            // If the last exclusion ends where this one starts,
-                            // merge them
-                            if last_exclusion.1 == exclusion.0 {
-                                exclusion.0 = last_exclusion.0;
-                                exclusions.pop();
+                        // If we are calculating hashes, avoid adding an
+                        // exclusion if the CAI block is beyond the end of the
+                        // stream.  Some asset handlers will inject a
+                        // placeholder for the CAI block at the end of the
+                        // stream before the stream itself has the block.
+                        if !calc_hashes || (item.offset + item.length) as u64 <= stream_len {
+                            let mut exclusion = (item.offset, item.offset + item.length);
+                            // Setup to defragment sections that are contiguous but may have
+                            // been listed as separate
+                            if let Some(last_exclusion) = exclusions.last() {
+                                // If the last exclusion ends where this one starts,
+                                // merge them
+                                if last_exclusion.1 == exclusion.0 {
+                                    exclusion.0 = last_exclusion.0;
+                                    exclusions.pop();
+                                }
                             }
+                            exclusions.push(exclusion);
                         }
-                        exclusions.push(exclusion);
                     }
                 }
             }
@@ -1625,7 +1632,6 @@ impl Store {
                 }
 
                 if calc_hashes {
-                    // this check is only valid on the final sized asset
                     if exclusions.iter().any(|x| x.1 as u64 > stream_len) {
                         return Err(Error::BadParam(
                             "data hash exclusions out of range".to_string(),
@@ -2885,9 +2891,9 @@ impl Store {
                     // Otherwise, fall back to data hashing.
                     else {
                         let mut new_hash_ranges =
-                            object_locations_from_stream(format, output_stream)?;
+                            object_locations_from_stream(format, &mut intermediate_stream)?;
                         let updated_hashes = Store::generate_data_hashes_for_stream(
-                            output_stream,
+                            &mut intermediate_stream,
                             pc.alg(),
                             &mut new_hash_ranges,
                             true,
