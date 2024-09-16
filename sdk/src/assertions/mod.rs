@@ -14,7 +14,7 @@
 //! Assertion helpers to build, validate, and parse assertions.
 
 mod actions;
-pub use actions::{c2pa_action, Action, Actions, SoftwareAgent};
+pub use actions::{c2pa_action, Action, ActionTemplate, Actions, SoftwareAgent};
 
 mod bmff_hash;
 pub use bmff_hash::{BmffHash, BmffMerkleMap, DataMap, ExclusionsMap, SubsetMap};
@@ -33,7 +33,8 @@ pub use exif::Exif;
 
 #[allow(dead_code)] // will become public later
 mod ingredient;
-pub(crate) use ingredient::{Ingredient, Relationship};
+pub(crate) use ingredient::Ingredient;
+pub use ingredient::Relationship;
 
 pub mod labels;
 

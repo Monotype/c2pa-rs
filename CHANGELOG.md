@@ -6,6 +6,48 @@ This project adheres to [Semantic Versioning](https://semver.org), except that â
 
 Do not manually edit this file. It will be automatically updated when a new release is published.
 
+## 0.35.0
+_12 September 2024_
+
+* upgrades to riff@2.0.0, preventing panic on invalid riff files ([#579](https://github.com/contentauth/c2pa-rs/pull/579))
+* EC signature DER support ([#581](https://github.com/contentauth/c2pa-rs/pull/581))
+* Update base64 requirement from 0.21.2 to 0.22.1 in /sdk ([#519](https://github.com/contentauth/c2pa-rs/pull/519))
+* (MINOR) Rust API enhancements and fixes. ([#575](https://github.com/contentauth/c2pa-rs/pull/575))
+* Fix GIF off by one with XMP ([#562](https://github.com/contentauth/c2pa-rs/pull/562))
+
+## 0.34.0
+_30 August 2024_
+
+* (MINOR) Fragmented BMFF media ([#572](https://github.com/contentauth/c2pa-rs/pull/572))
+
+## 0.33.4
+_29 August 2024_
+
+* Depend on url crate version 2.5.2 or newer ([#573](https://github.com/contentauth/c2pa-rs/pull/573))
+
+## 0.33.3
+_17 August 2024_
+
+* Inline certs for wasm test signer ([#564](https://github.com/contentauth/c2pa-rs/pull/564))
+
+## 0.33.2
+_15 August 2024_
+
+* Bmff write fix ([#552](https://github.com/contentauth/c2pa-rs/pull/552))
+* Fix remote embedding RIFF when specifying mime type ([#551](https://github.com/contentauth/c2pa-rs/pull/551))
+* Fix data hash out of bounds when using placeholder beyond stream length ([#546](https://github.com/contentauth/c2pa-rs/pull/546))
+* Adds embeddable apis and remote_url/no_embed options ([#537](https://github.com/contentauth/c2pa-rs/pull/537))
+* export_schema: add unstable_api feature ([#542](https://github.com/contentauth/c2pa-rs/pull/542))
+* Ingredient checks ([#529](https://github.com/contentauth/c2pa-rs/pull/529))
+* Add base_path field to Builder ([#539](https://github.com/contentauth/c2pa-rs/pull/539))
+* Export `AssertionDefinition` and `ActionTemplate` in public API ([#522](https://github.com/contentauth/c2pa-rs/pull/522))
+
+## 0.33.1
+_30 July 2024_
+
+* Use timestamp with OpenSSL validation to prevent check chain check erâ€¦ ([#531](https://github.com/contentauth/c2pa-rs/pull/531))
+* Fix GIF `remove_cai_store_from_stream` behavior ([#524](https://github.com/contentauth/c2pa-rs/pull/524))
+
 ## 0.33.0
 _26 July 2024_
 

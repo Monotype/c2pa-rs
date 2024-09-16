@@ -1061,10 +1061,7 @@ impl CAIReader for SfntIO {
     fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
         // Fonts have no XMP data.
         // BUT, for now we will pretend it does and read from the reference
-        match read_reference_from_stream(asset_reader) {
-            Ok(reference) => reference,
-            Err(_) => None,
-        }
+        read_reference_from_stream(asset_reader).unwrap_or_default()
     }
 }
 
