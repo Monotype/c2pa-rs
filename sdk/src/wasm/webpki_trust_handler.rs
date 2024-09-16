@@ -290,7 +290,7 @@ fn cert_signing_alg(cert: &x509_parser::certificate::X509Certificate) -> Option<
     Some(signing_alg)
 }
 
-async fn verify_data(
+pub(crate) async fn verify_data(
     cert_der: Vec<u8>,
     sig_alg: Option<String>,
     sig: Vec<u8>,
@@ -302,13 +302,10 @@ async fn verify_data(
         X509Certificate::from_der(cert_der.as_bytes()).map_err(|_e| Error::CoseCertUntrusted)?;
 
     let certificate_public_key = cert.public_key();
+
     if let Some(cert_alg_string) = sig_alg {
         let (algo, hash, salt_len) = match cert_alg_string.as_str() {
-            "rsa256" => (
-                "RSASSA-PKCS1-v1_5".to_string(),
-                "SHA-256".to_string().to_string(),
-                0,
-            ),
+            "rsa256" => ("RSASSA-PKCS1-v1_5".to_string(), "SHA-256".to_string(), 0),
             "rsa384" => ("RSASSA-PKCS1-v1_5".to_string(), "SHA-384".to_string(), 0),
             "rsa512" => ("RSASSA-PKCS1-v1_5".to_string(), "SHA-512".to_string(), 0),
             "es256" => ("ECDSA".to_string(), "SHA-256".to_string().to_string(), 0),
@@ -534,6 +531,7 @@ pub(crate) async fn verify_trust_async(
     th: &dyn TrustHandlerConfig,
     chain_der: &[Vec<u8>],
     cert_der: &[u8],
+    _signing_time_epoc: Option<i64>,
 ) -> Result<bool> {
     // check configured EKUs against end-entity cert
     find_allowed_eku(cert_der, &th.get_auxillary_ekus()).ok_or(Error::CoseCertUntrusted)?;
@@ -577,28 +575,40 @@ pub mod tests {
         let es512_certs = load_trust_from_data(es512).unwrap();
         let ed25519_certs = load_trust_from_data(ed25519).unwrap();
 
-        assert!(verify_trust_async(&th, &ps256_certs[1..], &ps256_certs[0])
-            .await
-            .unwrap());
-        assert!(verify_trust_async(&th, &ps384_certs[1..], &ps384_certs[0])
-            .await
-            .unwrap());
-        assert!(verify_trust_async(&th, &ps512_certs[1..], &ps512_certs[0])
-            .await
-            .unwrap());
-        assert!(verify_trust_async(&th, &es256_certs[1..], &es256_certs[0])
-            .await
-            .unwrap());
-
-        assert!(verify_trust_async(&th, &es384_certs[1..], &es384_certs[0])
-            .await
-            .unwrap());
-        assert!(verify_trust_async(&th, &es512_certs[1..], &es512_certs[0])
-            .await
-            .unwrap());
+        assert!(
+            verify_trust_async(&th, &ps256_certs[1..], &ps256_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            verify_trust_async(&th, &ps384_certs[1..], &ps384_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            verify_trust_async(&th, &ps512_certs[1..], &ps512_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            verify_trust_async(&th, &es256_certs[1..], &es256_certs[0], None)
+                .await
+                .unwrap()
+        );
 
         assert!(
-            verify_trust_async(&th, &ed25519_certs[1..], &ed25519_certs[0])
+            verify_trust_async(&th, &es384_certs[1..], &es384_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            verify_trust_async(&th, &es512_certs[1..], &es512_certs[0], None)
+                .await
+                .unwrap()
+        );
+
+        assert!(
+            verify_trust_async(&th, &ed25519_certs[1..], &ed25519_certs[0], None)
                 .await
                 .unwrap()
         );
@@ -630,26 +640,38 @@ pub mod tests {
         let es512_certs = load_trust_from_data(es512).unwrap();
         let ed25519_certs = load_trust_from_data(ed25519).unwrap();
 
-        assert!(!verify_trust_async(&th, &ps256_certs[2..], &ps256_certs[0])
-            .await
-            .unwrap());
-        assert!(!verify_trust_async(&th, &ps384_certs[2..], &ps384_certs[0])
-            .await
-            .unwrap());
-        assert!(!verify_trust_async(&th, &ps512_certs[2..], &ps512_certs[0])
-            .await
-            .unwrap());
-        assert!(!verify_trust_async(&th, &es256_certs[2..], &es256_certs[0])
-            .await
-            .unwrap());
-        assert!(!verify_trust_async(&th, &es384_certs[2..], &es384_certs[0])
-            .await
-            .unwrap());
-        assert!(!verify_trust_async(&th, &es512_certs[2..], &es512_certs[0])
-            .await
-            .unwrap());
         assert!(
-            !verify_trust_async(&th, &ed25519_certs[2..], &ed25519_certs[0])
+            !verify_trust_async(&th, &ps256_certs[2..], &ps256_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &ps384_certs[2..], &ps384_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &ps512_certs[2..], &ps512_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &es256_certs[2..], &es256_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &es384_certs[2..], &es384_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &es512_certs[2..], &es512_certs[0], None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !verify_trust_async(&th, &ed25519_certs[2..], &ed25519_certs[0], None)
                 .await
                 .unwrap()
         );

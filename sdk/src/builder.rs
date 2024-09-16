@@ -11,6 +11,8 @@
 // specific language governing permissions and limitations under
 // each license.
 
+#[cfg(feature = "file_io")]
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
     io::{Read, Seek, Write},
@@ -19,24 +21,29 @@ use std::{
 use async_generic::async_generic;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use uuid::Uuid;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 use crate::{
-    assertion::AssertionBase,
+    assertion::AssertionDecodeError,
     assertions::{
-        labels, Actions, CreativeWork, Exif, Metadata, SoftwareAgent, Thumbnail, User, UserCbor,
+        labels, Actions, CreativeWork, DataHash, Exif, Metadata, SoftwareAgent, Thumbnail, User,
+        UserCbor,
     },
     claim::Claim,
     error::{Error, Result},
-    ingredient::Ingredient,
+    // manifest_definition::{AssertionData, AssertionDefinition, ManifestDefinition},
     resource_store::{ResourceRef, ResourceResolver, ResourceStore},
     salt::DefaultSalt,
     store::Store,
     utils::mime::format_to_mime,
-    AsyncSigner, ClaimGeneratorInfo, Signer,
+    AsyncSigner,
+    ClaimGeneratorInfo,
+    HashRange,
+    Ingredient,
+    Signer,
 };
 
 /// Version of the Builder Archive file
@@ -121,10 +128,6 @@ pub struct AssertionDefinition {
     pub label: String,
     pub data: AssertionData,
 }
-
-use serde::de::DeserializeOwned;
-
-use crate::assertion::AssertionDecodeError;
 impl AssertionDefinition {
     pub(crate) fn to_assertion<T: DeserializeOwned>(&self) -> Result<T> {
         match &self.data {
@@ -203,6 +206,7 @@ impl AssertionDefinition {
 /// ```
 #[skip_serializing_none]
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Builder {
     #[serde(flatten)]
     pub definition: ManifestDefinition,
@@ -212,6 +216,10 @@ pub struct Builder {
 
     // If true, the manifest store will not be embedded in the asset on sign
     pub no_embed: bool,
+
+    /// Base path to search for resources.
+    #[cfg(feature = "file_io")]
+    pub base_path: Option<PathBuf>,
 
     /// container for binary assets (like thumbnails)
     #[serde(skip)]
@@ -225,6 +233,13 @@ impl AsRef<Builder> for Builder {
 }
 
 impl Builder {
+    /// Creates a new builder.
+    /// # Returns
+    /// * A new [`Builder`].
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     /// Creates a new builder from a JSON [`ManifestDefinition`] string.
     ///
     /// # Arguments
@@ -238,14 +253,48 @@ impl Builder {
         })
     }
 
+    /// Sets the ClaimGeneratorInfo for this [`Builder`]
+    pub fn set_claim_generator_info<I>(&mut self, claim_generator_info: I) -> &mut Self
+    where
+        I: Into<ClaimGeneratorInfo>,
+    {
+        self.definition.claim_generator_info = [claim_generator_info.into()].to_vec();
+        self
+    }
+
     /// Sets the MIME format for this [`Builder`].
     ///
     /// # Arguments
     /// * `format` - The format of the asset associated with this [`Builder`].
     /// # Returns
     /// * A mutable reference to the [`Builder`].
-    pub fn set_format(&mut self, format: &str) -> &mut Self {
-        self.definition.format = format.to_string();
+    pub fn set_format<S: Into<String>>(&mut self, format: S) -> &mut Self {
+        self.definition.format = format.into();
+        self
+    }
+
+    /// Sets the remote_url for this [`Builder`].
+    /// The url will be injected into the destination asset when signing.
+    /// The signed manifest should be made accessible at that URL for retrieval.
+    /// For remote manifests, the no_embed flag should be set to true.
+    /// # Arguments
+    /// * `url` - The URL where the manifest will be available.
+    /// # Returns
+    /// * A mutable reference to the [`Builder`].
+    pub fn set_remote_url<S: Into<String>>(&mut self, url: S) -> &mut Self {
+        self.remote_url = Some(url.into());
+        self
+    }
+
+    /// Sets the no_embed flag for this [`Builder`].
+    /// If true, the manifest store will not be embedded in the destination asset on sign.
+    /// This is useful for sidecar and remote manifests.
+    /// # Arguments
+    /// * `no_embed` - A boolean flag to set the no_embed flag.
+    /// # Returns
+    /// * A mutable reference to the [`Builder`].
+    pub fn set_no_embed(&mut self, no_embed: bool) -> &mut Self {
+        self.no_embed = no_embed;
         self
     }
 
@@ -260,8 +309,9 @@ impl Builder {
     /// * A mutable reference to the [`Builder`].
     /// # Errors
     /// * If the thumbnail is not valid.
-    pub fn set_thumbnail<R>(&mut self, format: &str, stream: &mut R) -> Result<&mut Self>
+    pub fn set_thumbnail<S, R>(&mut self, format: S, stream: &mut R) -> Result<&mut Self>
     where
+        S: Into<String>,
         R: Read + Seek + ?Sized,
     {
         // just read into a buffer until resource store handles reading streams
@@ -316,7 +366,7 @@ impl Builder {
         Ok(self)
     }
 
-    /// Adds an [`Ingredient`] to the manifest
+    /// Adds an [`Ingredient`] to the manifest with JSON and a stream.
     /// # Arguments
     /// * `ingredient_json` - A JSON string representing the [`Ingredient`].
     /// * `format` - The format of the [`Ingredient`].
@@ -326,7 +376,7 @@ impl Builder {
     /// # Errors
     /// * If the [`Ingredient`] is not valid
     #[async_generic()]
-    pub fn add_ingredient<'a, T, R>(
+    pub fn add_ingredient_from_stream<'a, T, R>(
         &'a mut self,
         ingredient_json: T,
         format: &str,
@@ -345,6 +395,15 @@ impl Builder {
         self.definition.ingredients.push(ingredient);
         #[allow(clippy::unwrap_used)]
         Ok(self.definition.ingredients.last_mut().unwrap()) // ok since we just added it
+    }
+
+    /// Adds an [`Ingredient`] to the manifest from an existing Ingredient.
+    pub fn add_ingredient<I>(&mut self, ingredient: I) -> &mut Self
+    where
+        I: Into<Ingredient>,
+    {
+        self.definition.ingredients.push(ingredient.into());
+        self
     }
 
     /// Adds a resource to the manifest.
@@ -745,6 +804,113 @@ impl Builder {
         Ok(self)
     }
 
+    // Find an assertion in the manifest.
+    pub(crate) fn find_assertion<T: DeserializeOwned>(&self, label: &str) -> Result<T> {
+        if let Some(manifest_assertion) =
+            self.definition.assertions.iter().find(|a| a.label == label)
+        {
+            manifest_assertion.to_assertion()
+        } else {
+            Err(Error::NotFound)
+        }
+    }
+
+    /// Create a placeholder for a hashed data manifest.
+    /// This is only used for applications doing their own data_hashed asset management.
+    /// # Arguments
+    /// * `reserve_size` - The size to reserve for the signature (taken from the signer).
+    /// * `format` - The format of the target asset, the placeholder will be preformatted for this format.
+    /// # Returns
+    /// * The bytes of the c2pa_manifest placeholder.
+    /// # Errors
+    /// * If the placeholder cannot be created.
+    pub fn data_hashed_placeholder(
+        &mut self,
+        reserve_size: usize,
+        format: &str,
+    ) -> Result<Vec<u8>> {
+        let dh: Result<DataHash> = self.find_assertion(DataHash::LABEL);
+        if dh.is_err() {
+            let mut ph = DataHash::new("jumbf manifest", "sha256");
+            for _ in 0..10 {
+                ph.add_exclusion(HashRange::new(0, 2));
+            }
+            self.add_assertion(labels::DATA_HASH, &ph)?;
+        }
+        self.definition.format = format.to_string();
+        self.definition.instance_id = format!("xmp:iid:{}", Uuid::new_v4());
+        let mut store = self.to_store()?;
+        let placeholder = store.get_data_hashed_manifest_placeholder(reserve_size, format)?;
+        Ok(placeholder)
+    }
+
+    /// Create a signed data hashed embeddable manifest using a supplied signer.
+    /// This is used to create a manifest that can be embedded into a stream.
+    /// It allows the caller to do the embedding.
+    /// You must call data_hashed placeholder first to create the placeholder.
+    /// The placeholder is then injected into the asset before calculating hashes
+    /// A source stream can be passed to generate the hashes, or else the hashes mush be provided.
+    ///
+    /// # Arguments
+    /// * `signer` - The signer to use.
+    /// * `data_hash` - The updated data_hash to use for the manifest.
+    /// * `format` - The format of the stream.
+    /// * `source` - The stream to read from.
+    /// # Returns
+    /// * The bytes of the c2pa_manifest that was created (prep-formatted)
+    #[async_generic(async_signature(
+        &mut self,
+        signer: &dyn AsyncSigner,
+        data_hash: &DataHash,
+        format: &str,
+    ))]
+    pub fn sign_data_hashed_embeddable(
+        &mut self,
+        signer: &dyn Signer,
+        data_hash: &DataHash,
+        format: &str,
+    ) -> Result<Vec<u8>> {
+        let mut store = self.to_store()?;
+        if _sync {
+            store.get_data_hashed_embeddable_manifest(data_hash, signer, format, None)
+        } else {
+            store
+                .get_data_hashed_embeddable_manifest_async(data_hash, signer, format, None)
+                .await
+        }
+    }
+
+    /// Create a signed box hashed embeddable manifest using a supplied signer.
+    /// This is used to create a manifest that can be embedded into a stream.
+    /// It allows the caller to do the embedding.
+    /// The manifest definition must already include a BoxHash assertion.
+    ///
+    /// # Arguments
+    /// * `signer` - The signer to use.
+    /// # Returns
+    /// * The bytes of the c2pa_manifest that was created (prep-formatted)
+    #[async_generic(async_signature(
+        &mut self,
+        signer: &dyn AsyncSigner,
+        format: &str
+    ))]
+    pub fn sign_box_hashed_embeddable(
+        &mut self,
+        signer: &dyn Signer,
+        format: &str,
+    ) -> Result<Vec<u8>> {
+        self.definition.instance_id = format!("xmp:iid:{}", Uuid::new_v4());
+
+        let mut store = self.to_store()?;
+        let bytes = if _sync {
+            store.get_box_hashed_embeddable_manifest(signer)
+        } else {
+            store.get_box_hashed_embeddable_manifest_async(signer).await
+        }?;
+        // get composed version for embedding to JPEG
+        Store::get_composed_manifest(&bytes, format)
+    }
+
     /// Embed a signed manifest into a stream using a supplied signer.
     /// # Arguments
     /// * `format` - The format of the stream
@@ -777,6 +943,11 @@ impl Builder {
         self.definition.format.clone_from(&format);
         // todo:: read instance_id from xmp from stream ?
         self.definition.instance_id = format!("xmp:iid:{}", Uuid::new_v4());
+
+        #[cfg(feature = "file_io")]
+        if let Some(base_path) = &self.base_path {
+            self.resources.set_base_path(base_path);
+        }
 
         // generate thumbnail if we don't already have one
         #[cfg(feature = "add_thumbnails")]
@@ -832,8 +1003,12 @@ impl Builder {
                 "Destination file already exists".to_string(),
             ));
         };
+        if self.definition.title.is_none() {
+            if let Some(title) = dest.file_name() {
+                self.definition.title = Some(title.to_string_lossy().to_string());
+            }
+        }
         let mut dest = std::fs::File::create(dest)?;
-
         self.sign(signer, &format, &mut source, &mut dest)
     }
 }
@@ -849,7 +1024,14 @@ mod tests {
     use wasm_bindgen_test::*;
 
     use super::*;
-    use crate::{utils::test::temp_signer, Reader};
+    use crate::{
+        assertions::BoxHash,
+        asset_handlers::jpeg_io::JpegIO,
+        hash_stream_by_alg,
+        utils::test::{temp_signer, write_jpeg_placeholder_stream},
+        Reader,
+    };
+
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
@@ -883,7 +1065,7 @@ mod tests {
             "instance_id": "1234",
             "thumbnail": {
                 "format": "image/jpeg",
-                "identifier": "thumbnail1.jpg"
+                "identifier": "thumbnail.jpg"
             },
             "ingredients": [
                 {
@@ -903,9 +1085,22 @@ mod tests {
         .to_string()
     }
 
+    fn simple_manifest() -> String {
+        json!({
+            "claim_generator_info": [
+                {
+                    "name": "c2pa_test",
+                    "version": "1.0.0"
+                }
+            ]
+        })
+        .to_string()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     const TEST_IMAGE_CLEAN: &[u8] = include_bytes!("../tests/fixtures/IMG_0003.jpg");
     const TEST_IMAGE: &[u8] = include_bytes!("../tests/fixtures/CA.jpg");
+    const TEST_THUMBNAIL: &[u8] = include_bytes!("../tests/fixtures/thumbnail.jpg");
 
     #[test]
     /// example of creating a builder directly with a [`ManifestDefinition`]
@@ -931,7 +1126,7 @@ mod tests {
         };
 
         builder
-            .add_ingredient(parent_json(), "image/jpeg", &mut image)
+            .add_ingredient_from_stream(parent_json(), "image/jpeg", &mut image)
             .unwrap();
 
         builder
@@ -978,7 +1173,7 @@ mod tests {
         assert_eq!(definition.instance_id, "1234".to_string());
         assert_eq!(
             definition.thumbnail.clone().unwrap().identifier.as_str(),
-            "thumbnail1.jpg"
+            "thumbnail.jpg"
         );
         assert_eq!(definition.ingredients[0].title(), "Test".to_string());
         assert_eq!(
@@ -1013,12 +1208,12 @@ mod tests {
 
         let mut builder = Builder::from_json(&manifest_json()).unwrap();
         builder
-            .add_ingredient(parent_json().to_string(), format, &mut source)
+            .add_ingredient_from_stream(parent_json().to_string(), format, &mut source)
             .unwrap();
 
         builder
             .resources
-            .add("thumbnail1.jpg", TEST_IMAGE.to_vec())
+            .add("thumbnail.jpg", TEST_THUMBNAIL.to_vec())
             .unwrap();
 
         builder
@@ -1074,7 +1269,7 @@ mod tests {
         let mut builder = Builder::from_json(&manifest_json()).unwrap();
 
         builder
-            .add_resource("thumbnail1.jpg", Cursor::new(TEST_IMAGE))
+            .add_resource("thumbnail.jpg", Cursor::new(TEST_THUMBNAIL))
             .unwrap();
 
         // sign and write to the output stream
@@ -1121,11 +1316,11 @@ mod tests {
 
             let mut builder = Builder::from_json(&manifest_json()).unwrap();
             builder
-                .add_ingredient(parent_json(), format, &mut source)
+                .add_ingredient_from_stream(parent_json(), format, &mut source)
                 .unwrap();
 
             builder
-                .add_resource("thumbnail1.jpg", Cursor::new(TEST_IMAGE))
+                .add_resource("thumbnail.jpg", Cursor::new(TEST_THUMBNAIL))
                 .unwrap();
 
             // sign and write to the output stream
@@ -1168,12 +1363,12 @@ mod tests {
 
         let mut builder = Builder::from_json(&manifest_json()).unwrap();
         builder
-            .add_ingredient(parent_json(), format, &mut source)
+            .add_ingredient_from_stream(parent_json(), format, &mut source)
             .unwrap();
 
         builder
             .resources
-            .add("thumbnail1.jpg", TEST_IMAGE.to_vec())
+            .add("thumbnail.jpg", TEST_THUMBNAIL.to_vec())
             .unwrap();
 
         // sign the ManifestStoreBuilder and write it to the output stream
@@ -1187,9 +1382,10 @@ mod tests {
         dest.rewind().unwrap();
         let manifest_store = Reader::from_stream(format, &mut dest).expect("from_bytes");
 
-        println!("{}", manifest_store);
+        //println!("{}", manifest_store);
         #[cfg(not(target_arch = "wasm32"))] // skip this until we get wasm async signing working
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
+
         assert_eq!(
             manifest_store.active_manifest().unwrap().title().unwrap(),
             "Test_Manifest"
@@ -1207,7 +1403,7 @@ mod tests {
         builder.no_embed = true;
 
         builder
-            .add_resource("thumbnail1.jpg", Cursor::new(TEST_IMAGE))
+            .add_resource("thumbnail.jpg", Cursor::new(TEST_THUMBNAIL))
             .unwrap();
 
         // sign the ManifestStoreBuilder and write it to the output stream
@@ -1228,5 +1424,169 @@ mod tests {
 
         println!("{}", reader.json());
         assert!(reader.validation_status().is_none());
+    }
+
+    #[test]
+    fn test_builder_data_hashed_embeddable() {
+        const CLOUD_IMAGE: &[u8] = include_bytes!("../tests/fixtures/cloud.jpg");
+        let mut input_stream = Cursor::new(CLOUD_IMAGE);
+
+        let signer = temp_signer();
+
+        let mut builder = Builder::from_json(&simple_manifest()).unwrap();
+
+        // get a placeholder the manifest
+        let placeholder = builder
+            .data_hashed_placeholder(signer.reserve_size(), "image/jpeg")
+            .unwrap();
+
+        let mut output_stream = Cursor::new(Vec::new());
+
+        // write a jpeg file with a placeholder for the manifest (returns offset of the placeholder)
+        let offset = write_jpeg_placeholder_stream(
+            &placeholder,
+            "image/jpeg",
+            &mut input_stream,
+            &mut output_stream,
+            None,
+        )
+        .unwrap();
+
+        println!("offset: {}, size {}", offset, output_stream.get_ref().len());
+        // create an hash exclusion for the manifest
+        let exclusion = crate::HashRange::new(offset, placeholder.len());
+        let exclusions = vec![exclusion];
+
+        let mut dh = DataHash::new("source_hash", "sha256");
+        dh.exclusions = Some(exclusions);
+
+        // Hash the bytes excluding the manifest we inserted
+        output_stream.rewind().unwrap();
+        let hash =
+            hash_stream_by_alg("sha256", &mut output_stream, dh.exclusions.clone(), true).unwrap();
+        dh.set_hash(hash);
+
+        // get the embeddable manifest, letting API do the hashing
+        let signed_manifest: Vec<u8> = builder
+            .sign_data_hashed_embeddable(signer.as_ref(), &dh, "image/jpeg")
+            .unwrap();
+
+        use std::io::{Seek, SeekFrom, Write};
+
+        output_stream.seek(SeekFrom::Start(offset as u64)).unwrap();
+        output_stream.write_all(&signed_manifest).unwrap();
+        output_stream.flush().unwrap();
+
+        output_stream.rewind().unwrap();
+
+        let reader = crate::Reader::from_stream("image/jpeg", output_stream).unwrap();
+        println!("{reader}");
+        #[cfg(not(target_arch = "wasm32"))] // skip this until we get wasm async signing working
+        assert!(reader.validation_status().is_none());
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), actix::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn test_builder_box_hashed_embeddable() {
+        use crate::asset_io::{CAIWriter, HashBlockObjectType};
+        const BOX_HASH_IMAGE: &[u8] = include_bytes!("../tests/fixtures/boxhash.jpg");
+        const BOX_HASH: &[u8] = include_bytes!("../tests/fixtures/boxhash.json");
+
+        let mut input_stream = Cursor::new(BOX_HASH_IMAGE);
+
+        // get saved box hash settings
+        let box_hash: BoxHash = serde_json::from_slice(BOX_HASH).unwrap();
+
+        let mut builder = Builder::from_json(&manifest_json()).unwrap();
+        builder
+            .add_resource("thumbnail.jpg", Cursor::new(TEST_IMAGE))
+            .unwrap();
+
+        builder.add_assertion(labels::BOX_HASH, &box_hash).unwrap();
+
+        let signer = crate::utils::test::temp_async_signer();
+
+        let manifest_bytes = builder
+            .sign_box_hashed_embeddable_async(signer.as_ref(), "image/jpeg")
+            .await
+            .unwrap();
+
+        // insert manifest into output asset
+        let jpeg_io = JpegIO {};
+        let ol = jpeg_io
+            .get_object_locations_from_stream(&mut input_stream)
+            .unwrap();
+        input_stream.rewind().unwrap();
+
+        let cai_loc = ol
+            .iter()
+            .find(|o| o.htype == HashBlockObjectType::Cai)
+            .unwrap();
+
+        // build new asset in memory inserting new manifest
+        let outbuf = Vec::new();
+        let mut out_stream = Cursor::new(outbuf);
+
+        // write before
+        let mut before = vec![0u8; cai_loc.offset];
+        input_stream.read_exact(before.as_mut_slice()).unwrap();
+        out_stream.write_all(&before).unwrap();
+
+        // write composed bytes
+        out_stream.write_all(&manifest_bytes).unwrap();
+
+        // write bytes after
+        let mut after_buf = Vec::new();
+        input_stream.read_to_end(&mut after_buf).unwrap();
+        out_stream.write_all(&after_buf).unwrap();
+
+        out_stream.rewind().unwrap();
+
+        let _reader = crate::Reader::from_stream_async("image/jpeg", out_stream)
+            .await
+            .unwrap();
+        //println!("{reader}");
+        #[cfg(not(target_arch = "wasm32"))] // skip this until we get wasm async signing working
+        assert_eq!(_reader.validation_status(), None);
+    }
+
+    #[cfg(feature = "file_io")]
+    #[test]
+    fn test_builder_base_path() {
+        let mut source = Cursor::new(TEST_IMAGE_CLEAN);
+        let mut dest = Cursor::new(Vec::new());
+
+        let mut builder = Builder::from_json(&manifest_json()).unwrap();
+        builder.base_path = Some(std::path::PathBuf::from("tests/fixtures"));
+
+        // Ensure that we can zip and unzip, saving the base path
+        let mut zipped = Cursor::new(Vec::new());
+        builder.to_archive(&mut zipped).unwrap();
+
+        // unzip the manifest builder from the zipped stream
+        zipped.rewind().unwrap();
+        let mut builder = Builder::from_archive(&mut zipped).unwrap();
+
+        // sign the ManifestStoreBuilder and write it to the output stream
+        let signer = temp_signer();
+        let _manifest_data = builder
+            .sign(signer.as_ref(), "image/jpeg", &mut source, &mut dest)
+            .unwrap();
+
+        // read and validate the signed manifest store
+        dest.rewind().unwrap();
+        let reader = Reader::from_stream("image/jpeg", &mut dest).expect("from_bytes");
+
+        //println!("{}", reader);
+        assert!(reader.validation_status().is_none());
+        assert_eq!(
+            reader
+                .active_manifest()
+                .unwrap()
+                .thumbnail_ref()
+                .unwrap()
+                .format,
+            "image/jpeg",
+        );
     }
 }

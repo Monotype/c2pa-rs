@@ -13,12 +13,16 @@
 
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Seek, SeekFrom},
+    io::{Cursor, Read, Seek},
 };
 #[cfg(feature = "file_io")]
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use async_generic::async_generic;
+use async_recursion::async_recursion;
 use log::error;
 
 #[cfg(feature = "file_io")]
@@ -61,6 +65,7 @@ use crate::{
     trust_handler::TrustHandlerConfig,
     utils::{
         hash_utils::{hash_sha256, HashRange},
+        io_utils::stream_len,
         patch::patch_bytes,
     },
     validation_status, AsyncSigner, RemoteSigner, Signer,
@@ -1302,15 +1307,21 @@ impl Store {
                         )?;
                     }
 
-                    // make sure
+                    let check_ingredient_trust: bool =
+                        crate::settings::get_settings_value("verify.check_ingredient_trust")?;
+
                     // verify the ingredient claim
                     Claim::verify_claim(
                         ingredient,
                         asset_data,
                         false,
+                        check_ingredient_trust,
                         store.trust_handler(),
                         validation_log,
                     )?;
+
+                    // recurse nested ingredients
+                    Store::ingredient_checks(store, ingredient, asset_data, validation_log)?;
                 } else {
                     let log_item = log_item!(
                         &c2pa_manifest.url(),
@@ -1372,6 +1383,7 @@ impl Store {
     }
 
     // wake the ingredients and validate
+    #[async_recursion(?Send)]
     async fn ingredient_checks_async(
         store: &Store,
         claim: &Claim,
@@ -1415,15 +1427,24 @@ impl Store {
                             )),
                         )?;
                     }
+
+                    let check_ingredient_trust: bool =
+                        crate::settings::get_settings_value("verify.check_ingredient_trust")?;
+
                     // verify the ingredient claim
                     Claim::verify_claim_async(
                         ingredient,
                         asset_data,
                         false,
+                        check_ingredient_trust,
                         store.trust_handler(),
                         validation_log,
                     )
                     .await?;
+
+                    // recurse nested ingredients
+                    Store::ingredient_checks_async(store, ingredient, asset_data, validation_log)
+                        .await?;
                 } else {
                     let log_item = log_item!(
                         &c2pa_manifest.url(),
@@ -1475,6 +1496,7 @@ impl Store {
             claim,
             asset_data,
             true,
+            true,
             store.trust_handler(),
             validation_log,
         )
@@ -1513,6 +1535,7 @@ impl Store {
             claim,
             asset_data,
             true,
+            true,
             store.trust_handler(),
             validation_log,
         )?;
@@ -1549,7 +1572,7 @@ impl Store {
             return Ok(out);
         }
 
-        let stream_len = stream.seek(SeekFrom::End(0))?;
+        let stream_len = stream_len(stream)?;
         stream.rewind()?;
 
         let mut hashes: Vec<DataHash> = Vec::new();
@@ -1576,18 +1599,25 @@ impl Store {
                 if item.htype == HashBlockObjectType::Cai {
                     // Make sure we have a valid range
                     if item.offset <= (item.offset + item.length) {
-                        let mut exclusion = (item.offset, item.offset + item.length);
-                        // Setup to defragment sections that are contiguous but may have
-                        // been listed as separate
-                        if let Some(last_exclusion) = exclusions.last() {
-                            // If the last exclusion ends where this one starts,
-                            // merge them
-                            if last_exclusion.1 == exclusion.0 {
-                                exclusion.0 = last_exclusion.0;
-                                exclusions.pop();
+                        // If we are calculating hashes, avoid adding an
+                        // exclusion if the CAI block is beyond the end of the
+                        // stream.  Some asset handlers will inject a
+                        // placeholder for the CAI block at the end of the
+                        // stream before the stream itself has the block.
+                        if !calc_hashes || (item.offset + item.length) as u64 <= stream_len {
+                            let mut exclusion = (item.offset, item.offset + item.length);
+                            // Setup to defragment sections that are contiguous but may have
+                            // been listed as separate
+                            if let Some(last_exclusion) = exclusions.last() {
+                                // If the last exclusion ends where this one starts,
+                                // merge them
+                                if last_exclusion.1 == exclusion.0 {
+                                    exclusion.0 = last_exclusion.0;
+                                    exclusions.pop();
+                                }
                             }
+                            exclusions.push(exclusion);
                         }
-                        exclusions.push(exclusion);
                     }
                 }
             }
@@ -1602,7 +1632,6 @@ impl Store {
                 }
 
                 if calc_hashes {
-                    // this check is only valid on the final sized asset
                     if exclusions.iter().any(|x| x.1 as u64 > stream_len) {
                         return Err(Error::BadParam(
                             "data hash exclusions out of range".to_string(),
@@ -1645,13 +1674,17 @@ impl Store {
             if found_jumbf {
                 // add exclusion hash for bytes before and after jumbf
                 let mut dh = DataHash::new("jumbf manifest", alg);
-                if block_end > block_start {
-                    dh.add_exclusion(HashRange::new(block_start, block_end - block_start));
-                }
 
                 if calc_hashes {
+                    if block_end > block_start && (block_end as u64) <= stream_len {
+                        dh.add_exclusion(HashRange::new(block_start, block_end - block_start));
+                    }
+
                     // this check is only valid on the final sized asset
-                    if block_end as u64 > stream_len {
+                    //
+                    // a case may occur where there is no existing manifest in the stream and the
+                    // asset handler creates a placeholder beyond the length of the stream
+                    if block_end as u64 > stream_len + (block_end - block_start) as u64 {
                         return Err(Error::BadParam(
                             "data hash exclusions out of range".to_string(),
                         ));
@@ -1659,6 +1692,10 @@ impl Store {
 
                     dh.gen_hash_from_stream(stream)?;
                 } else {
+                    if block_end > block_start {
+                        dh.add_exclusion(HashRange::new(block_start, block_end - block_start));
+                    }
+
                     match alg {
                         "sha256" => dh.set_hash([0u8; 32].to_vec()),
                         "sha384" => dh.set_hash([0u8; 48].to_vec()),
@@ -1673,17 +1710,14 @@ impl Store {
         Ok(hashes)
     }
 
-    fn generate_bmff_data_hashes_for_stream(
+    fn generate_bmff_data_hash_for_stream(
         asset_stream: &mut dyn CAIRead,
         alg: &str,
         calc_hashes: bool,
-    ) -> Result<Vec<BmffHash>> {
-        use serde_bytes::ByteBuf;
-
+        flat_fragmented_w_merkle: bool,
+    ) -> Result<BmffHash> {
         // The spec has mandatory BMFF exclusion ranges for certain atoms.
         // The function makes sure those are included.
-
-        let mut hashes: Vec<BmffHash> = Vec::new();
 
         let mut dh = BmffHash::new("jumbf manifest", alg, None);
         let exclusions = dh.exclusions_mut();
@@ -1704,6 +1738,11 @@ impl Store {
         let ftyp = ExclusionsMap::new("/ftyp".to_owned());
         exclusions.push(ftyp);
 
+        // /mfra/ exclusion
+        let mfra = ExclusionsMap::new("/mfra".to_owned());
+        exclusions.push(mfra);
+
+        /*  no longer mandatory
         // meta/iloc exclusion
         let iloc = ExclusionsMap::new("/meta/iloc".to_owned());
         exclusions.push(iloc);
@@ -1753,19 +1792,19 @@ impl Store {
         trun.subset = Some(subset_trun_vec);
         trun.flags = Some(ByteBuf::from([1, 0, 0]));
         exclusions.push(trun);
-
-        // V2 exclusions
-        /*  Enable this when we support Merkle trees and fragmented MP4
-        // /mdat exclusion
-        let mut mdat = ExclusionsMap::new("/mdat".to_owned());
-        let subset_mdat = SubsetMap {
-            offset: 16,
-            length: 0,
-        };
-        let subset_mdat_vec = vec![subset_mdat];
-        mdat.subset = Some(subset_mdat_vec);
-        exclusions.push(mdat);
         */
+
+        // enable flat flat files with Merkle trees
+        if flat_fragmented_w_merkle {
+            let mut mdat = ExclusionsMap::new("/mdat".to_owned());
+            let subset_mdat = SubsetMap {
+                offset: 16,
+                length: 0,
+            };
+            let subset_mdat_vec = vec![subset_mdat];
+            mdat.subset = Some(subset_mdat_vec);
+            exclusions.push(mdat);
+        }
 
         if calc_hashes {
             dh.gen_hash_from_stream(asset_stream)?;
@@ -1777,9 +1816,8 @@ impl Store {
                 _ => return Err(Error::UnsupportedType),
             }
         }
-        hashes.push(dh);
 
-        Ok(hashes)
+        Ok(dh)
     }
 
     // move or copy data from source to dest
@@ -2073,6 +2111,113 @@ impl Store {
             }
         }
         Err(Error::UnsupportedType)
+    }
+
+    #[cfg(feature = "file_io")]
+    fn start_save_bmff_fragmented(
+        &mut self,
+        asset_path: &Path,
+        fragments: &Vec<std::path::PathBuf>,
+        output_dir: &Path,
+        reserve_size: usize,
+    ) -> Result<Vec<u8>> {
+        // get the provenance claim changing mutability
+        let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
+        pc.clear_data(); // clear since we are reusing an existing claim
+
+        let output_filename = asset_path.file_name().ok_or(Error::NotFound)?;
+        let dest_path = output_dir.join(output_filename);
+
+        let mut data;
+
+        // 2) Get hash ranges if needed
+        let mut asset_stream = std::fs::File::open(asset_path)?;
+        let mut bmff_hash =
+            Store::generate_bmff_data_hash_for_stream(&mut asset_stream, pc.alg(), false, false)?;
+        bmff_hash.clear_hash();
+
+        // generate fragments and produce Merkle tree
+        bmff_hash.add_merkle_for_fragmented(
+            pc.alg(),
+            asset_path,
+            fragments,
+            output_dir,
+            1,
+            None,
+        )?;
+
+        // add in the BMFF assertion
+        pc.add_assertion(&bmff_hash)?;
+
+        // 3) Generate in memory CAI jumbf block
+        // and write preliminary jumbf store to file
+        // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
+        data = self.to_jumbf_internal(reserve_size)?;
+        let jumbf_size = data.len();
+        save_jumbf_to_file(&data, &dest_path, Some(&dest_path))?;
+
+        // generate actual hash values
+        let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?; // reborrow to change mutability
+
+        let bmff_hashes = pc.bmff_hash_assertions();
+
+        if !bmff_hashes.is_empty() {
+            let mut bmff_hash = BmffHash::from_assertion(bmff_hashes[0])?;
+            bmff_hash.update_fragmented_inithash(&dest_path)?;
+            pc.update_bmff_hash(bmff_hash)?;
+        }
+
+        // regenerate the jumbf because the cbor changed
+        data = self.to_jumbf_internal(reserve_size)?;
+        if jumbf_size != data.len() {
+            return Err(Error::JumbfCreationError);
+        }
+
+        Ok(data) // return JUMBF data
+    }
+
+    /// Embed the claims store as jumbf into fragmented assets.
+    #[cfg(feature = "file_io")]
+    pub fn save_to_bmff_fragmented(
+        &mut self,
+        asset_path: &Path,
+        fragments: &Vec<std::path::PathBuf>,
+        output_path: &Path,
+        signer: &dyn Signer,
+    ) -> Result<()> {
+        match get_supported_file_extension(asset_path) {
+            Some(ext) => {
+                if !is_bmff_format(&ext) {
+                    return Err(Error::UnsupportedType);
+                }
+            }
+            None => return Err(Error::UnsupportedType),
+        }
+
+        let mut validation_log = OneShotStatusTracker::new();
+        let jumbf = self.to_jumbf(signer)?;
+
+        // use temp store so mulitple calls will work (the Store is not finalized this way)
+        let mut temp_store = Store::from_jumbf(&jumbf, &mut validation_log)?;
+
+        let jumbf_bytes = temp_store.start_save_bmff_fragmented(
+            asset_path,
+            fragments,
+            output_path,
+            signer.reserve_size(),
+        )?;
+
+        let pc = temp_store.provenance_claim().ok_or(Error::ClaimEncoding)?;
+        let sig = temp_store.sign_claim(pc, signer, signer.reserve_size())?;
+        let sig_placeholder = Store::sign_claim_placeholder(pc, signer.reserve_size());
+
+        let output_filename = asset_path.file_name().ok_or(Error::NotFound)?;
+        let dest_path = output_path.join(output_filename);
+
+        match temp_store.finish_save(jumbf_bytes, &dest_path, sig, &sig_placeholder) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     /// Embed the claims store as jumbf into a stream. Updates XMP with provenance record.
@@ -2566,7 +2711,7 @@ impl Store {
         let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
 
         // Add remote reference XMP if needed and strip out existing manifest
-        // We don't need to strip manifests if we are replacing an exsiting one
+        // We don't need to strip manifests if we are replacing an existing one
         let (url, remove_manifests) = match pc.remote_manifest() {
             RemoteManifest::NoRemote => (None, false),
             RemoteManifest::SideCar => (None, true),
@@ -2626,14 +2771,13 @@ impl Store {
             // 2) Get hash ranges if needed, do not generate for update manifests
             if !pc.update_manifest() {
                 intermediate_stream.rewind()?;
-                let bmff_hashes = Store::generate_bmff_data_hashes_for_stream(
+                let bmff_hash = Store::generate_bmff_data_hash_for_stream(
                     &mut intermediate_stream,
                     pc.alg(),
                     false,
+                    false,
                 )?;
-                for hash in bmff_hashes {
-                    pc.add_assertion(&hash)?;
-                }
+                pc.add_assertion(&bmff_hash)?;
             }
 
             // 3) Generate in memory CAI jumbf block
@@ -2747,9 +2891,9 @@ impl Store {
                     // Otherwise, fall back to data hashing.
                     else {
                         let mut new_hash_ranges =
-                            object_locations_from_stream(format, output_stream)?;
+                            object_locations_from_stream(format, &mut intermediate_stream)?;
                         let updated_hashes = Store::generate_data_hashes_for_stream(
-                            output_stream,
+                            &mut intermediate_stream,
                             pc.alg(),
                             &mut new_hash_ranges,
                             true,
@@ -2906,18 +3050,16 @@ impl Store {
             // 2) Get hash ranges if needed, do not generate for update manifests
             if !pc.update_manifest() {
                 let mut file = std::fs::File::open(asset_path)?;
-                let bmff_hashes =
-                    Store::generate_bmff_data_hashes_for_stream(&mut file, pc.alg(), false)?;
-                for hash in bmff_hashes {
-                    pc.add_assertion(&hash)?;
-                }
+                let bmff_hash =
+                    Store::generate_bmff_data_hash_for_stream(&mut file, pc.alg(), false, false)?;
+                pc.add_assertion(&bmff_hash)?;
             }
 
             // 3) Generate in memory CAI jumbf block
             // and write preliminary jumbf store to file
             // source and dest the same so save_jumbf_to_file will use the same file since we have already cloned
             data = self.to_jumbf_internal(reserve_size)?;
-            save_jumbf_to_file(&data, &output_path, Some(&output_path))?;
+            save_jumbf_to_file(&data, &output_path, Some(dest_path))?;
 
             // generate actual hash values
             let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?; // reborrow to change mutability
@@ -3363,6 +3505,38 @@ impl Store {
         }
 
         Ok(store)
+    }
+
+    /// Load Store from a init and fragments
+    /// asset_type: asset extension or mime type
+    /// init_segment: reader for the file containing the initialization segments
+    /// fragments: list of paths to the fragments to verify
+    /// verify: if true will run verification checks when loading, all fragments must verify for Ok status
+    /// validation_log: If present all found errors are logged and returned, otherwise first error causes exit and is returned
+    #[cfg(feature = "file_io")]
+    pub fn load_from_file_and_fragments(
+        asset_type: &str,
+        init_segment: &mut dyn CAIRead,
+        fragments: &Vec<PathBuf>,
+        verify: bool,
+        validation_log: &mut impl StatusTracker,
+    ) -> Result<Store> {
+        let mut init_seg_data = Vec::new();
+        init_segment.read_to_end(&mut init_seg_data)?;
+
+        Store::get_store_from_memory(asset_type, &init_seg_data, validation_log).and_then(|store| {
+            // verify the store
+            if verify {
+                // verify store and claims
+                Store::verify_store(
+                    &store,
+                    &mut ClaimAssetData::StreamFragments(init_segment, fragments, asset_type),
+                    validation_log,
+                )?;
+            }
+
+            Ok(store)
+        })
     }
 
     /// Load Store from a in-memory asset
@@ -3908,7 +4082,17 @@ pub mod tests {
 
         // make sure we can read from new file
         let mut report = DetailedStatusTracker::new();
-        let _new_store = Store::load_from_asset(&op, true, &mut report).unwrap();
+        let new_store = Store::load_from_asset(&op, false, &mut report).unwrap();
+        Store::verify_store_async(
+            &new_store,
+            &mut ClaimAssetData::Path(op.as_path()),
+            &mut report,
+        )
+        .await
+        .unwrap();
+
+        let errors = report_split_errors(report.get_log_mut());
+        assert!(errors.is_empty());
     }
 
     #[actix::test]
@@ -3935,7 +4119,18 @@ pub mod tests {
 
         // make sure we can read from new file
         let mut report = DetailedStatusTracker::new();
-        let _new_store = Store::load_from_asset(&op, true, &mut report).unwrap();
+        let new_store = Store::load_from_asset(&op, false, &mut report).unwrap();
+
+        Store::verify_store_async(
+            &new_store,
+            &mut ClaimAssetData::Path(op.as_path()),
+            &mut report,
+        )
+        .await
+        .unwrap();
+
+        let errors = report_split_errors(report.get_log_mut());
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -4792,13 +4987,8 @@ pub mod tests {
         assert!(!report.get_log().is_empty());
         let errors = report_split_errors(report.get_log_mut());
 
-        assert!(report_has_err(&errors, Error::CoseSignature));
         assert!(report_has_err(&errors, Error::CoseTimeStampMismatch));
 
-        assert!(report_has_status(
-            &errors,
-            validation_status::CLAIM_SIGNATURE_MISMATCH
-        ));
         assert!(report_has_status(
             &errors,
             validation_status::TIMESTAMP_MISMATCH
@@ -4909,7 +5099,13 @@ pub mod tests {
         let mut report = DetailedStatusTracker::new();
 
         // can we read back in
-        let _new_store = Store::load_from_asset(&op, true, &mut report).unwrap();
+        let new_store = Store::load_from_asset(&op, true, &mut report).unwrap();
+
+        let errors = report_split_errors(report.get_log_mut());
+
+        assert!(errors.is_empty());
+
+        println!("store = {new_store}");
     }
 
     #[test]
@@ -5215,11 +5411,18 @@ pub mod tests {
 
         // make sure we can read from new file
         let mut report = DetailedStatusTracker::new();
-        let _new_store = Store::load_from_memory("jpeg", &result, true, &mut report).unwrap();
+        let new_store = Store::load_from_memory("jpeg", &result, false, &mut report).unwrap();
+
+        Store::verify_store_async(
+            &new_store,
+            &mut ClaimAssetData::Bytes(&result, "jpg"),
+            &mut report,
+        )
+        .await
+        .unwrap();
 
         let errors = report_split_errors(report.get_log_mut());
         assert!(errors.is_empty());
-
         // std::fs::write("target/test.jpg", result).unwrap();
     }
 
@@ -5370,7 +5573,11 @@ pub mod tests {
         output_file.write_all(&out_stream.into_inner()).unwrap();
 
         let mut report = DetailedStatusTracker::new();
-        let _new_store = Store::load_from_asset(&output, true, &mut report).unwrap();
+        let new_store = Store::load_from_asset(&output, false, &mut report).unwrap();
+
+        Store::verify_store_async(&new_store, &mut ClaimAssetData::Path(&output), &mut report)
+            .await
+            .unwrap();
 
         let errors = report_split_errors(report.get_log_mut());
         assert!(errors.is_empty());
@@ -5461,6 +5668,8 @@ pub mod tests {
     #[cfg(feature = "file_io")]
     async fn test_datahash_embeddable_manifest_async() {
         // test adding to actual image
+
+        use std::io::SeekFrom;
         let ap = fixture_path("cloud.jpg");
 
         // Do we generate JUMBF?
@@ -5514,7 +5723,11 @@ pub mod tests {
         output_file.write_all(&cm).unwrap();
 
         let mut report = DetailedStatusTracker::new();
-        let _new_store = Store::load_from_asset(&output, true, &mut report).unwrap();
+        let new_store = Store::load_from_asset(&output, false, &mut report).unwrap();
+
+        Store::verify_store_async(&new_store, &mut ClaimAssetData::Path(&output), &mut report)
+            .await
+            .unwrap();
 
         let errors = report_split_errors(report.get_log_mut());
         assert!(errors.is_empty());
@@ -5524,6 +5737,8 @@ pub mod tests {
     #[cfg(feature = "file_io")]
     fn test_datahash_embeddable_manifest() {
         // test adding to actual image
+
+        use std::io::SeekFrom;
         let ap = fixture_path("cloud.jpg");
 
         // Do we generate JUMBF?
@@ -5591,6 +5806,8 @@ pub mod tests {
     #[cfg(feature = "file_io")]
     fn test_datahash_embeddable_manifest_user_hashed() {
         // test adding to actual image
+
+        use std::io::SeekFrom;
         let ap = fixture_path("cloud.jpg");
 
         let mut hasher = Hasher::SHA256(Sha256::new());
@@ -5768,5 +5985,101 @@ pub mod tests {
 
         let errors = report_split_errors(report.get_log_mut());
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "file_io")]
+    fn test_fragmented_jumbf_generation() {
+        // test adding to actual image
+
+        let tempdir = tempdir().expect("temp dir");
+        let output_path = tempdir.into_path();
+
+        // search folders for init segments
+        for init in glob::glob(
+            fixture_path("bunny/**/BigBuckBunny_2s_init.mp4")
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap()
+        {
+            match init {
+                Ok(p) => {
+                    let mut fragments = Vec::new();
+                    let init_dir = p.parent().unwrap();
+                    let seg_glob = init_dir.join("BigBuckBunny_2s*.m4s"); // segment match pattern
+
+                    // grab the fragments that go with this init segment
+                    for seg in glob::glob(seg_glob.to_str().unwrap()).unwrap().flatten() {
+                        fragments.push(seg);
+                    }
+
+                    // Create claims store.
+                    let mut store = Store::new();
+
+                    // Create a new claim.
+                    let claim = create_test_claim().unwrap();
+                    store.commit_claim(claim).unwrap();
+
+                    // Do we generate JUMBF?
+                    let signer = temp_signer();
+
+                    // add manifest based on
+                    let new_output_path = output_path.join(init_dir.file_name().unwrap());
+                    store
+                        .save_to_bmff_fragmented(
+                            p.as_path(),
+                            &fragments,
+                            new_output_path.as_path(),
+                            signer.as_ref(),
+                        )
+                        .unwrap();
+
+                    // verify the fragments
+                    let output_init = new_output_path.join(p.file_name().unwrap());
+                    let init_stream = std::fs::read(output_init).unwrap();
+
+                    for entry in &fragments {
+                        let file_path = new_output_path.join(entry.file_name().unwrap());
+
+                        let mut validation_log = DetailedStatusTracker::new();
+
+                        let fragment_stream = std::fs::read(&file_path).unwrap();
+                        let _manifest = Store::load_fragment_from_memory(
+                            "mp4",
+                            &init_stream,
+                            &fragment_stream,
+                            true,
+                            &mut validation_log,
+                        )
+                        .unwrap();
+
+                        let errors = report_split_errors(validation_log.get_log_mut());
+                        assert!(errors.is_empty());
+                    }
+
+                    // test verifying all at once
+                    let mut output_fragments = Vec::new();
+                    for entry in &fragments {
+                        output_fragments.push(new_output_path.join(entry.file_name().unwrap()));
+                    }
+
+                    let mut reader = Cursor::new(init_stream);
+                    let mut validation_log = DetailedStatusTracker::new();
+                    let _manifest = Store::load_from_file_and_fragments(
+                        "mp4",
+                        &mut reader,
+                        &output_fragments,
+                        true,
+                        &mut validation_log,
+                    )
+                    .unwrap();
+
+                    let errors = report_split_errors(validation_log.get_log_mut());
+                    assert!(errors.is_empty());
+                }
+                Err(_) => panic!("test misconfigures"),
+            }
+        }
     }
 }
