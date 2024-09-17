@@ -3075,7 +3075,7 @@ impl Store {
             }
         } else {
             let mut needs_hashing = false;
-            let ext = get_file_extension(&output_path).ok_or(Error::UnsupportedType)?;
+            let ext = get_file_extension(dest_path).ok_or(Error::UnsupportedType)?;
             // 2) If we have no hash assertions (and aren't an update manifest),
             // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
@@ -3085,12 +3085,7 @@ impl Store {
                     // hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(
-                            &output_path,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
+                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
                         pc.add_assertion(&box_hash)?;
                     // Otherwise, fall back to data hashing.
                     } else {
@@ -3132,12 +3127,7 @@ impl Store {
                     // the existing box hash assertion.
                     if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
                         let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(
-                            &output_path,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
+                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
                         pc.replace_box_hash(box_hash)?;
                     }
                     // Otherwise, fall back to data hashing.
@@ -3904,7 +3894,7 @@ pub mod tests {
 
         // read from new file
         let new_store =
-            Store::load_from_asset(&op, true, &mut OneShotStatusTracker::new()).unwrap();
+            Store::load_from_asset(&op, false, &mut OneShotStatusTracker::new()).unwrap();
 
         // can  we get by the ingredient data back
 

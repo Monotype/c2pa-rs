@@ -267,8 +267,7 @@ impl SfntFont {
         neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
 
         // Currently we only allow a single C2PA table to be removed or added.
-        // Table modifications are allowed (notably DSIG).  Verify that this is
-        // the case.
+        // Table modifications are allowed.  Verify that this is the case.
         let orig_table_count = self.header.numTables;
         let new_table_count = self.tables.len() as u16;
         let table_diff = new_table_count as i32 - orig_table_count as i32;
@@ -764,12 +763,6 @@ where
             return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
         }
     };
-    // If we had a DSIG table, replace it with a dummy DSIG table.
-    if font.tables.contains_key(&DSIG_TABLE_TAG) {
-        font.tables.remove(&DSIG_TABLE_TAG);
-        font.tables
-            .insert(DSIG_TABLE_TAG, NamedTable::Dsig(TableDSIG::dummy()));
-    }
     font.write(destination)?;
     Ok(())
 }

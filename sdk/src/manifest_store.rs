@@ -307,16 +307,16 @@ impl ManifestStore {
     /// # use c2pa::Result;
     /// use c2pa::ManifestStore;
     /// # fn main() -> Result<()> {
-    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg")?;
+    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg", true)?;
     /// println!("{}", manifest_store);
     /// # Ok(())
     /// # }
     /// ```
     #[cfg(feature = "v1_api")]
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<ManifestStore> {
+    pub fn from_file<P: AsRef<Path>>(path: P, verify: bool) -> Result<ManifestStore> {
         let mut validation_log = DetailedStatusTracker::new();
 
-        let store = Store::load_from_asset(path.as_ref(), true, &mut validation_log)?;
+        let store = Store::load_from_asset(path.as_ref(), verify, &mut validation_log)?;
         Ok(Self::from_store(store, &validation_log))
     }
 
@@ -331,6 +331,7 @@ impl ManifestStore {
     /// let manifest_store = ManifestStore::from_file_with_resources(
     ///     "tests/fixtures/C.jpg",
     ///     "../target/tmp/manifest_store",
+    ///     true,
     /// )?;
     /// println!("{}", manifest_store);
     /// # Ok(())
@@ -340,10 +341,11 @@ impl ManifestStore {
     pub fn from_file_with_resources<P: AsRef<Path>>(
         path: P,
         resource_path: P,
+        verify: bool,
     ) -> Result<ManifestStore> {
         let mut validation_log = DetailedStatusTracker::new();
 
-        let store = Store::load_from_asset(path.as_ref(), true, &mut validation_log)?;
+        let store = Store::load_from_asset(path.as_ref(), verify, &mut validation_log)?;
         Ok(Self::from_store_with_resources(
             store,
             &validation_log,
@@ -615,7 +617,7 @@ mod tests {
     #[cfg(feature = "file_io")]
     #[cfg(feature = "v1_api")]
     fn manifest_report_from_file() {
-        let manifest_store = ManifestStore::from_file("tests/fixtures/CA.jpg").unwrap();
+        let manifest_store = ManifestStore::from_file("tests/fixtures/CA.jpg", true).unwrap();
         println!("{manifest_store}");
 
         assert!(manifest_store.active_label().is_some());
@@ -654,6 +656,7 @@ mod tests {
         let manifest_store = ManifestStore::from_file_with_resources(
             "tests/fixtures/CIE-sig-CA.jpg",
             "../target/ms",
+            true,
         )
         .expect("from_store_with_resources");
         println!("{manifest_store}");

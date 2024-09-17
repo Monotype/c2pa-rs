@@ -155,18 +155,19 @@ impl ManifestStoreReport {
 
     #[cfg(feature = "v1_api")]
     /// Creates a ManifestStoreReport from image bytes and a format
-    pub fn from_bytes(format: &str, image_bytes: &[u8]) -> Result<Self> {
+    pub fn from_bytes(format: &str, image_bytes: &[u8], verify: bool) -> Result<Self> {
         let mut validation_log = DetailedStatusTracker::new();
-        let store = Store::load_from_memory(format, image_bytes, true, &mut validation_log)?;
+        let store = Store::load_from_memory(format, image_bytes, verify, &mut validation_log)?;
         Self::from_store_with_log(&store, &validation_log)
     }
 
     #[cfg(feature = "v1_api")]
     /// Creates a ManifestStoreReport from a file
     #[cfg(feature = "file_io")]
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P, verify: bool) -> Result<Self> {
         let mut validation_log = DetailedStatusTracker::new();
-        let store = Store::load_from_asset(path.as_ref(), true, &mut validation_log)?;
+        // TODO: Should be disabling validation if it's just a sidecar..
+        let store = Store::load_from_asset(path.as_ref(), verify, &mut validation_log)?;
         Self::from_store_with_log(&store, &validation_log)
     }
 
@@ -425,7 +426,14 @@ mod tests {
     #[test]
     fn manifest_store_report() {
         let path = fixture_path("CIE-sig-CA.jpg");
-        let report = ManifestStoreReport::from_file(path).expect("load_from_asset");
+        let report = ManifestStoreReport::from_file(path, true).expect("load_from_asset");
+        println!("{report}");
+    }
+
+    #[test]
+    fn manifest_store_report_without_verify() {
+        let path = fixture_path("CIE-sig-CA.jpg");
+        let report = ManifestStoreReport::from_file(path, false).expect("load_from_asset");
         println!("{report}");
     }
 
