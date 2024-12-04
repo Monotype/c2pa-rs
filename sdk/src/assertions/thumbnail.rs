@@ -40,6 +40,7 @@ impl Thumbnail {
             "tiff" => "image/tiff",
             "ico" => "image/x-icon",
             "webp" => "image/webp",
+            "svg" => "image/svg+xml",
             _ => "application/octet-stream",
         }
         .to_string();
@@ -112,8 +113,10 @@ pub mod tests {
     fn assertion_thumbnail_valid() {
         thumbnail_test(labels::JPEG_CLAIM_THUMBNAIL, "image/jpeg");
         thumbnail_test(labels::PNG_CLAIM_THUMBNAIL, "image/png");
+        thumbnail_test(labels::SVG_CLAIM_THUMBNAIL, "image/svg+xml");
         thumbnail_test(labels::JPEG_INGREDIENT_THUMBNAIL, "image/jpeg");
         thumbnail_test(labels::PNG_INGREDIENT_THUMBNAIL, "image/png");
+        thumbnail_test(labels::SVG_INGREDIENT_THUMBNAIL, "image/svg+xml");
         // unrecognized labels will be formatted as octet_streams
         thumbnail_test("foo", "application/octet-stream");
     }
