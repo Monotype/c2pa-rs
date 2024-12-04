@@ -91,8 +91,14 @@ pub fn format_to_extension(format: &str) -> Option<&'static str> {
         "arw" | "image/x-sony-arw" => "arw",
         "nef" | "image/x-nikon-nef" => "nef",
         "c2pa" | "application/x-c2pa-manifest-store" | "application/c2pa" => "c2pa",
-        "otf" | "application/x-font-opentype" |"font/otf" => "otf",
-        "ttf" | "sfnt" | "font/ttf" | "application/font-sfnt" | "application/x-font-ttf" | "application/x-font-truetype" | "font/sfnt" => "ttf",
+        "otf" | "application/x-font-opentype" | "font/otf" => "otf",
+        "ttf"
+        | "sfnt"
+        | "font/ttf"
+        | "application/font-sfnt"
+        | "application/x-font-ttf"
+        | "application/x-font-truetype"
+        | "font/sfnt" => "ttf",
         _ => return None,
     })
 }
