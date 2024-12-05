@@ -599,8 +599,9 @@ impl Ingredient {
                             let format = hashed_uri
                                 .url()
                                 .rsplit_once('.')
-                                .map(|(_, ext)| format!("image/{}", ext))
-                                .unwrap_or_else(|| "image/jpeg".to_string()); // default to jpeg??
+                                .map(|(_, ext)| extension_to_mime(ext))
+                                .flatten()
+                                .unwrap_or_else(|| "image/jpeg"); // default to jpeg??
                             let mut thumb = crate::resource_store::ResourceRef::new(format, &uri);
                             // keep track of the alg and hash for reuse
                             thumb.alg = hashed_uri.alg();
