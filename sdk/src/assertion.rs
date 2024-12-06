@@ -71,7 +71,11 @@ pub fn get_thumbnail_image_type(thumbnail_label: &str) -> String {
 
     if thumbnail_label.contains("thumbnail") && components.len() >= 4 {
         let image_type: Vec<&str> = components[3].split('_').collect(); // strip and other label adornments
-        image_type[0].to_ascii_lowercase()
+        let image_type = image_type[0].to_ascii_lowercase();
+        match image_type.as_str() {
+            "svg" => "svg+xml".to_string(),
+            _ => image_type,
+        }
     } else {
         "none".to_string()
     }
@@ -679,5 +683,17 @@ pub mod tests {
         let action_restored_obj = action_restored.as_json_object().unwrap();
 
         assert_eq!(action_obj, action_restored_obj);
+    }
+
+    #[test]
+    fn test_get_thumbnail_image_type() {
+        // Test the special case of SVG thumbnails
+        let label = "c2pa.thumbnail.ingredient.svg";
+        let image_type = get_thumbnail_image_type(label);
+        assert_eq!(image_type, "svg+xml");
+        // And now for jpeg
+        let label = "c2pa.thumbnail.ingredient.jpeg";
+        let image_type = get_thumbnail_image_type(label);
+        assert_eq!(image_type, "jpeg");
     }
 }
