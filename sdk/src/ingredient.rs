@@ -23,8 +23,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(feature = "file_io")]
-use crate::utils::mime::extension_to_mime;
 #[cfg(doc)]
 use crate::Manifest;
 use crate::{
@@ -42,7 +40,7 @@ use crate::{
     resource_store::{skip_serializing_resources, ResourceRef, ResourceStore},
     status_tracker::{log_item, DetailedStatusTracker, StatusTracker},
     store::Store,
-    utils::{base64, xmp_inmemory_utils::XmpInfo},
+    utils::{base64, mime::extension_to_mime, xmp_inmemory_utils::XmpInfo},
     validation_status::{self, status_for_store, ValidationStatus},
 };
 
@@ -599,9 +597,8 @@ impl Ingredient {
                             let format = hashed_uri
                                 .url()
                                 .rsplit_once('.')
-                                .map(|(_, ext)| extension_to_mime(ext))
-                                .flatten()
-                                .unwrap_or_else(|| "image/jpeg"); // default to jpeg??
+                                .and_then(|(_, ext)| extension_to_mime(ext))
+                                .unwrap_or("image/jpeg"); // default to jpeg??
                             let mut thumb = crate::resource_store::ResourceRef::new(format, &uri);
                             // keep track of the alg and hash for reuse
                             thumb.alg = hashed_uri.alg();
