@@ -204,7 +204,7 @@ pub(crate) enum Magic {
     Woff2 = 0x774f4632,
 }
 
-/// Tags for the font tables we care about.
+// Tags for the font tables we care about.
 
 /// Tag for the 'C2PA' table.
 #[allow(dead_code)]
@@ -933,7 +933,7 @@ impl Table for NamedTable {
 /// All the serialization structures so far have been defined using native
 /// Rust types; should we go all-out in the other direction, and establish a
 /// layer of "font" types (FWORD, FIXED, etc.)?
-
+///
 /// SFNT header, from the OpenType spec.
 ///
 /// This SFNT type is also referenced by WOFF formats, so it is defined here for

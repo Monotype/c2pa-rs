@@ -319,18 +319,12 @@ impl WoffFont {
             self.tables[&entry.tag].write(destination)?;
         }
         // Then the XML meta, if present.
-        match &self.meta {
-            Some(woff_meta) => {
-                woff_meta.write(destination)?;
-            }
-            None => (),
+        if let Some(woff_meta) = &self.meta {
+            woff_meta.write(destination)?;
         };
         // Then the private data, if present.
-        match &self.private {
-            Some(woff_private) => {
-                woff_private.write(destination)?;
-            }
-            None => (),
+        if let Some(woff_private) = &self.private {
+            woff_private.write(destination)?;
         };
         // If we made it here, it all worked.
         Ok(())
