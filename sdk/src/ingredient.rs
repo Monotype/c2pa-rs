@@ -1959,4 +1959,19 @@ mod tests_file_io {
         //let mut _data_ref = ResourceRef::new("image/jpg", "foo");
         //data_ref.data_types = vec!["c2pa.types.dataset.pytorch".to_string()];
     }
+
+    #[test]
+    #[cfg(feature = "file_io")]
+    #[cfg(feature = "sfnt")]
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    fn test_input_to_file_based_ingredient_font() {
+        let ap = fixture_path("font_c2pa_ingredient.otf");
+        let ingredient = Ingredient::from_file(ap).expect("from_file");
+        // println!("ingredient = {ingredient}");
+        assert!(ingredient.validation_status().is_none());
+        assert!(ingredient.manifest_data().is_some());
+        assert!(ingredient.thumbnail_ref().is_some());
+        let thumbnail = ingredient.thumbnail_ref().unwrap();
+        assert_eq!(thumbnail.format, "image/svg+xml");
+    }
 }
