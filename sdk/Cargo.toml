@@ -26,7 +26,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["v1_api"]
+default = ["v1_api", "sfnt", "add_svg_font_thumbnails"]
 add_thumbnails = ["image"]
 add_font_thumbnails = ["dep:tiny-skia", "dep:cosmic-text", "add_thumbnails", "font"]
 add_svg_font_thumbnails = ["add_font_thumbnails", "dep:svg", "dep:resvg"]
@@ -38,7 +38,7 @@ fetch_remote_manifests = []
 openssl_sign = ["openssl"]
 json_schema = ["dep:schemars"]
 pdf = ["dep:lopdf"]
-font = []
+font = ["dep:c2pa-font-handler"]
 sfnt = ["font"]
 woff = ["font"]
 v1_api = []
@@ -81,6 +81,8 @@ bcder = "0.7.3"
 bytes = "1.4.0"
 byteorder = { version = "1.4.3", default-features = false }
 byteordered = "0.6.0"
+#c2pa-font-handler = { branch = "main", git = "https://github.com/Monotype/c2pa-font-handler", optional = true }
+c2pa-font-handler = { path="../../c2pa-font-handler/c2pa-font-handler", optional = true }
 chrono = { version = "0.4.28", default-features = false, features = [
     "serde",
     "wasmbind",

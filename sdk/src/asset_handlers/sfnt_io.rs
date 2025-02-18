@@ -1,4 +1,4 @@
-// Copyright 2022,2023 Monotype. All rights reserved.
+// Copyright 2022,2023,2025 Monotype. All rights reserved.
 // This file is licensed to you under the Apache License,
 // Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
 // or the MIT license (http://opensource.org/licenses/MIT),
@@ -10,19 +10,24 @@
 // implied. See the LICENSE-MIT and LICENSE-APACHE files for the
 // specific language governing permissions and limitations under
 // each license.
-use core::{fmt, mem::size_of, num::Wrapping};
 use std::{
-    collections::BTreeMap,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, Write},
     path::*,
 };
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use c2pa_font_handler::{
+    c2pa::{C2PASupport, ContentCredentialRecord, UpdatableC2PA, UpdateContentCredentialRecord},
+    sfnt::{
+        font::SfntFont,
+        table::{NamedTable, TableC2PA},
+    },
+    tag::FontTag,
+    ChunkPosition, ChunkReader, ChunkType, Font, FontDataRead, MutFontDataWrite,
+};
 use log::trace;
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use crate::{
     assertions::BoxMap,
@@ -33,6 +38,9 @@ use crate::{
     },
     error::Error,
 };
+
+/// Font software IO object
+pub(crate) struct SfntIO {}
 
 /// This module is a temporary implementation of a very basic support for XMP in
 /// fonts. Ideally the reading/writing of the following should be independent of
@@ -54,6 +62,7 @@ use crate::{
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
     use std::io::SeekFrom;
+    use uuid::Uuid;
 
     use super::*;
     use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
@@ -207,523 +216,6 @@ impl TempFile {
     }
 }
 
-/// Pseudo-tag for the SFNT file header
-const SFNT_HEADER_CHUNK_NAME: SfntTag = SfntTag { data: *b" HDR" };
-
-/// Pseudo-tag for the table directory.
-const _SFNT_DIRECTORY_CHUNK_NAME: SfntTag = SfntTag { data: *b" DIR" }; // Sorts to just-after HEADER tag.
-
-/// Implementation of ye olde SFNT
-struct SfntFont {
-    header: SfntHeader,
-    directory: SfntDirectory,
-    /// All the Tables in this font, keyed by SfntTag.
-    tables: BTreeMap<SfntTag, NamedTable>,
-}
-
-impl SfntFont {
-    /// Reads a new instance from the given source.
-    fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<SfntFont> {
-        // Read in the SfntHeader
-        let sfnt_hdr = SfntHeader::from_reader(reader)?;
-
-        // After the header should be the directory.
-        let sfnt_dir = SfntDirectory::from_reader(reader, sfnt_hdr.numTables as usize)?;
-
-        // With that, we can construct the tables
-        let mut sfnt_tables = BTreeMap::new();
-
-        for entry in sfnt_dir.entries.iter() {
-            // Try to parse the next dir entry
-            let offset: u64 = entry.offset as u64;
-            let size: usize = entry.length as usize;
-            // Create a table instance for it.
-            let table = NamedTable::from_reader(&entry.tag, reader, offset, size)?;
-            // Tell it to get in the van
-            sfnt_tables.insert(entry.tag, table);
-        }
-
-        // Assemble the five lions as shown to construct your robot.
-        Ok(SfntFont {
-            header: sfnt_hdr,
-            directory: sfnt_dir,
-            tables: sfnt_tables,
-        })
-    }
-
-    /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&mut self, destination: &mut TDest) -> Result<()> {
-        let mut neo_header = SfntHeader::default();
-        let mut neo_directory = SfntDirectory::new()?;
-        // Re-synthesize the file header based on the actual table count
-        neo_header.sfntVersion = self.header.sfntVersion;
-        neo_header.numTables = self.tables.len() as u16;
-        neo_header.entrySelector = if neo_header.numTables > 0 {
-            neo_header.numTables.ilog2() as u16
-        } else {
-            0_u16
-        };
-        neo_header.searchRange = 2_u16.pow(neo_header.entrySelector as u32) * 16;
-        neo_header.rangeShift = neo_header.numTables * 16 - neo_header.searchRange;
-
-        // Currently we only allow a single C2PA table to be removed or added.
-        // Table modifications are allowed.  Verify that this is the case.
-        let orig_table_count = self.header.numTables;
-        let new_table_count = self.tables.len() as u16;
-        let table_diff = new_table_count as i32 - orig_table_count as i32;
-        let had_c2pa_before = self
-            .directory
-            .entries
-            .iter()
-            .any(|entry| entry.tag == C2PA_TABLE_TAG);
-        let have_c2pa_now = self.tables.contains_key(&C2PA_TABLE_TAG);
-        // Make sure we only removed at most one table.
-        if table_diff < -1 {
-            return Err(FontError::SaveError(FontSaveError::TooManyTablesRemoved));
-        }
-        // Make sure we only added at most one table.
-        else if table_diff > 1 {
-            return Err(FontError::SaveError(FontSaveError::TooManyTablesAdded));
-        }
-        // If we only removed one table, make sure it's the C2PA table.
-        else if table_diff == -1 && (!had_c2pa_before || have_c2pa_now) {
-            return Err(FontError::SaveError(FontSaveError::UnexpectedTable(
-                format!("{:?}", C2PA_TABLE_TAG),
-            )));
-        }
-        // If we only added one table, make sure it's the C2PA table.
-        else if table_diff == 1 && (had_c2pa_before || !have_c2pa_now) {
-            return Err(FontError::SaveError(FontSaveError::NonC2PATableAdded));
-        }
-
-        // Keep a running offset as we encounter our tables in physical order.
-        let mut running_offset = size_of::<SfntHeader>() as u32
-            + size_of::<SfntDirectoryEntry>() as u32 * new_table_count as u32;
-
-        // Walk our old directory in physical order, adding new entries for each
-        // table we still have.
-        self.directory.physical_order().iter().for_each(|entry| {
-            // If we have this entry in our current table list, create new entry
-            if self.tables.contains_key(&entry.tag) {
-                let neo_entry = SfntDirectoryEntry {
-                    tag: entry.tag,
-                    offset: running_offset,
-                    checksum: self.tables[&entry.tag].checksum().0,
-                    length: self.tables[&entry.tag].len(),
-                };
-                neo_directory.entries.push(neo_entry);
-                // Update our running offset.
-                running_offset += align_to_four(self.tables[&entry.tag].len());
-            }
-        });
-
-        // If we have a new C2PA table, add a directory entry for it.
-        if let Some(c2pa) = self.tables.get(&C2PA_TABLE_TAG) {
-            if !self
-                .directory
-                .entries
-                .iter()
-                .any(|entry| entry.tag == C2PA_TABLE_TAG)
-            {
-                let neo_entry = SfntDirectoryEntry {
-                    tag: C2PA_TABLE_TAG,
-                    offset: running_offset,
-                    checksum: c2pa.checksum().0,
-                    length: c2pa.len(),
-                };
-                neo_directory.entries.push(neo_entry);
-            }
-        }
-
-        // Sort our directory entries by tag.
-        neo_directory.entries.sort_by_key(|entry| entry.tag);
-
-        // Figure the checksum for the whole font - the header, the directory,
-        // and then all the tables; we can just use the per-table checksums,
-        // since the only one we alter is C2PA, and we just refreshed it...
-        let font_cksum = neo_header.checksum()
-            + neo_directory.checksum()
-            + neo_directory
-                .entries
-                .iter()
-                .fold(Wrapping(0_u32), |tables_cksum, entry| {
-                    tables_cksum + Wrapping(entry.checksum)
-                });
-
-        // Rewrite the head table's checksumAdjustment. (This act does *not*
-        // invalidate the checksum in the TDE for the 'head' table, which is
-        // always treated as zero during check summing).
-        if let Some(NamedTable::Head(head)) = self.tables.get_mut(&HEAD_TABLE_TAG) {
-            head.checksumAdjustment =
-                (Wrapping(SFNT_EXPECTED_CHECKSUM) - font_cksum - Wrapping(0)).0;
-        }
-
-        // Replace our header & directory with updated editions.
-        self.header = neo_header;
-        self.directory = neo_directory;
-        // Write everything out.
-        self.header.write(destination)?;
-        self.directory.write(destination)?;
-        for entry in self.directory.physical_order().iter() {
-            self.tables[&entry.tag].write(destination)?;
-        }
-        Ok(())
-    }
-
-    /// Add an empty C2PA table in this font, at the end, so we don't have to
-    /// re-position any existing tables.
-    fn append_empty_c2pa_table(&mut self) -> Result<()> {
-        // Just add an empty table...
-        self.tables
-            .insert(C2PA_TABLE_TAG, NamedTable::C2pa(TableC2PA::default()));
-        // ...and then later, when the .write() function is invoked, it will
-        // notice that self.tables.len() no longer matches
-        // self.header.numTables, and regenerate the header & directory.
-        //
-        // Success at last
-        Ok(())
-    }
-}
-
-/// Definitions for the SFNT file header and Table Directory structures are in
-/// the font_io module, because WOFF support needs to use them as well.
-impl SfntHeader {
-    /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        // Read in the raw data
-        let unchecked = Self {
-            sfntVersion: reader.read_u32::<BigEndian>()?,
-            numTables: reader.read_u16::<BigEndian>()?,
-            searchRange: reader.read_u16::<BigEndian>()?,
-            entrySelector: reader.read_u16::<BigEndian>()?,
-            rangeShift: reader.read_u16::<BigEndian>()?,
-        };
-        // Check for a valid sfntVersion
-        let magic = <u32 as std::convert::TryInto<Magic>>::try_into(unchecked.sfntVersion)?;
-        if magic != Magic::OpenType && magic != Magic::TrueType {
-            Err(FontError::Unsupported)
-        } else {
-            // Otherwise, let it through.
-            // TBD - What else could we check -- the table count, against an
-            // arbitrary limit? Do we want to check the three stooges^H^H^H table-
-            // binary-search accelerator values?
-            Ok(unchecked)
-        }
-    }
-
-    /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        destination.write_u32::<BigEndian>(self.sfntVersion)?;
-        destination.write_u16::<BigEndian>(self.numTables)?;
-        destination.write_u16::<BigEndian>(self.searchRange)?;
-        destination.write_u16::<BigEndian>(self.entrySelector)?;
-        destination.write_u16::<BigEndian>(self.rangeShift)?;
-        Ok(())
-    }
-
-    /// Computes the checksum for this font.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        // 0x00
-        Wrapping(self.sfntVersion)
-            // 0x04
-            + u32_from_u16_pair(self.numTables, self.searchRange)
-            // 0x08
-            + u32_from_u16_pair(self.entrySelector, self.rangeShift)
-    }
-}
-
-impl Default for SfntHeader {
-    fn default() -> Self {
-        Self {
-            sfntVersion: Magic::TrueType as u32,
-            numTables: 0,
-            searchRange: 0,
-            entrySelector: 0,
-            rangeShift: 0,
-        }
-    }
-}
-
-impl SfntDirectoryEntry {
-    /// Reads a new instance from the given source.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<Self> {
-        Ok(Self {
-            tag: SfntTag::from_reader(reader)?,
-            checksum: reader.read_u32::<BigEndian>()?,
-            offset: reader.read_u32::<BigEndian>()?,
-            length: reader.read_u32::<BigEndian>()?,
-        })
-    }
-
-    /// Serializes this instance to the given writer.
-    pub(crate) fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        self.tag.write(destination)?;
-        destination.write_u32::<BigEndian>(self.checksum)?;
-        destination.write_u32::<BigEndian>(self.offset)?;
-        destination.write_u32::<BigEndian>(self.length)?;
-        Ok(())
-    }
-
-    /// Computes the checksum for this entry.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        Wrapping(u32::from_be_bytes(self.tag.data))
-            + Wrapping(self.checksum)
-            + Wrapping(self.offset)
-            + Wrapping(self.length)
-    }
-}
-
-/// SFNT Directory is just an array of entries. Undoubtedly there exists a
-/// more-oxidized way of just using Vec directly for this... but maybe we
-/// don't want to? Note the choice of Vec over BTreeMap here, which lets us
-/// keep non-compliant fonts as-is...
-#[derive(Debug)]
-struct SfntDirectory {
-    entries: Vec<SfntDirectoryEntry>,
-}
-
-impl SfntDirectory {
-    /// Constructs a new, empty, instance.
-    pub(crate) fn new() -> Result<Self> {
-        Ok(Self {
-            entries: Vec::new(),
-        })
-    }
-
-    /// Reads a new instance from the given source, reading the specified
-    /// number of entries.
-    pub(crate) fn from_reader<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-        entry_count: usize,
-    ) -> Result<Self> {
-        let mut the_directory = SfntDirectory::new()?;
-        for _entry in 0..entry_count {
-            the_directory
-                .entries
-                .push(SfntDirectoryEntry::from_reader(reader)?);
-        }
-        Ok(the_directory)
-    }
-
-    /// Serializes this instance to the given writer.
-    fn write<TDest: Write + ?Sized>(&self, destination: &mut TDest) -> Result<()> {
-        for entry in self.entries.iter() {
-            entry.write(destination)?;
-        }
-        Ok(())
-    }
-
-    /// Returns an array which contains the indices of this directory's entries,
-    /// arranged in increasing order of `offset` field.
-    fn physical_order(&self) -> Vec<SfntDirectoryEntry> {
-        let mut physically_ordered_entries = self.entries.clone();
-        physically_ordered_entries.sort_by_key(|e| e.offset);
-        physically_ordered_entries
-    }
-
-    /// Computes the checksum for this directory.
-    pub(crate) fn checksum(&self) -> Wrapping<u32> {
-        match self.entries.is_empty() {
-            true => Wrapping(0_u32),
-            false => self
-                .entries
-                .iter()
-                .fold(Wrapping(0_u32), |cksum, entry| cksum + entry.checksum()),
-        }
-    }
-}
-
-/// Identifies types of regions within a font file. Chunks with lesser enum
-/// values precede those with greater enum values; order within a given group
-/// of chunks (such as a series of `Table` chunks) must be preserved by some
-/// other mechanism.
-#[derive(Eq, PartialEq)]
-pub(crate) enum ChunkType {
-    /// Whole-container header.
-    Header,
-    /// Table directory entry or entries.
-    _Directory,
-    /// Table data included in C2PA hash.
-    TableDataIncluded,
-    /// Table data excluded from C2PA hash.
-    TableDataExcluded,
-}
-
-impl std::fmt::Display for ChunkType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "Directory"),
-            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
-            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
-        }
-    }
-}
-
-impl std::fmt::Debug for ChunkType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "Directory"),
-            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
-            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
-        }
-    }
-}
-
-/// Represents regions within a font file that may be of interest when it
-/// comes to hashing data for C2PA.
-#[derive(Eq, PartialEq)]
-pub(crate) struct ChunkPosition {
-    /// Offset to the start of the chunk
-    pub offset: usize,
-    /// Length of the chunk
-    pub length: usize,
-    /// Tag of the chunk
-    pub name: [u8; 4],
-    /// Type of chunk
-    pub chunk_type: ChunkType,
-}
-
-impl ChunkPosition {
-    /// Gets the name as an UTF-8 string.
-    pub(crate) fn name_as_string(&self) -> core::result::Result<String, FontError> {
-        Ok(std::str::from_utf8(&self.name)
-            .map_err(FontError::Utf8Error)?
-            .to_string())
-    }
-}
-
-/// Custom trait for reading chunks of data from a scalable font (SFNT).
-pub(crate) trait ChunkReader {
-    type Error;
-    /// Gets a collection of positions of chunks within the font, used to
-    /// omit from hashing.
-    fn get_chunk_positions<T: Read + Seek + ?Sized>(
-        &self,
-        reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
-}
-
-impl std::fmt::Display for ChunkPosition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}, {}, {}, {}",
-            String::from_utf8_lossy(&self.name),
-            self.offset,
-            self.length,
-            self.chunk_type
-        )
-    }
-}
-
-impl std::fmt::Debug for ChunkPosition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}, {}, {}, {}",
-            String::from_utf8_lossy(&self.name),
-            self.offset,
-            self.length,
-            self.chunk_type
-        )
-    }
-}
-
-/// Reads in chunks for an SFNT file
-impl ChunkReader for SfntIO {
-    type Error = FontError;
-
-    /// Get a map of all the chunks in the given source stream.
-    fn get_chunk_positions<T: Read + Seek + ?Sized>(
-        &self,
-        reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
-        // Rewind to start and read the SFNT header and directory - that's
-        // really all we need in order to map the chunks.
-        reader.rewind()?;
-        let header = SfntHeader::from_reader(reader)?;
-        let directory = SfntDirectory::from_reader(reader, header.numTables as usize)?;
-
-        // TBD - Streamlined approach:
-        // 1 - Header + directory
-        // 2 - Data from start to head::checksumAdjustment
-        // 3 - head::checksumAdjustment
-        // 4 - Data from head::checksumAdjustment through penultimate table
-        // 5 - The C2PA table
-
-        // The first chunk excludes the header & directory from hashing
-        let mut positions: Vec<ChunkPosition> = Vec::new();
-        positions.push(ChunkPosition {
-            offset: 0,
-            length: size_of::<SfntHeader>()
-                + header.numTables as usize * size_of::<SfntDirectoryEntry>(),
-            name: SFNT_HEADER_CHUNK_NAME.data,
-            chunk_type: ChunkType::Header,
-        });
-
-        // The subsequent chunks represent the tables. All table data is hashed,
-        // with two exceptions:
-        // - The C2PA table itself.
-        // - The head table's `checksumAdjustment` field.
-        for entry in directory.physical_order() {
-            match entry.tag {
-                C2PA_TABLE_TAG => {
-                    positions.push(ChunkPosition {
-                        offset: entry.offset as usize,
-                        length: entry.length as usize,
-                        name: entry.tag.data,
-                        chunk_type: ChunkType::TableDataExcluded,
-                    });
-                }
-                HEAD_TABLE_TAG => {
-                    // TBD - These hard-coded magic numbers could be mopped up
-                    // if only we could use offset_of, see https://github.com/rust-lang/rust/issues/106655
-                    positions.push(ChunkPosition {
-                        offset: entry.offset as usize,
-                        length: 8_usize,
-                        name: *b"hea0",
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                    positions.push(ChunkPosition {
-                        offset: entry.offset as usize + 8_usize,
-                        length: 4_usize,
-                        name: *b"hea1",
-                        chunk_type: ChunkType::TableDataExcluded,
-                    });
-                    positions.push(ChunkPosition {
-                        offset: entry.offset as usize + 12_usize,
-                        length: 42_usize,
-                        name: *b"hea2",
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                }
-                _ => {
-                    positions.push(ChunkPosition {
-                        offset: entry.offset as usize,
-                        length: entry.length as usize,
-                        name: entry.tag.data,
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                }
-            }
-        }
-
-        // Do not iterate if the log level is not set to at least trace
-        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-            for (i, dirent) in directory.entries.iter().enumerate() {
-                trace!("get_chunk_positions/table[{:02}]: {:?}", i, &dirent);
-            }
-            for (i, chunk) in positions.iter().enumerate() {
-                trace!("get_chunk_positions/chunk[{:02}]: {:?}", i, &chunk);
-            }
-        }
-
-        Ok(positions)
-    }
-}
-
 /// Adds C2PA manifest store data to a font file (specified by path).
 fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
@@ -745,24 +237,14 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    // Install the provide active_manifest_uri in this font's C2PA table, adding
-    // that table if needed.
-    match font.tables.get_mut(&C2PA_TABLE_TAG) {
-        // If there isn't one, create it.
-        None => {
-            font.tables.insert(
-                C2PA_TABLE_TAG,
-                NamedTable::C2pa(TableC2PA::new(None, Some(manifest_store_data.to_vec()))),
-            );
-        }
-        // If there is, replace its `manifest_store` value with the
-        // provided one.
-        Some(NamedTable::C2pa(c2pa)) => c2pa.manifest_store = Some(manifest_store_data.to_vec()),
-        // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => {
-            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
-        }
-    };
+    if font.has_c2pa() {
+        font.remove_c2pa_record()?;
+    }
+    let c2pa_record = ContentCredentialRecord::builder()
+        .with_content_credential(manifest_store_data.to_vec())
+        .build()?;
+    font.add_c2pa_record(c2pa_record)?;
+
     font.write(destination)?;
     Ok(())
 }
@@ -789,24 +271,9 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    // Install the provide active_manifest_uri in this font's C2PA table, adding
-    // that table if needed.
-    match font.tables.get_mut(&C2PA_TABLE_TAG) {
-        // If there isn't one, create it.
-        None => {
-            font.tables.insert(
-                C2PA_TABLE_TAG,
-                NamedTable::C2pa(TableC2PA::new(Some(manifest_uri.to_string()), None)),
-            );
-        }
-        // If there is, replace its `active_manifest_uri` value with the
-        // provided one.
-        Some(NamedTable::C2pa(c2pa)) => c2pa.active_manifest_uri = Some(manifest_uri.to_string()),
-        // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => {
-            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
-        }
-    };
+    let mut update_record = UpdateContentCredentialRecord::default();
+    update_record.with_active_manifest_uri(manifest_uri.to_string());
+    font.update_c2pa_record(update_record)?;
     font.write(destination)?;
     Ok(())
 }
@@ -826,12 +293,10 @@ where
     TReader: Read + Seek + ?Sized,
     TWriter: Read + Seek + ?Sized + Write,
 {
-    // Read the font from the input stream
     let mut font = SfntFont::from_reader(input_stream)?;
-    // If the C2PA table does not exist...
-    if !font.tables.contains_key(&C2PA_TABLE_TAG) {
-        // ...install an empty one.
-        font.append_empty_c2pa_table()?;
+    // Read the font from the input stream
+    if !font.has_c2pa() {
+        font.add_c2pa_record(ContentCredentialRecord::default())?;
     }
     // Write the font to the output stream
     font.write(output_stream)?;
@@ -900,10 +365,9 @@ where
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    // Load the font from the stream
     let mut font = SfntFont::from_reader(source)?;
-    // Remove the table from the collection
-    font.tables.remove(&C2PA_TABLE_TAG);
+    // Remove the C2PA record from the font
+    font.remove_c2pa_record()?;
     // And write it to the destination stream
     font.write(destination)?;
     Ok(())
@@ -923,34 +387,18 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
-        // If there isn't one, how pleasant, there will be so much less to do.
-        None => None,
-        // If there is, and it has Some `active_manifest_uri`, then mutate that
-        // to None, and return the former value.
-        Some(NamedTable::C2pa(c2pa)) => {
-            if c2pa.active_manifest_uri.is_none() {
-                None
-            } else {
-                // TBD this cannot really be the idiomatic way, can it?
-                let old_manifest_uri = c2pa.active_manifest_uri.clone();
-                c2pa.active_manifest_uri = None;
-                old_manifest_uri
-            }
-        }
-        // Yikes! Non-C2PA table with C2PA tag!
-        Some(_) => {
-            return Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag"));
-        }
-    };
+    let mut update_record = UpdateContentCredentialRecord::default();
+    update_record.without_active_manifest_uri();
+    font.update_c2pa_record(update_record)?;
     font.write(destination)?;
-    Ok(old_manifest_uri_maybe)
+    // TODO: we need the old reference to return
+    Ok(None)
 }
 
 /// Gets a collection of positions of hash objects from the reader which are to
 /// be excluded from the hashing, used to omit from hashing.
 fn get_object_locations_from_stream<T>(
-    sfnt_io: &SfntIO,
+    sfnt_io: &SfntFont,
     reader: &mut T,
 ) -> Result<Vec<HashObjectPositions>>
 where
@@ -1011,30 +459,14 @@ where
 /// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
 /// table data
 fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(reader: &mut T) -> Result<TableC2PA> {
-    // Convert all errors from the reader to a deserialization error.
     let sfnt = SfntFont::from_reader(reader)?;
-    match sfnt.tables.get(&C2PA_TABLE_TAG) {
+    // Convert all errors from the reader to a deserialization error.
+    match sfnt.table(&FontTag::C2PA) {
         None => Err(FontError::JumbfNotFound),
-        // If there is, replace its `manifest_store` value with the
-        // provided one.
-        Some(NamedTable::C2pa(c2pa)) => Ok(c2pa.clone()),
+        // If there is, return its `manifest_store` value.
+        Some(NamedTable::C2PA(c2pa)) => Ok((*c2pa).clone()),
         // Yikes! Non-C2PA table with C2PA tag!
         Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
-    }
-}
-
-/// Main SFNT IO feature.
-pub(crate) struct SfntIO {}
-
-impl SfntIO {
-    #[allow(dead_code)]
-    pub(crate) fn default_document_id() -> String {
-        format!("fontsoftware:did:{}", Uuid::new_v4())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn default_instance_id() -> String {
-        format!("fontsoftware:iid:{}", Uuid::new_v4())
     }
 }
 
@@ -1045,7 +477,7 @@ impl CAIReader for SfntIO {
             FontError::JumbfNotFound => Error::JumbfNotFound,
             _ => wrap_font_err(e),
         })?;
-        match c2pa_table.get_manifest_store() {
+        match c2pa_table.manifest_store {
             Some(manifest_store) => Ok(manifest_store.to_vec()),
             _ => Err(Error::JumbfNotFound),
         }
@@ -1073,7 +505,8 @@ impl CAIWriter for SfntIO {
         &self,
         input_stream: &mut dyn CAIRead,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
-        get_object_locations_from_stream(self, input_stream).map_err(wrap_font_err)
+        let fnt = SfntFont::default();
+        get_object_locations_from_stream(&fnt, input_stream).map_err(wrap_font_err)
     }
 
     fn remove_cai_store_from_stream(
@@ -1140,7 +573,8 @@ impl AssetIO for SfntIO {
         asset_path: &Path,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
         let mut buf_reader = open_bufreader_for_file(asset_path)?;
-        get_object_locations_from_stream(self, &mut buf_reader).map_err(wrap_font_err)
+        let sfnt_io = SfntFont::default();
+        get_object_locations_from_stream(&sfnt_io, &mut buf_reader).map_err(wrap_font_err)
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> crate::error::Result<()> {
@@ -1155,8 +589,11 @@ impl AssetIO for SfntIO {
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for SfntIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
+        let sfnt_font = SfntFont::default();
         // Get the chunk positions
-        let chunks = self.get_chunk_positions(input_stream)?;
+        let chunks = sfnt_font
+            .get_chunk_positions(input_stream)
+            .map_err(FontError::C2paFontHandlerIoError)?;
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
 
@@ -1263,11 +700,57 @@ pub mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
+    use std::num::Wrapping;
+
+    use byteorder::{BigEndian, ByteOrder};
     use claims::*;
     use tempfile::tempdir;
 
     use super::*;
     use crate::utils::test::{fixture_path, temp_dir_path};
+    /// Computes a 32-bit big-endian OpenType-style checksum on the given byte
+    /// array, which is presumed to start on a 4-byte boundary.
+    ///
+    /// # Remarks
+    /// Note that trailing pad bytes do not affect this checksum - it's not a real
+    /// CRC.
+    ///
+    /// # Panics
+    /// Panics if the the `bytes` array is not aligned on a 4-byte boundary.
+    #[allow(dead_code)]
+    pub(crate) fn checksum(bytes: &[u8]) -> Wrapping<u32> {
+        // Cut your pie into 1x4cm pieces to serve
+        let words = bytes.chunks_exact(size_of::<u32>());
+        // ...and then any remainder...
+        let frag_cksum: Wrapping<u32> = Wrapping(
+            // (away, mayhap, with issue #32463)
+            words
+                .remainder()
+                .iter()
+                .fold(Wrapping(0_u32), |acc, byte| {
+                    // At some point, it should be possible to:
+                    // - Remove the `Wrapping(...)` surrounding the outer expression
+                    // - Get rid of `.0` and just access plain `acc`
+                    // - Get rid of `.0` down there getting applied to the end of
+                    //   this .fold(), as well as
+                    // - Get rid of the `Wrapping(...)` in this next expression
+                    // but unfortunately as of this writing, attempting to call
+                    // `.rotate_left` on a `Wrapping<u32>` fails:
+                    //   use of unstable library feature 'wrapping_int_impl', see issue
+                    //     #32463 <https://github.com/rust-lang/rust/issues/32463>
+                    Wrapping(acc.0.rotate_left(u8::BITS) + *byte as u32)
+                })
+                .0 // (goes away, mayhap, when issue #32463 is done)
+                .rotate_left(u8::BITS * (size_of::<u32>() - words.remainder().len()) as u32),
+        );
+        // Sum all the exact chunks...
+        let chunks_cksum: Wrapping<u32> = words
+            .fold(Wrapping(0_u32), |running_cksum, exact_chunk| {
+                running_cksum + Wrapping(BigEndian::read_u32(exact_chunk))
+            });
+        // Combine ingredients & serve.
+        chunks_cksum + frag_cksum
+    }
 
     #[test]
     fn chunk_type_debug_and_display() {
@@ -1326,85 +809,6 @@ pub mod tests {
         };
         assert_eq!(format!("{:?}", chunk), "ABCD, 72, 37, TableDataIncluded");
         assert_eq!(format!("{}", chunk), "ABCD, 72, 37, TableDataIncluded");
-    }
-
-    #[test]
-    /// Verify that short file fails to chunk-parse at all
-    fn get_chunk_positions_without_any_font() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, // ...and then one more byte, and that's it.
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        assert_err!(sfnt_io.get_chunk_positions(&mut font_stream));
-    }
-
-    #[test]
-    /// Verify chunk-parsing behavior for empty font with just the header
-    fn get_chunk_positions_without_any_tables() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, 0x00, 0x00, 0x00, // 0 tables / 0
-            0x00, 0x00, 0x00, 0x00, // 0 / 0
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have one positions reported, for a header and no dir entries
-        assert_eq!(1, positions.len());
-        assert_eq!(
-            positions.first().unwrap(),
-            &ChunkPosition {
-                offset: 0_usize,
-                length: 12_usize,
-                name: SFNT_HEADER_CHUNK_NAME.data,
-                chunk_type: ChunkType::Header,
-            }
-        );
-    }
-
-    #[test]
-    /// Verify when reading the object locations for hashing, we get zero
-    /// positions when the font does not contain a C2PA font table
-    fn get_chunk_positions_without_c2pa_table() {
-        let font_data = vec![
-            0x4f, 0x54, 0x54, 0x4f, // OTTO
-            0x00, 0x01, // 1 tables
-            0x00, 0x00, // search range
-            0x00, 0x00, // entry selector
-            0x00, 0x00, // range shift
-            0x43, 0x32, 0x50, 0x42, // C2PB table tag
-            0x00, 0x00, 0x00, 0x00, // Checksum
-            0x00, 0x00, 0x00, 0x1c, // offset to table data
-            0x00, 0x00, 0x00, 0x01, // length of table data
-            0x00, // C2PB data
-        ];
-        let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-        let sfnt_io = SfntIO {};
-        let positions = sfnt_io.get_chunk_positions(&mut font_stream).unwrap();
-        // Should have 2 positions reported for the header and the table data
-        assert_eq!(2, positions.len());
-        // First is the header
-        assert_eq!(
-            positions.first().unwrap(),
-            &ChunkPosition {
-                offset: 0_usize,
-                length: 28_usize,
-                name: SFNT_HEADER_CHUNK_NAME.data,
-                chunk_type: ChunkType::Header,
-            }
-        );
-        // Second is the C2PB table
-        assert_eq!(
-            positions.get(1).unwrap(),
-            &ChunkPosition {
-                offset: 28_usize,
-                length: 1,
-                name: *b"C2PB",
-                chunk_type: ChunkType::TableDataIncluded,
-            }
-        );
     }
 
     #[test]
@@ -1782,7 +1186,7 @@ pub mod tests {
         // Verify the embedded C2PA data as well
         assert_eq!(
             Some(vec![0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, 0x74, 0x61].as_ref()),
-            c2pa_data.get_manifest_store()
+            c2pa_data.manifest_store.as_deref()
         );
     }
 
