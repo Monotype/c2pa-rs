@@ -888,14 +888,14 @@ where
 fn remove_reference_from_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-) -> Result<Option<String>>
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
     let mut font = WoffFont::from_reader(source)?;
-    let old_manifest_uri_maybe = match font.tables.get_mut(&C2PA_TABLE_TAG) {
+    let _ = match font.tables.get_mut(&C2PA_TABLE_TAG) {
         // If there isn't one, how pleasant, there will be so much less to do.
         None => None,
         // If there is, and it has Some `active_manifest_uri`, then mutate that
@@ -916,7 +916,7 @@ where
         }
     };
     font.write(destination)?;
-    Ok(old_manifest_uri_maybe)
+    Ok(())
 }
 
 /// Gets a collection of positions of hash objects from the reader which are to

@@ -380,7 +380,7 @@ where
 fn remove_reference_from_stream<TSource, TDest>(
     source: &mut TSource,
     destination: &mut TDest,
-) -> Result<Option<String>>
+) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
@@ -391,8 +391,7 @@ where
     update_record.without_active_manifest_uri();
     font.update_c2pa_record(update_record)?;
     font.write(destination)?;
-    // TODO: we need the old reference to return
-    Ok(None)
+    Ok(())
 }
 
 /// Gets a collection of positions of hash objects from the reader which are to
