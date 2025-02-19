@@ -11,6 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
+    fmt,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, Write},
     path::*,
@@ -19,11 +20,13 @@ use std::{
 use c2pa_font_handler::{
     c2pa::{C2PASupport, ContentCredentialRecord, UpdatableC2PA, UpdateContentCredentialRecord},
     sfnt::{
+        directory::{SfntDirectory, SfntDirectoryEntry},
         font::SfntFont,
+        header::SfntHeader,
         table::{NamedTable, TableC2PA},
     },
     tag::FontTag,
-    ChunkPosition, ChunkReader, ChunkType, Font, FontDataRead, MutFontDataWrite,
+    Font, FontDataExactRead, FontDataRead, FontDirectory, FontDirectoryEntry, MutFontDataWrite,
 };
 use log::trace;
 use serde_bytes::ByteBuf;
@@ -62,6 +65,7 @@ pub(crate) struct SfntIO {}
 #[cfg(feature = "xmp_write")]
 mod font_xmp_support {
     use std::io::SeekFrom;
+
     use uuid::Uuid;
 
     use super::*;
@@ -216,6 +220,196 @@ impl TempFile {
     }
 }
 
+/// Custom trait for reading chunks of data from a scalable font (SFNT).
+pub trait ChunkReader {
+    /// The error type for reading the data.
+    type Error;
+    /// Gets a collection of positions of chunks within the font, used to
+    /// omit from hashing.
+    fn get_chunk_positions<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
+}
+
+/// Identifies types of regions within a font file. Chunks with lesser enum
+/// values precede those with greater enum values; order within a given group
+/// of chunks (such as a series of `Table` chunks) must be preserved by some
+/// other mechanism.
+#[derive(Eq, PartialEq)]
+pub enum ChunkType {
+    /// Whole-container header.
+    Header,
+    /// Table directory entry or entries.
+    _Directory,
+    /// Table data included in C2PA hash.
+    TableDataIncluded,
+    /// Table data excluded from C2PA hash.
+    TableDataExcluded,
+}
+
+impl std::fmt::Display for ChunkType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ChunkType::Header => write!(f, "Header"),
+            ChunkType::_Directory => write!(f, "Directory"),
+            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
+            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ChunkType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ChunkType::Header => write!(f, "Header"),
+            ChunkType::_Directory => write!(f, "Directory"),
+            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
+            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
+        }
+    }
+}
+
+/// Represents regions within a font file that may be of interest when it
+/// comes to hashing data for C2PA.
+#[derive(Eq, PartialEq)]
+pub struct ChunkPosition {
+    /// Offset to the start of the chunk
+    pub offset: usize,
+    /// Length of the chunk
+    pub length: usize,
+    /// Tag of the chunk
+    pub name: [u8; 4],
+    /// Type of chunk
+    pub chunk_type: ChunkType,
+}
+
+impl ChunkPosition {
+    /// Gets the name as an UTF-8 string.
+    pub fn name_as_string(&self) -> core::result::Result<String, FontError> {
+        String::from_utf8(self.name.to_vec()).map_err(FontError::StringFromUtf8)
+    }
+}
+
+impl std::fmt::Display for ChunkPosition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}, {}, {}, {}",
+            String::from_utf8_lossy(&self.name),
+            self.offset,
+            self.length,
+            self.chunk_type
+        )
+    }
+}
+
+impl std::fmt::Debug for ChunkPosition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:?}, {:?}, {:?}, {:?}",
+            String::from_utf8_lossy(&self.name),
+            self.offset,
+            self.length,
+            self.chunk_type
+        )
+    }
+}
+
+const SFNT_HEADER_CHUNK_NAME: [u8; 4] = *b" HDR";
+
+impl ChunkReader for SfntIO {
+    type Error = FontError;
+
+    fn get_chunk_positions<T: Read + Seek + ?Sized>(
+        reader: &mut T,
+    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
+        // Rewind to start and read the SFNT header and directory - that's
+        // really all we need in order to map the chunks.
+        reader.rewind()?;
+        let header = SfntHeader::from_reader(reader)?;
+        let size_to_read = header.numTables as usize * SfntDirectoryEntry::SIZE;
+        let offset = reader.stream_position()?;
+        let directory = SfntDirectory::from_reader_exact(reader, offset, size_to_read)?;
+
+        // TBD - Streamlined approach:
+        // 1 - Header + directory
+        // 2 - Data from start to head::checksumAdjustment
+        // 3 - head::checksumAdjustment
+        // 4 - Data from head::checksumAdjustment through penultimate table
+        // 5 - The C2PA table
+
+        // The first chunk excludes the header & directory from hashing
+        let mut positions: Vec<ChunkPosition> = Vec::new();
+        positions.push(ChunkPosition {
+            offset: 0,
+            length: size_of::<SfntHeader>()
+                + header.numTables as usize * size_of::<SfntDirectoryEntry>(),
+            name: SFNT_HEADER_CHUNK_NAME,
+            chunk_type: ChunkType::Header,
+        });
+
+        // The subsequent chunks represent the tables. All table data is hashed,
+        // with two exceptions:
+        // - The C2PA table itself.
+        // - The head table's `checksumAdjustment` field.
+        for entry in directory.physical_order() {
+            match entry.tag() {
+                FontTag::C2PA => {
+                    positions.push(ChunkPosition {
+                        offset: entry.offset() as usize,
+                        length: entry.length() as usize,
+                        name: entry.tag().data(),
+                        chunk_type: ChunkType::TableDataExcluded,
+                    });
+                }
+                FontTag::HEAD => {
+                    // TBD - These hard-coded magic numbers could be mopped up
+                    // if only we could use offset_of, see https://github.com/rust-lang/rust/issues/106655
+                    positions.push(ChunkPosition {
+                        offset: entry.offset() as usize,
+                        length: 8_usize,
+                        name: *b"hea0",
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                    positions.push(ChunkPosition {
+                        offset: entry.offset() as usize + 8_usize,
+                        length: 4_usize,
+                        name: *b"hea1",
+                        chunk_type: ChunkType::TableDataExcluded,
+                    });
+                    positions.push(ChunkPosition {
+                        offset: entry.offset() as usize + 12_usize,
+                        length: 42_usize,
+                        name: *b"hea2",
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                }
+                _ => {
+                    positions.push(ChunkPosition {
+                        offset: entry.offset() as usize,
+                        length: entry.length() as usize,
+                        name: entry.tag().data(),
+                        chunk_type: ChunkType::TableDataIncluded,
+                    });
+                }
+            }
+        }
+
+        // Do not iterate if the log level is not set to at least trace
+        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
+            for (i, dirent) in directory.entries().iter().enumerate() {
+                trace!("get_chunk_positions/table[{:02}]: {:?}", i, &dirent);
+            }
+            for (i, chunk) in positions.iter().enumerate() {
+                trace!("get_chunk_positions/chunk[{:02}]: {:?}", i, &chunk);
+            }
+        }
+
+        Ok(positions)
+    }
+}
+
 /// Adds C2PA manifest store data to a font file (specified by path).
 fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> {
     process_file_with_streams(font_path, move |input_stream, temp_file| {
@@ -271,8 +465,9 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    let mut update_record = UpdateContentCredentialRecord::default();
-    update_record.with_active_manifest_uri(manifest_uri.to_string());
+    let update_record = UpdateContentCredentialRecord::builder()
+        .with_active_manifest_uri(manifest_uri.to_string())
+        .build();
     font.update_c2pa_record(update_record)?;
     font.write(destination)?;
     Ok(())
@@ -387,8 +582,9 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    let mut update_record = UpdateContentCredentialRecord::default();
-    update_record.without_active_manifest_uri();
+    let update_record = UpdateContentCredentialRecord::builder()
+        .without_active_manifest_uri()
+        .build();
     font.update_c2pa_record(update_record)?;
     font.write(destination)?;
     Ok(())
@@ -396,10 +592,7 @@ where
 
 /// Gets a collection of positions of hash objects from the reader which are to
 /// be excluded from the hashing, used to omit from hashing.
-fn get_object_locations_from_stream<T>(
-    sfnt_io: &SfntFont,
-    reader: &mut T,
-) -> Result<Vec<HashObjectPositions>>
+fn get_object_locations_from_stream<T>(reader: &mut T) -> Result<Vec<HashObjectPositions>>
 where
     T: Read + Seek + ?Sized,
 {
@@ -421,7 +614,7 @@ where
     let mut locations: Vec<HashObjectPositions> = Vec::new();
 
     // Which will be built up from the different chunks from the file
-    for chunk in sfnt_io.get_chunk_positions(&mut output_stream)? {
+    for chunk in SfntIO::get_chunk_positions(&mut output_stream)? {
         match chunk.chunk_type {
             // The table directory, other than the table records array will be
             // added as "Cai" -- metadata to be excluded from hashing.
@@ -504,8 +697,7 @@ impl CAIWriter for SfntIO {
         &self,
         input_stream: &mut dyn CAIRead,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
-        let fnt = SfntFont::default();
-        get_object_locations_from_stream(&fnt, input_stream).map_err(wrap_font_err)
+        get_object_locations_from_stream(input_stream).map_err(wrap_font_err)
     }
 
     fn remove_cai_store_from_stream(
@@ -572,8 +764,7 @@ impl AssetIO for SfntIO {
         asset_path: &Path,
     ) -> crate::error::Result<Vec<HashObjectPositions>> {
         let mut buf_reader = open_bufreader_for_file(asset_path)?;
-        let sfnt_io = SfntFont::default();
-        get_object_locations_from_stream(&sfnt_io, &mut buf_reader).map_err(wrap_font_err)
+        get_object_locations_from_stream(&mut buf_reader).map_err(wrap_font_err)
     }
 
     fn remove_cai_store(&self, asset_path: &Path) -> crate::error::Result<()> {
@@ -588,11 +779,8 @@ impl AssetIO for SfntIO {
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for SfntIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
-        let sfnt_font = SfntFont::default();
         // Get the chunk positions
-        let chunks = sfnt_font
-            .get_chunk_positions(input_stream)
-            .map_err(FontError::C2paFontHandlerIoError)?;
+        let chunks = SfntIO::get_chunk_positions(input_stream)?;
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
 

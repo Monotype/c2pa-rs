@@ -68,6 +68,10 @@ pub enum FontError {
     #[error("Failed to save font: {0}")]
     SaveError(#[from] FontSaveError),
 
+    /// Failed to create a string from a byte array.
+    #[error("Failed to create a string from a byte array: {0}")]
+    StringFromUtf8(#[from] std::string::FromUtf8Error),
+
     /// Invalid or unsupported font format
     #[error("Invalid or unsupported font format")]
     Unsupported,
