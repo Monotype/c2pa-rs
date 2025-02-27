@@ -431,14 +431,10 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    if font.has_c2pa() {
-        font.remove_c2pa_record()?;
-    }
-    let c2pa_record = ContentCredentialRecord::builder()
+    let c2pa_record = UpdateContentCredentialRecord::builder()
         .with_content_credential(manifest_store_data.to_vec())
-        .build()?;
-    font.add_c2pa_record(c2pa_record)?;
-
+        .build();
+    font.update_c2pa_record(c2pa_record)?;
     font.write(destination)?;
     Ok(())
 }
