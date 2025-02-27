@@ -307,7 +307,7 @@ impl std::fmt::Debug for ChunkPosition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{:?}, {:?}, {:?}, {:?}",
+            "{}, {}, {}, {}",
             String::from_utf8_lossy(&self.name),
             self.offset,
             self.length,
