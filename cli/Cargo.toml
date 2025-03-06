@@ -26,7 +26,9 @@ c2pa = { path = "../sdk", version = "0.46.0", features = [
 	"fetch_remote_manifests",
 	"file_io",
 	"add_thumbnails",
-	"pdf"
+	"pdf",
+	"sfnt",
+	"add_svg_font_thumbnails",
 ] }
 c2pa-crypto = { path = "../internal/crypto", version = "0.6.2" }
 clap = { version = "4.5.10", features = ["derive", "env"] }
