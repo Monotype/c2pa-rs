@@ -21,7 +21,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 use conv::ValueFrom;
 use png_pong::chunk::InternationalText;
 use serde_bytes::ByteBuf;
-use tempfile::Builder;
 
 use crate::{
     assertions::{BoxMap, C2PA_BOXHASH},
@@ -31,7 +30,10 @@ use crate::{
         RemoteRefEmbedType,
     },
     error::{Error, Result},
-    utils::xmp_inmemory_utils::{add_provenance, MIN_XMP},
+    utils::{
+        io_utils::{tempfile_builder, ReaderUtils},
+        xmp_inmemory_utils::{add_provenance, MIN_XMP},
+    },
 };
 
 const PNG_ID: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -119,7 +121,7 @@ fn get_png_chunk_positions<R: Read + Seek + ?Sized>(f: &mut R) -> Result<Vec<Png
     Ok(chunk_positions)
 }
 
-fn get_cai_data<R: Read + Seek + ?Sized>(f: &mut R) -> Result<Vec<u8>> {
+fn get_cai_data<R: Read + Seek + ?Sized>(mut f: &mut R) -> Result<Vec<u8>> {
     let ps = get_png_chunk_positions(f)?;
 
     if ps
@@ -141,11 +143,7 @@ fn get_cai_data<R: Read + Seek + ?Sized>(f: &mut R) -> Result<Vec<u8>> {
 
     f.seek(SeekFrom::Start(pcp.start + 8))?; // skip ahead from chunk start + length(4) + name(4)
 
-    let mut data: Vec<u8> = vec![0; length];
-    f.read_exact(&mut data[..])
-        .map_err(|_err| Error::InvalidAsset("PNG out of range".to_string()))?;
-
-    Ok(data)
+    f.read_to_vec(length as u64)
 }
 
 fn add_required_chunks_to_stream(
@@ -208,7 +206,7 @@ impl CAIReader for PngIO {
     }
 
     // Get XMP block
-    fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
+    fn read_xmp(&self, mut asset_reader: &mut dyn CAIRead) -> Option<String> {
         let ps = get_png_chunk_positions(asset_reader).ok()?;
         let mut xmp_str: Option<String> = None;
 
@@ -253,14 +251,14 @@ impl CAIReader for PngIO {
                     };
 
                     // read iTxt data
-                    let mut data = vec![
-                        0u8;
-                        pcp.length as usize
-                            - (key.len() + _langtag.len() + _transkey.len() + 5)
-                    ]; // data len - size of key - size of land - size of transkey - 3 "0" string terminators - compressed u8 - compression method u8
-                    if asset_reader.read_exact(&mut data).is_err() {
-                        return false;
-                    }
+                    let data = match asset_reader.read_to_vec(
+                        pcp.length as u64
+                            - (key.len() + _langtag.len() + _transkey.len() + 5) as u64,
+                    ) {
+                        // data len - size of key - size of land - size of transkey - 3 "0" string terminators - compressed u8 - compression method u8
+                        Ok(v) => v,
+                        Err(_) => return false,
+                    };
 
                     // convert to string, decompress if needed
                     let val = if compressed {
@@ -480,10 +478,7 @@ impl AssetIO for PngIO {
             .open(asset_path)
             .map_err(Error::IoError)?;
 
-        let mut temp_file = Builder::new()
-            .prefix("c2pa_temp")
-            .rand_bytes(5)
-            .tempfile()?;
+        let mut temp_file = tempfile_builder("c2pa_temp")?;
 
         self.write_cai(&mut stream, &mut temp_file, store_bytes)?;
 
@@ -655,7 +650,7 @@ impl RemoteRefEmbed for PngIO {
 
                 let xmp = match self.read_xmp(source_stream) {
                     Some(s) => s,
-                    None => format!("http://ns.adobe.com/xap/1.0/\0 {}", MIN_XMP),
+                    None => MIN_XMP.to_string(),
                 };
 
                 // update XMP
@@ -794,7 +789,10 @@ pub mod tests {
     use memchr::memmem;
 
     use super::*;
-    use crate::utils::test::{self, temp_dir_path};
+    use crate::utils::{
+        io_utils::tempdirectory,
+        test::{self, temp_dir_path},
+    };
 
     #[test]
     fn test_png_xmp() {
@@ -816,7 +814,7 @@ pub mod tests {
         let ap = test::fixture_path("libpng-test.png");
         let mut source_stream = std::fs::File::open(ap).unwrap();
 
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempdirectory().unwrap();
         let output = temp_dir_path(&temp_dir, "out.png");
         let mut output_stream = std::fs::OpenOptions::new()
             .read(true)
@@ -982,7 +980,7 @@ pub mod tests {
     #[test]
     fn test_remove_c2pa() {
         let source = test::fixture_path("exp-test1.png");
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempdirectory().unwrap();
         let output = test::temp_dir_path(&temp_dir, "exp-test1_tmp.png");
         std::fs::copy(source, &output).unwrap();
 
@@ -1035,7 +1033,7 @@ pub mod tests {
             .unwrap();
         let curr_manifest = png_io.read_cai_store(&source).unwrap();
 
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempdirectory().unwrap();
         let output = crate::utils::test::temp_dir_path(&temp_dir, "exp-test1-out.png");
 
         std::fs::copy(source, &output).unwrap();

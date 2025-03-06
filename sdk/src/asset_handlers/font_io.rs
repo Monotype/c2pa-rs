@@ -81,12 +81,12 @@ pub enum FontError {
     Utf8Error(#[from] std::str::Utf8Error),
 
     // Failed to read XMP data.
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     #[error("Error reading/writing XMP data: {0}")]
     XmpError(String),
 
     /// XMP data was not found.
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     #[error("XMP data was not found in the font.")]
     XmpNotFound,
 }

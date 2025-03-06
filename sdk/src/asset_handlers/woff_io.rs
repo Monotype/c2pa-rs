@@ -50,8 +50,8 @@ use crate::{
 /// implementation for remote manifests.
 ///
 /// # Remarks
-/// This module depends on the `feature = "xmp_write"` to be enabled.
-#[cfg(feature = "xmp_write")]
+/// This module depends on the `feature = "font_xmp"` to be enabled.
+#[cfg(feature = "font_xmp")]
 mod font_xmp_support {
     use super::*;
     use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
@@ -1190,12 +1190,12 @@ impl RemoteRefEmbed for WoffIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
                         .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
                 }
@@ -1214,7 +1214,7 @@ impl RemoteRefEmbed for WoffIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_stream(
                         reader,
@@ -1223,7 +1223,7 @@ impl RemoteRefEmbed for WoffIO {
                     )
                     .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_stream(reader, output_stream, &manifest_uri)
                         .map_err(wrap_font_err)
@@ -1250,7 +1250,7 @@ pub mod tests {
 
     #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(not(feature = "xmp_write"))]
+    #[cfg(not(feature = "font_xmp"))]
     // Key to cryptic test comments.
     //
     //   IIP - Invalid/Ignored/Passthrough
@@ -1304,7 +1304,7 @@ pub mod tests {
     /// expected.
     #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     fn add_c2pa_ref() {
         use crate::utils::xmp_inmemory_utils::extract_provenance;
 
@@ -1580,7 +1580,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::{fs::File, io::Cursor};

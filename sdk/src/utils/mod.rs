@@ -11,8 +11,11 @@
 // specific language governing permissions and limitations under
 // each license.
 
-pub(crate) mod base64;
 pub(crate) mod cbor_types;
+
+mod debug_byte_slice;
+pub(crate) use debug_byte_slice::DebugByteSlice;
+
 #[allow(dead_code)]
 pub(crate) mod hash_utils;
 pub(crate) mod io_utils;
@@ -20,7 +23,6 @@ pub(crate) mod merkle;
 pub(crate) mod mime;
 #[allow(dead_code)] // for wasm build
 pub(crate) mod patch;
-pub(crate) mod sig_utils;
 #[cfg(feature = "add_thumbnails")]
 pub(crate) mod thumbnail;
 pub(crate) mod time_it;
@@ -30,3 +32,6 @@ pub(crate) mod xmp_inmemory_utils;
 #[cfg(test)]
 #[allow(dead_code)] // for wasm build
 pub mod test;
+
+#[cfg(test)]
+pub(crate) mod test_signer;

@@ -22,7 +22,6 @@ use std::{
 use atree::{Arena, Token};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use conv::ValueFrom;
-use tempfile::Builder;
 
 use crate::{
     assertions::{BmffMerkleMap, ExclusionsMap},
@@ -33,7 +32,7 @@ use crate::{
     error::{Error, Result},
     utils::{
         hash_utils::{vec_compare, HashRange},
-        io_utils::stream_len,
+        io_utils::{stream_len, tempfile_builder, ReaderUtils},
         xmp_inmemory_utils::{add_provenance, MIN_XMP},
     },
 };
@@ -437,7 +436,7 @@ fn get_top_level_boxes(
 }
 
 pub fn bmff_to_jumbf_exclusions<R>(
-    reader: &mut R,
+    mut reader: &mut R,
     bmff_exclusions: &[ExclusionsMap],
     bmff_v2: bool,
 ) -> Result<Vec<HashRange>>
@@ -535,8 +534,7 @@ where
                         skip_bytes_to(reader, box_start + data_map.offset as u64)?;
 
                         // match the data
-                        let mut buf = vec![0u8; data_map.value.len()];
-                        reader.read_exact(&mut buf)?;
+                        let buf = reader.read_to_vec(data_map.value.len() as u64)?;
 
                         // does not match so skip
                         if !vec_compare(&data_map.value, &buf) {
@@ -943,7 +941,7 @@ pub(crate) fn build_bmff_tree<R: Read + Seek + ?Sized>(
     while current < end {
         // Get box header.
         let header = BoxHeaderLite::read(reader)
-            .map_err(|_err| Error::InvalidAsset("Bad BMFF".to_string()))?;
+            .map_err(|err| Error::InvalidAsset(format!("Bad BMFF {}", err)))?;
 
         // Break if size zero BoxHeader
         let s = header.size;
@@ -1118,7 +1116,7 @@ pub(crate) struct C2PABmffBoxes {
     pub xmp: Option<String>,
 }
 
-pub(crate) fn read_bmff_c2pa_boxes(reader: &mut dyn CAIRead) -> Result<C2PABmffBoxes> {
+pub(crate) fn read_bmff_c2pa_boxes(mut reader: &mut dyn CAIRead) -> Result<C2PABmffBoxes> {
     let size = stream_len(reader)?;
     reader.rewind()?;
 
@@ -1192,8 +1190,7 @@ pub(crate) fn read_bmff_c2pa_boxes(reader: &mut dyn CAIRead) -> Result<C2PABmffB
 
                             // read the manifest
                             if manifest_store_cnt == 0 {
-                                let mut manifest = vec![0u8; data_len as usize];
-                                reader.read_exact(&mut manifest)?;
+                                let manifest = reader.read_to_vec(data_len)?;
                                 output = Some(manifest);
 
                                 manifest_store_cnt += 1;
@@ -1206,8 +1203,7 @@ pub(crate) fn read_bmff_c2pa_boxes(reader: &mut dyn CAIRead) -> Result<C2PABmffB
                                 _first_aux_uuid = offset;
                             }
                         } else if vec_compare(&purpose, MERKLE.as_bytes()) {
-                            let mut merkle = vec![0u8; data_len as usize];
-                            reader.read_exact(&mut merkle)?;
+                            let merkle = reader.read_to_vec(data_len)?;
 
                             // use this method since it will strip trailing zeros padding if there
                             let mut deserializer =
@@ -1227,9 +1223,7 @@ pub(crate) fn read_bmff_c2pa_boxes(reader: &mut dyn CAIRead) -> Result<C2PABmffB
                         // set reader to start of box contents
                         skip_bytes_to(reader, box_info.data.offset + HEADER_SIZE + 16)?;
 
-                        let mut xmp_vec = vec![0u8; data_len as usize];
-                        reader.read_exact(&mut xmp_vec)?;
-
+                        let xmp_vec = reader.read_to_vec(data_len)?;
                         if let Ok(xmp_string) = String::from_utf8(xmp_vec) {
                             xmp = Some(xmp_string);
                         }
@@ -1283,10 +1277,7 @@ impl AssetIO for BmffIO {
             .open(asset_path)
             .map_err(Error::IoError)?;
 
-        let mut temp_file = Builder::new()
-            .prefix("c2pa_temp")
-            .rand_bytes(5)
-            .tempfile()?;
+        let mut temp_file = tempfile_builder("c2pa_temp")?;
 
         self.write_cai(&mut input_stream, &mut temp_file, store_bytes)?;
 
@@ -1305,10 +1296,7 @@ impl AssetIO for BmffIO {
     fn remove_cai_store(&self, asset_path: &Path) -> Result<()> {
         let mut input_file = std::fs::File::open(asset_path)?;
 
-        let mut temp_file = Builder::new()
-            .prefix("c2pa_temp")
-            .rand_bytes(5)
-            .tempfile()?;
+        let mut temp_file = tempfile_builder("c2pa_temp")?;
 
         self.remove_cai_store_from_stream(&mut input_file, &mut temp_file)?;
 
@@ -1713,7 +1701,7 @@ impl RemoteRefEmbed for BmffIO {
                 let xmp = match self.get_reader().read_xmp(input_stream) {
                     Some(xmp) => add_provenance(&xmp, &manifest_uri)?,
                     None => {
-                        let xmp = format!("http://ns.adobe.com/xap/1.0/\0 {}", MIN_XMP);
+                        let xmp = MIN_XMP.to_string();
                         add_provenance(&xmp, &manifest_uri)?
                     }
                 };
@@ -1847,33 +1835,32 @@ impl RemoteRefEmbed for BmffIO {
         }
     }
 }
+
 #[cfg(test)]
 pub mod tests {
     #![allow(clippy::expect_used)]
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use tempfile::tempdir;
-
     use super::*;
-    use crate::utils::test::{fixture_path, temp_dir_path};
+    use crate::utils::{
+        io_utils::tempdirectory,
+        test::{fixture_path, temp_dir_path},
+    };
 
-    #[cfg(not(target_arch = "wasm32"))]
-    #[cfg(feature = "file_io")]
+    #[cfg(all(feature = "v1_api", feature = "file_io"))]
     #[test]
     fn test_read_mp4() {
-        use crate::{
-            status_tracker::{report_split_errors, DetailedStatusTracker, StatusTracker},
-            store::Store,
-        };
+        use c2pa_status_tracker::StatusTracker;
+
+        use crate::store::Store;
 
         let ap = fixture_path("video1.mp4");
 
-        let mut log = DetailedStatusTracker::default();
+        let mut log = StatusTracker::default();
         let store = Store::load_from_asset(&ap, true, &mut log);
 
-        let errors = report_split_errors(log.get_log_mut());
-        assert!(errors.is_empty());
+        assert!(!log.has_any_error());
 
         if let Ok(s) = store {
             print!("Store: \n{s}");
@@ -1885,7 +1872,7 @@ pub mod tests {
         let data = "some test data";
         let source = fixture_path("video1.mp4");
 
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdirectory().unwrap();
         let output = temp_dir_path(&temp_dir, "video1-out.mp4");
 
         std::fs::copy(source, &output).unwrap();
@@ -1911,7 +1898,7 @@ pub mod tests {
         let source = fixture_path("video1.mp4");
 
         let mut success = false;
-        if let Ok(temp_dir) = tempdir() {
+        if let Ok(temp_dir) = tempdirectory() {
             let output = temp_dir_path(&temp_dir, "mp4_test.mp4");
 
             if let Ok(_size) = std::fs::copy(source, &output) {
@@ -1935,7 +1922,7 @@ pub mod tests {
         let source = fixture_path("video1.mp4");
 
         let mut success = false;
-        if let Ok(temp_dir) = tempdir() {
+        if let Ok(temp_dir) = tempdirectory() {
             let output = temp_dir_path(&temp_dir, "mp4_test.mp4");
 
             if let Ok(_size) = std::fs::copy(&source, &output) {
@@ -1961,7 +1948,7 @@ pub mod tests {
         let source = fixture_path("video1.mp4");
 
         let mut success = false;
-        if let Ok(temp_dir) = tempdir() {
+        if let Ok(temp_dir) = tempdirectory() {
             let output = temp_dir_path(&temp_dir, "mp4_test.mp4");
 
             if let Ok(_size) = std::fs::copy(source, &output) {
@@ -1988,7 +1975,7 @@ pub mod tests {
     fn test_remove_c2pa() {
         let source = fixture_path("video1.mp4");
 
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdirectory().unwrap();
         let output = temp_dir_path(&temp_dir, "mp4_test.mp4");
 
         std::fs::copy(source, &output).unwrap();

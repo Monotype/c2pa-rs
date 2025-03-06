@@ -1,10 +1,254 @@
 # Changelog
 
-All changes to this project are documented in this file.
+All notable changes to this project will be documented in this file.
 
-This project adheres to [Semantic Versioning](https://semver.org), except that – as is typical in the Rust community – the minimum supported Rust version may be increased without a major version increase.
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), except that – as is typical in the Rust community – the minimum supported Rust version may be increased without a major version increase.
 
-Do not manually edit this file. It will be automatically updated when a new release is published.
+Since version 0.36.2, the format of this changelog is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [0.46.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.45.3...c2pa-v0.46.0)
+_15 February 2025_
+
+### Added
+
+* Add support for DynamicAssertions in JSON format (#924)
+
+### Fixed
+
+* Panic in decoding of GIF chunks (#873)
+* Use correct byte label for GIF Plain Text Extension (#864)
+* Panic in slicing of empty XMP data (#872)
+
+### Other
+
+* Use `AsRef<Path>` in `jumbf_io` functions (#910)
+
+## [0.45.3](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.45.2...c2pa-v0.45.3)
+_11 February 2025_
+
+### Fixed
+
+* Restore support for claim_generator_hints (#915)
+
+## [0.45.2](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.45.1...c2pa-v0.45.2)
+_06 February 2025_
+
+### Documented
+
+* Fix reported errors for docs (#903)
+
+### Fixed
+
+* Update error reporting (#906)
+* Repair cargo test (#898)
+
+## [0.45.1](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.45.0...c2pa-v0.45.1)
+_31 January 2025_
+
+### Fixed
+
+* Remove dependency on SubtleCrypto (#881)
+
+## [0.45.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.44.0...c2pa-v0.45.0)
+_30 January 2025_
+
+### Added
+
+* *(cawg_identity)* Split `CredentialHolder` into sync and async versions (#891)
+
+## [0.44.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.43.0...c2pa-v0.44.0)
+_29 January 2025_
+
+### Added
+
+* Allow synchronous DynamicAssertion (#889)
+* Claim v2 (#707)
+
+## [0.43.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.42.0...c2pa-v0.43.0)
+_24 January 2025_
+
+### Added
+
+* *(crypto)* Make `box_size` parameter on `c2pa_crypto::cose::sign` an `Option` (#879)
+
+### Fixed
+
+* Bump coset requirement to 0.3.8 (#883)
+* Update id3 crate (#875)
+* Remove `Debug` supertrait from `DynamicAssertion` and `CredentialHolder` traits (#876)
+
+## [0.42.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.41.1...c2pa-v0.42.0)
+_22 January 2025_
+
+### Added
+
+* Change the definition of `Signer.raw_signer()` to return an `Option` defaulting to `None` (#869)
+
+## [0.41.1](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.41.0...c2pa-v0.41.1)
+_22 January 2025_
+
+### Fixed
+
+* Make alg enum exhaustive (#866)
+
+## [0.41.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.40.0...c2pa-v0.41.0)
+_16 January 2025_
+
+### Added
+
+* *(crypto)* Add `rsa` crate support to `rust_native_crypto` feature (#853)
+* *(cawg_identity)* Implement identity assertion validation (#843)
+* Remove writing of native camera RAW formats from SDK (#814)
+* Review `c2pa-crypto` crate API (#813)
+* Add new function `c2pa_crypto::cose::signing_time_from_sign1` (#812)
+* Move COSE signing into `c2pa_crypto` crate (#807)
+* Move COSE timestamp generation into `c2pa_crypto` (#803)
+* Move COSE signature verification into `c2pa_crypto` (#801)
+* Introduce `c2pa_crypto::Verifier::verify_trust` (#798)
+* Introduce `c2pa_crypto::cose::Verifier` (#797)
+* Consolidate implementations of `cert_chain_from_sign1` in `c2pa_crypto` (#796)
+* Move `signing_alg_from_sign1` into `c2pa-crypto` (#795)
+* Move `get_cose_sign1` into `c2pa-crypto` crate (#794)
+* Move COSE OCSP support into c2pa-crypto (#793)
+* Move `verify_trust` into `c2pa_crypto` (#784)
+* Introduce `c2pa_crypto::CertificateAcceptancePolicy` (#779)
+* Bump MSRV to 1.81.0 (#781)
+
+### Fixed
+
+* Make sure `DynamicAssertion::content` gets a properly populated `PreliminaryClaim` (#842)
+* Switch to from fast_xml to quick_xml (#805)
+* Update img-parts for jpeg segment underflow fix (#806)
+* Bring `claim_v2` changes from #707 into `c2pa_crypto` (#811)
+* Improve usage of `#[cfg]` directives (#783)
+* OOB read attempt in jpeg_io asset handler in get_cai_segments function (#719)
+* Prevent negative length value for SVG object locations (#766)
+* JPEG `write_cai` OOB insertion (#762)
+* Add support XMP in SVG (#771)
+* Possible overflow for TIFF (#760)
+* Resolve new Clippy issues (#776)
+
+### Updated dependencies
+
+* Bump jfifdump from 0.5.1 to 0.6.0 (#785)
+* Bump serde-wasm-bindgen from 0.5.0 to 0.6.5 (#786)
+* Bump thiserror from 2.0.6 to 2.0.8 (#787)
+* Bump rasn from 0.18.0 to 0.22.0 (#727)
+* Bump thiserror from 1.0.69 to 2.0.6 (#770)
+
+## [0.40.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.39.0...c2pa-v0.40.0)
+_12 December 2024_
+
+### Added
+
+* Add `RawSigner` trait to `c2pa-crypto` (derived from `c2pa::Signer`) (#716)
+* Move time stamp code into c2pa-crypto (#696)
+* Adds ValidationState support (#701)
+* Introduce `DynamicAssertion` trait (#566)
+
+### Fixed
+
+* Compile `c2pa-crypto` with `cargo check` (#768)
+* Verbose assertions for `is_none()` (#704)
+* Remove `c2pa::Signer` dependency on `c2pa_crypto::TimeStampProvider` (#718)
+* Add support for MP3 without ID3 header (#652)
+* Treat Unicode-3.0 license as approved; unpin related dependencies (#693)
+* Remote manifest fetch test was not using full path (#675)
+* Fix #624 (edge cases when combining the box hashes) (#625)
+* Fix #672, Callback is unsound (#674)
+* Support "remote_manifest_fetch" verify setting (#667)
+
+### Updated dependencies
+
+* Bump chrono from 0.4.38 to 0.4.39 (#763)
+* Bump asn1-rs from 0.5.2 to 0.6.2 (#724)
+* Bump mockall requirement from 0.11.2 to 0.13.1 in /sdk (#685)
+* Update zip requirement from 0.6.6 to 2.2.1 in /sdk (#698)
+
+## [0.39.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.38.0...c2pa-v0.39.0)
+_13 November 2024_
+
+### Added
+
+* Factor status tracking infrastructure into its own crate ([#665](https://github.com/contentauth/c2pa-rs/pull/665))
+
+### Fixed
+
+* Fixed a typo in ManifestDefinition docstring ([#639](https://github.com/contentauth/c2pa-rs/pull/639))
+
+## [0.38.0](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.37.1...c2pa-v0.38.0)
+_06 November 2024_
+
+### Added
+
+* Add fragmented mp4 Builder and Reader support ([#649](https://github.com/contentauth/c2pa-rs/pull/649))
+* Associate ingredients with actions using parameters.org.cai.ingredientsIds array ([#627](https://github.com/contentauth/c2pa-rs/pull/627))
+
+### Fixed
+
+* Stay on url version 2.5.2 until Unicode-3.0 license can be approved ([#654](https://github.com/contentauth/c2pa-rs/pull/654))
+
+## [0.37.1](https://github.com/contentauth/c2pa-rs/compare/c2pa-v0.37.0...c2pa-v0.37.1)
+_24 October 2024_
+
+### Documented
+
+* Update API documentation ([#621](https://github.com/contentauth/c2pa-rs/pull/621))
+
+## [0.37.0](https://github.com/contentauth/c2pa-rs/compare/v0.36.4...v0.37.0)
+_17 October 2024_
+
+### Fixed
+
+* Adds identified RangeType to region of interest ([#631](https://github.com/contentauth/c2pa-rs/pull/631))
+
+## [0.36.4](https://github.com/contentauth/c2pa-rs/compare/v0.36.3...v0.36.4)
+_15 October 2024_
+
+### Fixed
+
+* Harden SDK against attempting buffers that are too large ([#628](https://github.com/contentauth/c2pa-rs/pull/628))
+
+## [0.36.3](https://github.com/contentauth/c2pa-rs/compare/v0.36.2...v0.36.3)
+_07 October 2024_
+
+### Fixed
+
+* Changelog contained duplicate entries for 0.16.1 ([#618](https://github.com/contentauth/c2pa-rs/pull/618))
+
+## [0.36.2](https://github.com/contentauth/c2pa-rs/compare/v0.36.1...v0.36.2)
+_07 October 2024_
+
+* No-op change to start using release-plz to manage releases
+
+## 0.36.1
+_04 October 2024_
+
+* fix: Make sure algorithm is being respected in data_hash.rs ([#613](https://github.com/contentauth/c2pa-rs/pull/613))
+* fix: Make sure RSTn segment names are included in the data box hashes list ([#612](https://github.com/contentauth/c2pa-rs/pull/612))
+* Update mp4 requirement from 0.13.0 to 0.14.0 in /sdk ([#595](https://github.com/contentauth/c2pa-rs/pull/595))
+* chore: Add m4a test ([#606](https://github.com/contentauth/c2pa-rs/pull/606))
+* fix: Write absolute urls to manifest store resource references. ([#603](https://github.com/contentauth/c2pa-rs/pull/603))
+* doc: Removes xmp_write feature from README.md.
+* chore: Remove deprecated actions-rs/clippy-check action ([#601](https://github.com/contentauth/c2pa-rs/pull/601))
+* chore: bump stefanzweifel/git-auto-commit-action from 4 to 5 ([#600](https://github.com/contentauth/c2pa-rs/pull/600))
+* chore: bump actions/github-script from 3 to 7 ([#599](https://github.com/contentauth/c2pa-rs/pull/599))
+* chore: bump paulhatch/semantic-version from 5.2.1 to 5.4.0 ([#598](https://github.com/contentauth/c2pa-rs/pull/598))
+* chore: Use Dependabot to upgrade GitHub Actions steps ([#597](https://github.com/contentauth/c2pa-rs/pull/597))
+* chore: Fix dependabot issues ([#594](https://github.com/contentauth/c2pa-rs/pull/594))
+* Fixes issue where nested assertion-uri-hash errors were being reported at the active manifest level. ([#593](https://github.com/contentauth/c2pa-rs/pull/593))
+* Feature/add content length to tsa request ([#587](https://github.com/contentauth/c2pa-rs/pull/587))
+
+## 0.36.0
+_23 September 2024_
+
+* (MINOR) ensures release bumps minor version ([#592](https://github.com/contentauth/c2pa-rs/pull/592))
+* fix: requires "StatusTracker" to implement "Send" ([#589](https://github.com/contentauth/c2pa-rs/pull/589))
+
+## 0.35.1
+_17 September 2024_
+
+* Fix error when trying to sign BMFF content with Builder. ([#582](https://github.com/contentauth/c2pa-rs/pull/582))
 
 ## 0.35.0
 _12 September 2024_
@@ -432,13 +676,6 @@ _22 February 2023_
 _19 December 2022_
 
 * Update xmp-toolkit from 0.6.0 to 1.0.0 ([#165](https://github.com/contentauth/c2pa-rs/pull/165))
-* Prepare 0.16.1 release
-* Address new Clippy warnings for Rust 1.66 ([#164](https://github.com/contentauth/c2pa-rs/pull/164))
-* Create external manifests for unknown types ([#162](https://github.com/contentauth/c2pa-rs/pull/162))
-
-## 0.16.1
-_19 December 2022_
-
 * Address new Clippy warnings for Rust 1.66 ([#164](https://github.com/contentauth/c2pa-rs/pull/164))
 * Create external manifests for unknown types ([#162](https://github.com/contentauth/c2pa-rs/pull/162))
 

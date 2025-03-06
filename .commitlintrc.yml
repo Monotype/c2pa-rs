@@ -1,0 +1,51 @@
+rules:
+  # Body may be empty
+  body-empty:
+    level: ignore
+
+  # Description must not be empty
+  description-empty:
+    level: error
+
+  # Description must start with a capital letter and must not end with a period or space
+  description-format:
+    level: error
+    format: ^[\w ]+[\s\S]*$
+
+  # Description should be <70 chars
+  description-max-length:
+    level: warning
+    length: 70
+
+  # Scope must be one of the following
+  scope:
+    level: error
+    optional: true
+    options:
+      - c2patool
+      - cawg_identity
+      - crypto
+      - export_schema
+      - make_test_images
+      - sdk
+
+  # Subject line should exist
+  subject-empty:
+    level: error
+
+  # Type must be one of these options
+  type:
+    level: error
+    options:
+      - build
+      - chore
+      - ci
+      - docs
+      - feat
+      - fix
+      - perf
+      - refactor
+      - revert
+      - style
+      - test
+      - update

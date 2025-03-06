@@ -109,7 +109,7 @@ impl Metadata {
     }
 
     /// Sets the ISO 8601 date-time string when the assertion was created/generated.
-    pub fn set_date_time(&mut self, date_time: String) -> &mut Self {
+    pub fn set_date_time(mut self, date_time: String) -> Self {
         self.date_time = Some(DateT(date_time));
         self
     }
@@ -298,6 +298,15 @@ pub struct AssetType {
     pub version: Option<String>,
 }
 
+impl AssetType {
+    pub fn new<S: Into<String>>(asset_type: S, version: Option<String>) -> Self {
+        AssetType {
+            asset_type: asset_type.into(),
+            version,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 pub struct DataBox {
     #[serde(rename = "dc:format")]
@@ -326,21 +335,14 @@ pub mod tests {
                 .set_region_of_interest(RegionOfInterest {
                     region: vec![Range {
                         range_type: RangeType::Temporal,
-                        shape: None,
                         time: Some(Time {
                             time_type: TimeType::Npt,
                             start: None,
                             end: None,
                         }),
-                        frame: None,
-                        text: None,
+                        ..Default::default()
                     }],
-                    name: None,
-                    identifier: None,
-                    region_type: None,
-                    role: None,
-                    description: None,
-                    metadata: None,
+                    ..Default::default()
                 });
         original.insert("foo", test_value);
         println!("{:?}", &original);

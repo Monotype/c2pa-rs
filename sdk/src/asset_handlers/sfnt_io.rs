@@ -61,8 +61,8 @@ pub(crate) struct SfntIO {}
 /// implementation for remote manifests.
 ///
 /// # Remarks
-/// This module depends on the `feature = "xmp_write"` to be enabled.
-#[cfg(feature = "xmp_write")]
+/// This module is only compiled when the `font_xmp` feature is enabled.
+#[cfg(feature = "font_xmp")]
 mod font_xmp_support {
     use std::io::SeekFrom;
 
@@ -831,12 +831,12 @@ impl RemoteRefEmbed for SfntIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
                         .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
                 }
@@ -855,7 +855,7 @@ impl RemoteRefEmbed for SfntIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_stream(
                         reader,
@@ -864,7 +864,7 @@ impl RemoteRefEmbed for SfntIO {
                     )
                     .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_stream(reader, output_stream, &manifest_uri)
                         .map_err(wrap_font_err)
@@ -1052,7 +1052,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "xmp_write"))]
+    #[cfg(not(feature = "font_xmp"))]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
     fn add_c2pa_ref() {
@@ -1098,7 +1098,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     fn add_c2pa_ref() {
@@ -1437,7 +1437,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::{fs::File, io::Cursor, path::Path};
