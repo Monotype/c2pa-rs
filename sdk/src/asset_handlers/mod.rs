@@ -24,8 +24,8 @@ pub mod riff_io;
 pub mod sfnt_io;
 pub mod svg_io;
 pub mod tiff_io;
-//#[cfg(feature = "woff")]
-//pub mod woff_io;
+#[cfg(feature = "woff")]
+pub mod woff_io;
 
 #[cfg(feature = "pdf")]
 pub(crate) mod pdf;
