@@ -18,7 +18,7 @@ readme = "../README.md"
 keywords = ["xmp", "metadata"]
 categories = ["api-bindings"]
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.82.0"
 exclude = ["tests/fixtures"]
 
 [package.metadata.docs.rs]
@@ -101,8 +101,7 @@ extfmt = "0.1.1"
 ed25519-dalek = "2.1.1"
 fast-xml = "0.23.1"
 hex = "0.4.3"
-# Version 1.13.0 doesn't compile under Rust < 1.75, pinning to 1.12.0
-id3 = "=1.12.0"
+id3 = "=1.16.1"
 img-parts = "0.3.0"
 jfifdump = "0.5.1"
 log = "0.4.21"
