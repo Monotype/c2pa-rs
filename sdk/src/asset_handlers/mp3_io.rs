@@ -500,6 +500,7 @@ pub mod tests {
     use crate::utils::{
         hash_utils::vec_compare,
         test::{fixture_path, temp_dir_path},
+        xmp_inmemory_utils::extract_provenance,
     };
 
     #[test]
@@ -591,8 +592,9 @@ pub mod tests {
         )?;
         output_stream1.rewind()?;
 
-        let xmp = mp3_io.read_xmp(&mut output_stream1);
-        assert_eq!(xmp, Some("http://ns.adobe.com/xap/1.0/\0<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 6.0.0\">\n  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n    <rdf:Description rdf:about=\"\" xmlns:dcterms=\"http://purl.org/dc/terms/\" dcterms:provenance=\"Test\">\n    </rdf:Description>\n  </rdf:RDF>\n</x:xmpmeta>".to_owned()));
+        let xmp = mp3_io.read_xmp(&mut output_stream1).unwrap();
+        let p = extract_provenance(&xmp).unwrap();
+        assert_eq!(&p, "Test");
 
         Ok(())
     }

@@ -11,7 +11,6 @@
 // specific language governing permissions and limitations under
 // each license.
 use std::{
-    fmt,
     fs::File,
     io::{BufReader, Cursor, Read, Seek, Write},
     path::*,
@@ -19,14 +18,13 @@ use std::{
 
 use c2pa_font_handler::{
     c2pa::{C2PASupport, ContentCredentialRecord, UpdatableC2PA, UpdateContentCredentialRecord},
+    chunks::{ChunkPosition, ChunkReader, ChunkTypeTrait},
     sfnt::{
-        directory::{SfntDirectory, SfntDirectoryEntry},
-        font::SfntFont,
-        header::SfntHeader,
+        font::{SfntChunkType, SfntFont},
         table::{NamedTable, TableC2PA},
     },
     tag::FontTag,
-    Font, FontDataExactRead, FontDataRead, FontDirectory, FontDirectoryEntry, MutFontDataWrite,
+    Font, FontDataRead, MutFontDataWrite,
 };
 use log::trace;
 use serde_bytes::ByteBuf;
@@ -217,196 +215,6 @@ impl TempFile {
     /// Get a mutable reference to the temporary file
     pub(crate) fn get_mut_file(&mut self) -> &mut File {
         &mut self.file
-    }
-}
-
-/// Custom trait for reading chunks of data from a scalable font (SFNT).
-pub trait ChunkReader {
-    /// The error type for reading the data.
-    type Error;
-    /// Gets a collection of positions of chunks within the font, used to
-    /// omit from hashing.
-    fn get_chunk_positions<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error>;
-}
-
-/// Identifies types of regions within a font file. Chunks with lesser enum
-/// values precede those with greater enum values; order within a given group
-/// of chunks (such as a series of `Table` chunks) must be preserved by some
-/// other mechanism.
-#[derive(Eq, PartialEq)]
-pub enum ChunkType {
-    /// Whole-container header.
-    Header,
-    /// Table directory entry or entries.
-    _Directory,
-    /// Table data included in C2PA hash.
-    TableDataIncluded,
-    /// Table data excluded from C2PA hash.
-    TableDataExcluded,
-}
-
-impl std::fmt::Display for ChunkType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "Directory"),
-            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
-            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
-        }
-    }
-}
-
-impl std::fmt::Debug for ChunkType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ChunkType::Header => write!(f, "Header"),
-            ChunkType::_Directory => write!(f, "Directory"),
-            ChunkType::TableDataIncluded => write!(f, "TableDataIncluded"),
-            ChunkType::TableDataExcluded => write!(f, "TableDataExcluded"),
-        }
-    }
-}
-
-/// Represents regions within a font file that may be of interest when it
-/// comes to hashing data for C2PA.
-#[derive(Eq, PartialEq)]
-pub struct ChunkPosition {
-    /// Offset to the start of the chunk
-    pub offset: usize,
-    /// Length of the chunk
-    pub length: usize,
-    /// Tag of the chunk
-    pub name: [u8; 4],
-    /// Type of chunk
-    pub chunk_type: ChunkType,
-}
-
-impl ChunkPosition {
-    /// Gets the name as an UTF-8 string.
-    pub fn name_as_string(&self) -> core::result::Result<String, FontError> {
-        String::from_utf8(self.name.to_vec()).map_err(FontError::StringFromUtf8)
-    }
-}
-
-impl std::fmt::Display for ChunkPosition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}, {}, {}, {}",
-            String::from_utf8_lossy(&self.name),
-            self.offset,
-            self.length,
-            self.chunk_type
-        )
-    }
-}
-
-impl std::fmt::Debug for ChunkPosition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}, {}, {}, {}",
-            String::from_utf8_lossy(&self.name),
-            self.offset,
-            self.length,
-            self.chunk_type
-        )
-    }
-}
-
-const SFNT_HEADER_CHUNK_NAME: [u8; 4] = *b" HDR";
-
-impl ChunkReader for SfntIO {
-    type Error = FontError;
-
-    fn get_chunk_positions<T: Read + Seek + ?Sized>(
-        reader: &mut T,
-    ) -> core::result::Result<Vec<ChunkPosition>, Self::Error> {
-        // Rewind to start and read the SFNT header and directory - that's
-        // really all we need in order to map the chunks.
-        reader.rewind()?;
-        let header = SfntHeader::from_reader(reader)?;
-        let size_to_read = header.numTables as usize * SfntDirectoryEntry::SIZE;
-        let offset = reader.stream_position()?;
-        let directory = SfntDirectory::from_reader_exact(reader, offset, size_to_read)?;
-
-        // TBD - Streamlined approach:
-        // 1 - Header + directory
-        // 2 - Data from start to head::checksumAdjustment
-        // 3 - head::checksumAdjustment
-        // 4 - Data from head::checksumAdjustment through penultimate table
-        // 5 - The C2PA table
-
-        // The first chunk excludes the header & directory from hashing
-        let mut positions: Vec<ChunkPosition> = Vec::new();
-        positions.push(ChunkPosition {
-            offset: 0,
-            length: size_of::<SfntHeader>()
-                + header.numTables as usize * size_of::<SfntDirectoryEntry>(),
-            name: SFNT_HEADER_CHUNK_NAME,
-            chunk_type: ChunkType::Header,
-        });
-
-        // The subsequent chunks represent the tables. All table data is hashed,
-        // with two exceptions:
-        // - The C2PA table itself.
-        // - The head table's `checksumAdjustment` field.
-        for entry in directory.physical_order() {
-            match entry.tag() {
-                FontTag::C2PA => {
-                    positions.push(ChunkPosition {
-                        offset: entry.offset() as usize,
-                        length: entry.length() as usize,
-                        name: entry.tag().data(),
-                        chunk_type: ChunkType::TableDataExcluded,
-                    });
-                }
-                FontTag::HEAD => {
-                    // TBD - These hard-coded magic numbers could be mopped up
-                    // if only we could use offset_of, see https://github.com/rust-lang/rust/issues/106655
-                    positions.push(ChunkPosition {
-                        offset: entry.offset() as usize,
-                        length: 8_usize,
-                        name: *b"hea0",
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                    positions.push(ChunkPosition {
-                        offset: entry.offset() as usize + 8_usize,
-                        length: 4_usize,
-                        name: *b"hea1",
-                        chunk_type: ChunkType::TableDataExcluded,
-                    });
-                    positions.push(ChunkPosition {
-                        offset: entry.offset() as usize + 12_usize,
-                        length: 42_usize,
-                        name: *b"hea2",
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                }
-                _ => {
-                    positions.push(ChunkPosition {
-                        offset: entry.offset() as usize,
-                        length: entry.length() as usize,
-                        name: entry.tag().data(),
-                        chunk_type: ChunkType::TableDataIncluded,
-                    });
-                }
-            }
-        }
-
-        // Do not iterate if the log level is not set to at least trace
-        if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-            for (i, dirent) in directory.entries().iter().enumerate() {
-                trace!("get_chunk_positions/table[{:02}]: {:?}", i, &dirent);
-            }
-            for (i, chunk) in positions.iter().enumerate() {
-                trace!("get_chunk_positions/chunk[{:02}]: {:?}", i, &chunk);
-            }
-        }
-
-        Ok(positions)
     }
 }
 
@@ -610,35 +418,19 @@ where
     let mut locations: Vec<HashObjectPositions> = Vec::new();
 
     // Which will be built up from the different chunks from the file
-    for chunk in SfntIO::get_chunk_positions(&mut output_stream)? {
-        match chunk.chunk_type {
-            // The table directory, other than the table records array will be
-            // added as "Cai" -- metadata to be excluded from hashing.
-            ChunkType::Header | ChunkType::_Directory | ChunkType::TableDataExcluded => {
-                locations.push(HashObjectPositions {
-                    offset: chunk.offset,
-                    length: chunk.length,
-                    htype: HashBlockObjectType::Cai,
-                });
-            }
-            // All else is treated as "Other" -- content to be hashed.
-            ChunkType::TableDataIncluded => {
-                locations.push(HashObjectPositions {
-                    offset: chunk.offset,
-                    length: chunk.length,
-                    htype: HashBlockObjectType::Other,
-                });
-            }
-        }
-    }
-    // Do not iterate if the log level is not set to at least trace
-    if log::max_level().cmp(&log::LevelFilter::Trace).is_ge() {
-        for (i, location) in locations.iter().enumerate() {
-            trace!(
-                "get_object_locations_from_stream/loc[{:02}]: {:?}",
-                i,
-                &location
-            );
+    for chunk in SfntFont::get_chunk_positions(&mut output_stream)? {
+        if chunk.chunk_type().should_hash() {
+            locations.push(HashObjectPositions {
+                offset: chunk.offset(),
+                length: chunk.length(),
+                htype: HashBlockObjectType::Other,
+            });
+        } else {
+            locations.push(HashObjectPositions {
+                offset: chunk.offset(),
+                length: chunk.length(),
+                htype: HashBlockObjectType::Cai,
+            });
         }
     }
     Ok(locations)
@@ -775,41 +567,38 @@ impl AssetIO for SfntIO {
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for SfntIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
+        // The SDK doesn't necessarily promise the input stream is rewound, so do so
+        // now to make sure we can parse the font.
+        input_stream.rewind()?;
+
         // Get the chunk positions
-        let chunks = SfntIO::get_chunk_positions(input_stream)?;
+        let chunks = SfntFont::get_chunk_positions(input_stream).map_err(FontError::from)?;
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
 
         // Function to create and push a box map to the vector
-        let create_and_push_box_map = |chunk: &ChunkPosition, box_maps: &mut Vec<BoxMap>| {
-            let name = chunk.name_as_string()?;
-            // NOTE: The actual hash is not calculated here, as it is stated in the
-            //       trait documentation that the hash is calculated by the caller.
-            let box_map = BoxMap {
-                names: vec![name],
-                alg: None,
-                hash: ByteBuf::from(Vec::new()),
-                pad: ByteBuf::from(Vec::new()),
-                range_start: chunk.offset,
-                range_len: chunk.length,
+        let create_and_push_box_map =
+            |chunk: &ChunkPosition<SfntChunkType>, box_maps: &mut Vec<BoxMap>| {
+                let name = chunk.name_as_string()?;
+                // NOTE: The actual hash is not calculated here, as it is stated in the
+                //       trait documentation that the hash is calculated by the caller.
+                let box_map = BoxMap {
+                    names: vec![name],
+                    alg: None,
+                    hash: ByteBuf::from(Vec::new()),
+                    pad: ByteBuf::from(Vec::new()),
+                    range_start: chunk.offset(),
+                    range_len: chunk.length(),
+                };
+                box_maps.push(box_map);
+                Ok::<(), FontError>(())
             };
-            box_maps.push(box_map);
-            Ok::<(), FontError>(())
-        };
 
         for chunk in chunks {
             // If the chunk type is to be included in the hash, then generate
             // and add the hash to the box map
-            // Note: this also takes into account the `checkSumAdjustment` field
-            //       as it is split into portions.
-            match chunk.chunk_type {
-                ChunkType::TableDataIncluded => {
-                    create_and_push_box_map(&chunk, &mut box_maps)?;
-                }
-                ChunkType::TableDataExcluded if *b"C2PA" == chunk.name => {
-                    create_and_push_box_map(&chunk, &mut box_maps)?;
-                }
-                _ => {}
+            if chunk.chunk_type().should_hash() {
+                create_and_push_box_map(&chunk, &mut box_maps)?;
             }
         }
         // Do not iterate if the log level is not set to at least trace
@@ -936,65 +725,6 @@ pub mod tests {
     }
 
     #[test]
-    fn chunk_type_debug_and_display() {
-        assert_eq!(format!("{}", ChunkType::Header), "Header");
-        assert_eq!(format!("{:?}", ChunkType::Header), "Header");
-        assert_eq!(format!("{}", ChunkType::_Directory), "Directory");
-        assert_eq!(format!("{:?}", ChunkType::_Directory), "Directory");
-        assert_eq!(
-            format!("{}", ChunkType::TableDataIncluded),
-            "TableDataIncluded"
-        );
-        assert_eq!(
-            format!("{:?}", ChunkType::TableDataIncluded),
-            "TableDataIncluded"
-        );
-        assert_eq!(
-            format!("{}", ChunkType::TableDataExcluded),
-            "TableDataExcluded"
-        );
-        assert_eq!(
-            format!("{:?}", ChunkType::TableDataExcluded),
-            "TableDataExcluded"
-        );
-    }
-
-    #[test]
-    fn chunk_name_as_string() {
-        let chunk = ChunkPosition {
-            offset: 0,
-            length: 0,
-            name: [65, 66, 67, 68],
-            chunk_type: ChunkType::Header,
-        };
-        assert_eq!(chunk.name_as_string().unwrap(), "ABCD");
-    }
-
-    #[test]
-    fn chunk_name_as_string_with_invalid_utf8() {
-        let chunk = ChunkPosition {
-            offset: 0,
-            length: 0,
-            // Use an invalid UTF-8 sequence to cause an error
-            name: [b'\xE0', b'\x80', b'\x80', b'\0'],
-            chunk_type: ChunkType::Header,
-        };
-        assert_err!(chunk.name_as_string());
-    }
-
-    #[test]
-    fn chunk_position_debug_and_display() {
-        let chunk = ChunkPosition {
-            offset: 72,
-            length: 37,
-            name: [65, 66, 67, 68],
-            chunk_type: ChunkType::TableDataIncluded,
-        };
-        assert_eq!(format!("{:?}", chunk), "ABCD, 72, 37, TableDataIncluded");
-        assert_eq!(format!("{}", chunk), "ABCD, 72, 37, TableDataIncluded");
-    }
-
-    #[test]
     fn get_object_locations_c2pa_absent() {
         // Load the basic OTF test fixture
         let source = fixture_path("font.otf");
@@ -1010,7 +740,7 @@ pub mod tests {
         let sfnt_io = SfntIO {};
 
         // We expect 15 "objects"
-        // 0. The "header" (file header + table directory), as "Cai"
+        // 0. The "header" + "directory"
         // 1. The first 8 bytes of the `head` table, as "Other"
         // 2. The 4-byte checksumAdjustment field, as "Cai"
         // 3. The rest of the `head` table.
@@ -1036,12 +766,12 @@ pub mod tests {
         let sfnt_io = SfntIO {};
 
         // We expect 15 "objects"
-        // 0. The "header" (file header + table directory), as "Cai"
+        // 0. The "header" + "directory"
         // 1. The first 8 bytes of the `head` table, as "Other"
         // 2. The 4-byte checksumAdjustment field, as "Cai"
         // 3. The rest of the `head` table.
         // 4-13. The other tables in the font.
-        // 14. The C2PA table, which was already present in this file.
+        // 14. The C2PA table, automatically added when the font is deserialized
         //
         // Note that we also flip on Trace logging, to test those paths.
         let saved_log_level = log::max_level();
