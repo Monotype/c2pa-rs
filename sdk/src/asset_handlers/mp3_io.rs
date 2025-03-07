@@ -502,8 +502,6 @@ pub mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use xmp_inmemory_utils::extract_provenance;
-
     use super::*;
     use crate::utils::{
         hash_utils::vec_compare,
