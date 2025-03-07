@@ -509,6 +509,7 @@ pub mod tests {
         hash_utils::vec_compare,
         io_utils::tempdirectory,
         test::{fixture_path, temp_dir_path},
+        xmp_inmemory_utils::extract_provenance,
     };
 
     #[test]
