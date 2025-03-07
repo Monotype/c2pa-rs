@@ -274,6 +274,7 @@ where
 /// # Remarks
 /// Neither streams are rewound before and/or after the operation, so it is up
 /// to the caller.
+#[allow(dead_code)]
 fn add_required_chunks_to_stream<TReader, TWriter>(
     _input_stream: &mut TReader,
     _output_stream: &mut TWriter,
@@ -574,8 +575,8 @@ impl AssetBoxHash for WoffIO {
                 alg: None,
                 hash: ByteBuf::from(Vec::new()),
                 pad: ByteBuf::from(Vec::new()),
-                range_start: position.offset() as usize,
-                range_len: position.length() as usize,
+                range_start: position.offset(),
+                range_len: position.length(),
             };
             box_maps.push(box_map);
         }
