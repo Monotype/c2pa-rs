@@ -179,7 +179,14 @@ impl Reader {
         // first we convert the JUMBF into a usable store
         let store = Store::from_jumbf(c2pa_data, &mut validation_log)?;
 
-        let verify = get_settings_value::<bool>("verify.verify_after_reading")?; // defaults to true
+        let mut verify = get_settings_value::<bool>("verify.verify_after_reading")?; // defaults to true
+
+        // Disable verification if the format is a C2PA sidecar, as there is no
+        // asset to verify against.
+        // See: https://github.com/contentauth/c2pa-rs/issues/565
+        if format == "application/c2pa" {
+            verify = false;
+        }
 
         if verify {
             let mut asset_data = ClaimAssetData::Stream(&mut stream, format);
