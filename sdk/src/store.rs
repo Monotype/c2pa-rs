@@ -49,7 +49,8 @@ use crate::{
         SubsetMap, User, UserCbor,
     },
     asset_io::{
-        CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions, RemoteRefEmbedType,
+        AssetBoxHash, CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions,
+        RemoteRefEmbedType,
     },
     claim::{
         check_ocsp_status, Claim, ClaimAssertion, ClaimAssertionType, ClaimAssetData,
@@ -82,6 +83,14 @@ use crate::{
 use crate::{external_manifest::ManifestPatchCallback, RemoteSigner};
 
 const MANIFEST_STORE_EXT: &str = "c2pa"; // file extension for external manifests
+
+/// Gets the [`AssetBoxHash`] handler for the given file extension.
+fn get_box_hash_handler(ext: &str) -> Option<&dyn AssetBoxHash> {
+    match get_assetio_handler(ext) {
+        Some(handler) => handler.asset_box_hash_ref(),
+        None => None,
+    }
+}
 
 pub(crate) struct ManifestHashes {
     pub manifest_box_hash: Vec<u8>,
@@ -2947,38 +2956,36 @@ impl Store {
             // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
                 needs_hashing = true;
-                if let Some(handler) = get_assetio_handler(format) {
-                    // If our asset supports box hashing, generate and add a box
-                    // hash assertion.
-                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
-                        let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash_from_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
-                        pc.add_assertion(&box_hash)?;
-                    // Otherwise, fall back to data hashing.
-                    } else {
-                        // Get hash ranges.
-                        let mut hash_ranges =
-                            object_locations_from_stream(format, &mut intermediate_stream)?;
-                        let hashes = Store::generate_data_hashes_for_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            &mut hash_ranges,
-                            false,
-                        )?;
+                // If our asset supports box hashing, generate and add a box
+                // hash assertion.
+                if let Some(box_hash_handler) = get_box_hash_handler(format) {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash_from_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        box_hash_handler,
+                        false,
+                    )?;
+                    pc.add_assertion(&box_hash)?;
+                // Otherwise, fall back to data hashing.
+                } else {
+                    // Get hash ranges.
+                    let mut hash_ranges =
+                        object_locations_from_stream(format, &mut intermediate_stream)?;
+                    let hashes = Store::generate_data_hashes_for_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        &mut hash_ranges,
+                        false,
+                    )?;
 
-                        // add the placeholder data hashes to provenance claim so that the required space is reserved
-                        for mut hash in hashes {
-                            // add padding to account for possible cbor expansion of final DataHash
-                            let padding: Vec<u8> = vec![0x0; 10];
-                            hash.add_padding(padding);
+                    // add the placeholder data hashes to provenance claim so that the required space is reserved
+                    for mut hash in hashes {
+                        // add padding to account for possible cbor expansion of final DataHash
+                        let padding: Vec<u8> = vec![0x0; 10];
+                        hash.add_padding(padding);
 
-                            pc.add_assertion(&hash)?;
-                        }
+                        pc.add_assertion(&hash)?;
                     }
                 }
             }
@@ -3009,34 +3016,32 @@ impl Store {
                 intermediate_stream = Cursor::new(Vec::new());
                 std::io::copy(output_stream, &mut intermediate_stream)?;
 
-                if let Some(handler) = get_assetio_handler(format) {
-                    // If our asset supports box hashing, generate and update
-                    // the existing box hash assertion.
-                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
-                        let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash_from_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            box_hash_handler,
-                            false,
-                        )?;
-                        pc.replace_box_hash(box_hash)?;
-                    }
-                    // Otherwise, fall back to data hashing.
-                    else {
-                        let mut new_hash_ranges =
-                            object_locations_from_stream(format, &mut intermediate_stream)?;
-                        let updated_hashes = Store::generate_data_hashes_for_stream(
-                            &mut intermediate_stream,
-                            pc.alg(),
-                            &mut new_hash_ranges,
-                            true,
-                        )?;
+                // If our asset supports box hashing, generate and update
+                // the existing box hash assertion.
+                if let Some(box_hash_handler) = get_box_hash_handler(format) {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash_from_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        box_hash_handler,
+                        false,
+                    )?;
+                    pc.replace_box_hash(box_hash)?;
+                }
+                // Otherwise, fall back to data hashing.
+                else {
+                    let mut new_hash_ranges =
+                        object_locations_from_stream(format, &mut intermediate_stream)?;
+                    let updated_hashes = Store::generate_data_hashes_for_stream(
+                        &mut intermediate_stream,
+                        pc.alg(),
+                        &mut new_hash_ranges,
+                        true,
+                    )?;
 
-                        // patch existing claim hash with updated data
-                        for hash in updated_hashes {
-                            pc.update_data_hash(hash)?;
-                        }
+                    // patch existing claim hash with updated data
+                    for hash in updated_hashes {
+                        pc.update_data_hash(hash)?;
                     }
                 }
             }
@@ -3215,32 +3220,26 @@ impl Store {
             // add a hash assertion.  This creates a preliminary JUMBF store.
             if pc.hash_assertions().is_empty() && !pc.update_manifest() {
                 needs_hashing = true;
-                if let Some(handler) = get_assetio_handler(&ext) {
-                    // If our asset supports box hashing, generate and add a box
-                    // hash assertion.
-                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
-                        let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
-                        pc.add_assertion(&box_hash)?;
-                    // Otherwise, fall back to data hashing.
-                    } else {
-                        // Get hash ranges.
-                        let mut hash_ranges = object_locations(&output_path)?;
-                        let hashes = Store::generate_data_hashes(
-                            dest_path,
-                            pc.alg(),
-                            &mut hash_ranges,
-                            false,
-                        )?;
+                // If our asset supports box hashing, generate and add a box
+                // hash assertion.
+                if let Some(box_hash_handler) = get_box_hash_handler(&ext) {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
+                    pc.add_assertion(&box_hash)?;
+                // Otherwise, fall back to data hashing.
+                } else {
+                    // Get hash ranges.
+                    let mut hash_ranges = object_locations(&output_path)?;
+                    let hashes =
+                        Store::generate_data_hashes(dest_path, pc.alg(), &mut hash_ranges, false)?;
 
-                        // add the placeholder data hashes to provenance claim so that the required space is reserved
-                        for mut hash in hashes {
-                            // add padding to account for possible cbor expansion of final DataHash
-                            let padding: Vec<u8> = vec![0x0; 10];
-                            hash.add_padding(padding);
+                    // add the placeholder data hashes to provenance claim so that the required space is reserved
+                    for mut hash in hashes {
+                        // add padding to account for possible cbor expansion of final DataHash
+                        let padding: Vec<u8> = vec![0x0; 10];
+                        hash.add_padding(padding);
 
-                            pc.add_assertion(&hash)?;
-                        }
+                        pc.add_assertion(&hash)?;
                     }
                 }
             }
@@ -3257,29 +3256,27 @@ impl Store {
             if needs_hashing {
                 let pc = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
 
-                if let Some(handler) = get_assetio_handler(&ext) {
-                    // If our asset supports box hashing, generate and update
-                    // the existing box hash assertion.
-                    if let Some(box_hash_handler) = handler.asset_box_hash_ref() {
-                        let mut box_hash = BoxHash::new();
-                        box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
-                        pc.replace_box_hash(box_hash)?;
-                    }
-                    // Otherwise, fall back to data hashing.
-                    else {
-                        // get the final hash ranges, but not for update manifests
-                        let mut new_hash_ranges = object_locations(&output_path)?;
-                        let updated_hashes = Store::generate_data_hashes(
-                            dest_path,
-                            pc.alg(),
-                            &mut new_hash_ranges,
-                            true,
-                        )?;
+                // If our asset supports box hashing, generate and update
+                // the existing box hash assertion.
+                if let Some(box_hash_handler) = get_box_hash_handler(&ext) {
+                    let mut box_hash = BoxHash::new();
+                    box_hash.generate_box_hash(dest_path, pc.alg(), box_hash_handler, false)?;
+                    pc.replace_box_hash(box_hash)?;
+                }
+                // Otherwise, fall back to data hashing.
+                else {
+                    // get the final hash ranges, but not for update manifests
+                    let mut new_hash_ranges = object_locations(&output_path)?;
+                    let updated_hashes = Store::generate_data_hashes(
+                        dest_path,
+                        pc.alg(),
+                        &mut new_hash_ranges,
+                        true,
+                    )?;
 
-                        // patch existing claim hash with updated data
-                        for hash in updated_hashes {
-                            pc.update_data_hash(hash)?;
-                        }
+                    // patch existing claim hash with updated data
+                    for hash in updated_hashes {
+                        pc.update_data_hash(hash)?;
                     }
                 }
             }
