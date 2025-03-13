@@ -781,17 +781,14 @@ pub mod tests {
         assert_eq!(0, positions.first().unwrap().offset());
         assert_eq!(
             size_of::<Woff1Header>(),
-            positions.first().unwrap().length() as usize
+            positions.first().unwrap().length()
         );
         assert_eq!(
             &WoffChunkType::Header,
             positions.first().unwrap().chunk_type()
         );
-        assert_eq!(
-            size_of::<Woff1Header>(),
-            positions.get(1).unwrap().offset() as usize
-        );
-        assert_eq!(0, positions.get(1).unwrap().length() as usize);
+        assert_eq!(size_of::<Woff1Header>(), positions.get(1).unwrap().offset());
+        assert_eq!(0, positions.get(1).unwrap().length());
         assert_eq!(
             &WoffChunkType::DirectoryEntry,
             positions.get(1).unwrap().chunk_type()
@@ -835,21 +832,18 @@ pub mod tests {
         let hdr_chunk = positions.first().unwrap();
         assert_eq!(&WoffChunkType::Header, hdr_chunk.chunk_type());
         assert_eq!(0, hdr_chunk.offset());
-        assert_eq!(size_of::<Woff1Header>(), hdr_chunk.length() as usize);
+        assert_eq!(size_of::<Woff1Header>(), hdr_chunk.length());
 
         let dir_chunk = positions.get(1).unwrap();
         assert_eq!(&WoffChunkType::DirectoryEntry, dir_chunk.chunk_type());
-        assert_eq!(size_of::<Woff1Header>(), dir_chunk.offset() as usize);
-        assert_eq!(
-            size_of::<Woff1DirectoryEntry>(),
-            dir_chunk.length() as usize
-        );
+        assert_eq!(size_of::<Woff1Header>(), dir_chunk.offset());
+        assert_eq!(size_of::<Woff1DirectoryEntry>(), dir_chunk.length());
 
         let tbl_chunk = positions.get(2).unwrap();
         assert_eq!(&WoffChunkType::TableData, tbl_chunk.chunk_type());
         assert_eq!(
             size_of::<Woff1Header>() + size_of::<Woff1DirectoryEntry>(),
-            tbl_chunk.offset() as usize
+            tbl_chunk.offset()
         );
         assert_eq!(7, tbl_chunk.length());
     }

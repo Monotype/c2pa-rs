@@ -43,7 +43,7 @@ use crate::{
 
 /// A reader for the manifest store.
 #[skip_serializing_none]
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Reader {
     /// A label for the active (most recent) manifest in the store
@@ -289,7 +289,7 @@ impl Reader {
                     let idx3 = json[index..].find('[').unwrap_or_default();
 
                     let bytes: Vec<u8> =
-                        serde_json::from_slice(json[index + idx3..index + idx2 + 1].as_bytes())
+                        serde_json::from_slice(&json.as_bytes()[index + idx3..index + idx2 + 1])
                             .unwrap_or_default();
 
                     json = format!(
@@ -573,19 +573,6 @@ impl Reader {
             validation_results: Some(validation_results),
             validation_state: Some(validation_state),
             store,
-        }
-    }
-}
-
-impl Default for Reader {
-    fn default() -> Self {
-        Self {
-            active_manifest: None,
-            manifests: HashMap::<String, Manifest>::new(),
-            validation_status: None,
-            validation_results: None,
-            validation_state: None,
-            store: Store::new(),
         }
     }
 }
