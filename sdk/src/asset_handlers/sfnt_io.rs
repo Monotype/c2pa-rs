@@ -365,8 +365,11 @@ where
 {
     source.rewind()?;
     let mut font = SfntFont::from_reader(source)?;
-    // Remove the C2PA record from the font
-    font.remove_c2pa_record()?;
+    // Only remove if it has C2PA
+    if font.has_c2pa() {
+        // Remove the C2PA record from the font
+        font.remove_c2pa_record()?;
+    }
     // And write it to the destination stream
     font.write(destination)?;
     Ok(())
