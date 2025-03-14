@@ -20,9 +20,6 @@ use std::{
 
 //use conv::ValueFrom;
 use log::warn;
-// multihash versions
-use multibase::{decode, encode};
-use multihash::{wrap, Code, Multihash, Sha1, Sha2_256, Sha2_512, Sha3_256, Sha3_384, Sha3_512};
 use range_set::RangeSet;
 use serde::{Deserialize, Serialize};
 // direct sha functions
@@ -33,6 +30,7 @@ use crate::{utils::io_utils::stream_len, Error, Result};
 const MAX_HASH_BUF: usize = 256 * 1024 * 1024; // cap memory usage to 256MB
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+/// Defines a hash range to be used with `hash_stream_by_alg`
 pub struct HashRange {
     start: usize,
     length: usize,
@@ -87,21 +85,6 @@ pub fn vec_compare(va: &[u8], vb: &[u8]) -> bool {
      va.iter()
        .zip(vb)
        .all(|(a,b)| a == b)
-}
-
-/// Generate hash of type hash_type for supplied data array.  The
-/// hash_type are those specified in the multihash specification.  Currently
-/// we only support Sha2-256/512 or Sha2-256/512.
-/// Returns hash or None if incompatible type
-pub fn hash_by_type(hash_type: u8, data: &[u8]) -> Option<Multihash> {
-    match hash_type {
-        0x12 => Some(Sha2_256::digest(data)),
-        0x13 => Some(Sha2_512::digest(data)),
-        0x14 => Some(Sha3_512::digest(data)),
-        0x15 => Some(Sha3_384::digest(data)),
-        0x16 => Some(Sha3_256::digest(data)),
-        _ => None,
-    }
 }
 
 #[derive(Clone)]
@@ -456,81 +439,6 @@ where
         vec_compare(hash, &data_hash)
     } else {
         false
-    }
-}
-
-/// Return a Sha256 hash of array of bytes
-#[allow(dead_code)]
-pub fn hash_sha256(data: &[u8]) -> Vec<u8> {
-    let mh = Sha2_256::digest(data);
-    let digest = mh.digest();
-
-    digest.to_vec()
-}
-
-pub fn hash_sha1(data: &[u8]) -> Vec<u8> {
-    let mh = Sha1::digest(data);
-    let digest = mh.digest();
-    digest.to_vec()
-}
-
-/// Verify muiltihash against input data.  True if match,
-/// false if no match or unsupported.  The hash value should be
-/// be multibase encoded string.
-pub fn verify_hash(hash: &str, data: &[u8]) -> bool {
-    match decode(hash) {
-        Ok((_code, mh)) => {
-            if mh.len() < 2 {
-                return false;
-            }
-
-            // multihash lead bytes
-            let hash_type = mh[0]; // hash type
-            let _hash_len = mh[1]; // hash data length
-
-            // hash with the same algorithm as target
-            if let Some(data_hash) = hash_by_type(hash_type, data) {
-                vec_compare(data_hash.digest(), &mh.as_slice()[2..])
-            } else {
-                false
-            }
-        }
-        Err(_) => false,
-    }
-}
-
-/// Return the hash of data in the same hash format in_hash
-pub fn hash_as_source(in_hash: &str, data: &[u8]) -> Option<String> {
-    match decode(in_hash) {
-        Ok((code, mh)) => {
-            if mh.len() < 2 {
-                return None;
-            }
-
-            // multihash lead bytes
-            let hash_type = mh[0]; // hash type
-
-            // hash with the same algorithm as target
-            match hash_by_type(hash_type, data) {
-                Some(hash) => {
-                    let digest = hash.digest();
-
-                    let wrapped = match hash_type {
-                        0x12 => wrap(Code::Sha2_256, digest),
-                        0x13 => wrap(Code::Sha2_512, digest),
-                        0x14 => wrap(Code::Sha3_512, digest),
-                        0x15 => wrap(Code::Sha3_384, digest),
-                        0x16 => wrap(Code::Sha3_256, digest),
-                        _ => return None,
-                    };
-
-                    // Return encoded hash.
-                    Some(encode(code, wrapped.as_bytes()))
-                }
-                None => None,
-            }
-        }
-        Err(_) => None,
     }
 }
 

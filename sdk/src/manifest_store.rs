@@ -19,17 +19,18 @@ use std::{
 };
 
 use async_generic::async_generic;
+use c2pa_crypto::base64;
+use c2pa_status_tracker::StatusTracker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     claim::ClaimAssetData,
-    jumbf::labels::manifest_label_from_uri,
-    status_tracker::{DetailedStatusTracker, StatusTracker},
+    jumbf::labels::{manifest_label_from_uri, to_absolute_uri, to_relative_uri},
     store::Store,
-    utils::base64,
-    validation_status::{status_for_store, ValidationStatus},
+    validation_results::ValidationResults,
+    validation_status::ValidationStatus,
     Error, Manifest, Result,
 };
 
@@ -40,11 +41,17 @@ pub struct ManifestStore {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// A label for the active (most recent) manifest in the store
     active_manifest: Option<String>,
+
     /// A HashMap of Manifests
     manifests: HashMap<String, Manifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// ValidationStatus generated when loading the ManifestStore from an asset
     validation_status: Option<Vec<ValidationStatus>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    // ValidationStatus generated when loading the ManifestStore from an asset
+    validation_results: Option<ValidationResults>,
+
     #[serde(skip)]
     /// The internal store representing the manifest store
     store: Store,
@@ -58,6 +65,7 @@ impl ManifestStore {
             manifests: HashMap::<String, Manifest>::new(),
             validation_status: None,
             store: Store::new(),
+            validation_results: None,
         }
     }
 
@@ -76,7 +84,6 @@ impl ManifestStore {
     }
 
     /// Returns a reference to manifest HashMap
-    #[cfg(feature = "v1_api")]
     pub fn manifests(&self) -> &HashMap<String, Manifest> {
         &self.manifests
     }
@@ -89,22 +96,41 @@ impl ManifestStore {
     // writes a resource identified uri to the given stream
     pub fn get_resource(&self, uri: &str, stream: impl Write + Read + Seek + Send) -> Result<u64> {
         // get the manifest referenced by the uri, or the active one if None
-        let manifest = match manifest_label_from_uri(uri) {
-            Some(label) => self.get(&label),
-            None => self.get_active(),
+        // add logic to search for local or absolute uri identifiers
+        let (manifest, label) = match manifest_label_from_uri(uri) {
+            Some(label) => (self.get(&label), label),
+            None => (
+                self.get_active(),
+                self.active_label().unwrap_or_default().to_string(),
+            ),
         };
+        let relative_uri = to_relative_uri(uri);
+        let absolute_uri = to_absolute_uri(&label, uri);
+
         if let Some(manifest) = manifest {
-            let mut resources = manifest.resources();
-            if !resources.exists(uri) {
-                // also search ingredients to support Reader model
-                for ingredient in manifest.ingredients() {
-                    if ingredient.resources().exists(uri) {
-                        resources = ingredient.resources();
-                        break;
+            let find_resource = |uri: &str| -> Result<&crate::ResourceStore> {
+                let mut resources = manifest.resources();
+                if !resources.exists(uri) {
+                    // also search ingredients resources to support Reader model
+                    for ingredient in manifest.ingredients() {
+                        if ingredient.resources().exists(uri) {
+                            resources = ingredient.resources();
+                            return Ok(resources);
+                        }
                     }
+                } else {
+                    return Ok(resources);
                 }
+                Err(Error::ResourceNotFound(uri.to_owned()))
+            };
+            let result = find_resource(&relative_uri);
+            match result {
+                Ok(resource) => resource.write_stream(&relative_uri, stream),
+                Err(_) => match find_resource(&absolute_uri) {
+                    Ok(resource) => resource.write_stream(&absolute_uri, stream),
+                    Err(e) => Err(e),
+                },
             }
-            resources.write_stream(uri, stream)
         } else {
             Err(Error::ResourceNotFound(uri.to_owned()))
         }
@@ -115,9 +141,14 @@ impl ManifestStore {
         self.validation_status.as_deref()
     }
 
+    pub fn validation_results(&self) -> Option<&ValidationResults> {
+        self.validation_results.as_ref()
+    }
+
     /// creates a ManifestStore from a Store with validation
+    #[allow(dead_code)] // async not used without v1 feature
     #[async_generic]
-    pub(crate) fn from_store(store: Store, validation_log: &impl StatusTracker) -> ManifestStore {
+    pub(crate) fn from_store(store: Store, validation_log: &StatusTracker) -> ManifestStore {
         if _sync {
             Self::from_store_impl(
                 store,
@@ -137,10 +168,10 @@ impl ManifestStore {
     }
 
     /// creates a ManifestStore from a Store writing resources to resource_path
-    #[cfg(feature = "file_io")]
+    #[cfg(all(feature = "file_io", feature = "v1_api"))]
     pub(crate) fn from_store_with_resources(
         store: Store,
-        validation_log: &impl StatusTracker,
+        validation_log: &StatusTracker,
         resource_path: &Path,
     ) -> ManifestStore {
         ManifestStore::from_store_impl(store, validation_log, Some(resource_path))
@@ -149,10 +180,10 @@ impl ManifestStore {
     // internal implementation of from_store
     fn from_store_impl(
         store: Store,
-        validation_log: &impl StatusTracker,
+        validation_log: &StatusTracker,
         #[cfg(feature = "file_io")] resource_path: Option<&Path>,
     ) -> ManifestStore {
-        let mut statuses = status_for_store(&store, validation_log);
+        let mut validation_results = ValidationResults::from_store(&store, validation_log);
 
         let mut manifest_store = ManifestStore::new();
         manifest_store.active_manifest = store.provenance_label();
@@ -173,24 +204,23 @@ impl ManifestStore {
                         .insert(manifest_label.to_owned(), manifest);
                 }
                 Err(e) => {
-                    statuses.push(ValidationStatus::from_error(&e));
+                    validation_results.add_status(manifest_label, ValidationStatus::from_error(&e));
                 }
             };
         }
 
-        if !statuses.is_empty() {
-            manifest_store.validation_status = Some(statuses);
-        }
+        manifest_store.validation_status = validation_results.validation_errors();
+        manifest_store.validation_results = Some(validation_results);
 
         manifest_store
     }
 
     async fn from_store_impl_async(
         store: Store,
-        validation_log: &impl StatusTracker,
+        validation_log: &StatusTracker,
         #[cfg(feature = "file_io")] resource_path: Option<&Path>,
     ) -> ManifestStore {
-        let mut statuses = status_for_store(&store, validation_log);
+        let mut validation_results = ValidationResults::from_store(&store, validation_log);
 
         let mut manifest_store = ManifestStore::new();
         manifest_store.active_manifest = store.provenance_label();
@@ -211,40 +241,38 @@ impl ManifestStore {
                         .insert(manifest_label.to_owned(), manifest);
                 }
                 Err(e) => {
-                    statuses.push(ValidationStatus::from_error(&e));
+                    validation_results.add_status(manifest_label, ValidationStatus::from_error(&e));
                 }
             };
         }
 
-        if !statuses.is_empty() {
-            manifest_store.validation_status = Some(statuses);
-        }
+        manifest_store.validation_status = validation_results.validation_errors();
+        manifest_store.validation_results = Some(validation_results);
 
         manifest_store
     }
 
-    pub(crate) fn store(&self) -> &Store {
-        &self.store
-    }
-
     /// Creates a new Manifest Store from a Manifest
     #[allow(dead_code)]
+    #[deprecated(since = "0.38.0", note = "Please use Reader::from_json() instead")]
+    #[cfg(feature = "v1_api")]
     pub fn from_manifest(manifest: &Manifest) -> Result<Self> {
-        use crate::status_tracker::OneShotStatusTracker;
+        use c2pa_status_tracker::{ErrorBehavior, StatusTracker};
         let store = manifest.to_store()?;
         Ok(Self::from_store_impl(
             store,
-            &OneShotStatusTracker::new(),
+            &StatusTracker::with_error_behavior(ErrorBehavior::StopOnFirstError),
             #[cfg(feature = "file_io")]
             manifest.resources().base_path(),
         ))
     }
 
     /// Generate a Store from a format string and bytes.
+    #[deprecated(since = "0.38.0", note = "Please use Reader::from_stream() instead")]
     #[cfg(feature = "v1_api")]
     #[async_generic]
     pub fn from_bytes(format: &str, image_bytes: &[u8], verify: bool) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
 
         let result = if _sync {
             Store::load_from_memory(format, image_bytes, verify, &mut validation_log)
@@ -265,6 +293,7 @@ impl ManifestStore {
     }
 
     /// Generate a Store from a format string and stream.
+    #[deprecated(since = "0.38.0", note = "Please use Reader::from_stream() instead")]
     #[async_generic(async_signature(
         format: &str,
         mut stream: impl Read + Seek + Send,
@@ -275,7 +304,7 @@ impl ManifestStore {
         mut stream: impl Read + Seek + Send,
         verify: bool,
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
 
         let manifest_bytes = Store::load_jumbf_from_stream(format, &mut stream)?;
         let store = Store::from_jumbf(&manifest_bytes, &mut validation_log)?;
@@ -307,20 +336,21 @@ impl ManifestStore {
     /// # use c2pa::Result;
     /// use c2pa::ManifestStore;
     /// # fn main() -> Result<()> {
-    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg", true)?;
+    /// let manifest_store = ManifestStore::from_file("tests/fixtures/C.jpg")?;
     /// println!("{}", manifest_store);
     /// # Ok(())
     /// # }
     /// ```
     #[cfg(feature = "v1_api")]
-    pub fn from_file<P: AsRef<Path>>(path: P, verify: bool) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+    #[deprecated(since = "0.38.0", note = "Please use Reader::from_file() instead")]
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<ManifestStore> {
+        let mut validation_log = StatusTracker::default();
 
-        let store = Store::load_from_asset(path.as_ref(), verify, &mut validation_log)?;
+        let store = Store::load_from_asset(path.as_ref(), false, &mut validation_log)?;
         Ok(Self::from_store(store, &validation_log))
     }
 
-    #[cfg(feature = "file_io")]
+    #[cfg(all(feature = "file_io", feature = "v1_api"))]
     /// Loads a ManifestStore from a file adding resources to a folder
     /// Example:
     ///
@@ -338,12 +368,16 @@ impl ManifestStore {
     /// # }
     /// ```
     #[allow(dead_code)]
+    #[deprecated(
+        since = "0.38.0",
+        note = "Please use Reader::from_file()?.to_folder() instead"
+    )]
     pub fn from_file_with_resources<P: AsRef<Path>>(
         path: P,
         resource_path: P,
         verify: bool,
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
 
         let store = Store::load_from_asset(path.as_ref(), verify, &mut validation_log)?;
         Ok(Self::from_store_with_resources(
@@ -357,13 +391,18 @@ impl ManifestStore {
     /// would be used to load and validate fragmented MP4 files that span
     /// multiple separate assets.
     #[allow(dead_code)]
+    #[deprecated(
+        since = "0.38.0",
+        note = "Please use Reader::from_fragment_async() instead"
+    )]
+    #[cfg(feature = "v1_api")]
     pub async fn from_fragment_bytes_async(
         format: &str,
         init_bytes: &[u8],
         fragment_bytes: &[u8],
         verify: bool,
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
 
         match Store::load_fragment_from_memory_async(
             format,
@@ -380,6 +419,10 @@ impl ManifestStore {
     }
 
     #[cfg(feature = "file_io")]
+    #[deprecated(
+        since = "0.38.0",
+        note = "Please use Reader::from_fragmented_files() instead"
+    )]
     /// Loads a ManifestStore from an init segment and fragments.  This
     /// would be used to load and validate fragmented MP4 files that span
     /// multiple separate assets files.
@@ -388,7 +431,7 @@ impl ManifestStore {
         fragments: &Vec<std::path::PathBuf>,
         verify: bool,
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
 
         let asset_type = crate::jumbf_io::get_supported_file_extension(path.as_ref())
             .ok_or(crate::Error::UnsupportedType)?;
@@ -429,12 +472,17 @@ impl ManifestStore {
     /// }
     /// ```
     #[allow(dead_code)]
+    #[deprecated(
+        since = "0.38.0",
+        note = "Please use Reader::from_manifest_data_and_stream_async() instead"
+    )]
+    #[cfg(feature = "v1_api")]
     pub async fn from_manifest_and_asset_bytes_async(
         manifest_bytes: &[u8],
         format: &str,
         asset_bytes: &[u8],
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
         let store = Store::from_jumbf(manifest_bytes, &mut validation_log)?;
 
         Store::verify_store_async(
@@ -467,12 +515,17 @@ impl ManifestStore {
     /// #    Ok(())
     /// }
     #[allow(dead_code)]
+    #[deprecated(
+        since = "0.38.0",
+        note = "Please use Reader::from_manifest_data_and_stream() instead"
+    )]
+    #[cfg(feature = "v1_api")]
     pub fn from_manifest_and_asset_bytes(
         manifest_bytes: &[u8],
         format: &str,
         asset_bytes: &[u8],
     ) -> Result<ManifestStore> {
-        let mut validation_log = DetailedStatusTracker::new();
+        let mut validation_log = StatusTracker::default();
         let store = Store::from_jumbf(manifest_bytes, &mut validation_log)?;
 
         Store::verify_store(
@@ -516,7 +569,7 @@ impl std::fmt::Display for ManifestStore {
                     let idx3 = json[index..].find('[').unwrap_or_default();
 
                     let bytes: Vec<u8> =
-                        serde_json::from_slice(json[index + idx3..index + idx2 + 1].as_bytes())
+                        serde_json::from_slice(&json.as_bytes()[index + idx3..index + idx2 + 1])
                             .unwrap_or_default();
 
                     json = format!(
@@ -544,30 +597,35 @@ mod tests {
     #![allow(clippy::expect_used)]
     #![allow(clippy::unwrap_used)]
 
-    #[cfg(target_arch = "wasm32")]
+    use c2pa_status_tracker::{ErrorBehavior, StatusTracker};
+    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
     use wasm_bindgen_test::*;
 
     use super::*;
-    use crate::{status_tracker::OneShotStatusTracker, utils::test::create_test_store};
+    use crate::utils::test::create_test_store;
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-    // #[cfg_attr(not(target_arch = "wasm32"), test)]
-    // #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg_attr(
+        all(target_arch = "wasm32", not(target_os = "wasi")),
+        wasm_bindgen_test
+    )]
     #[test]
     fn manifest_report() {
         let store = create_test_store().expect("creating test store");
 
-        let manifest_store = ManifestStore::from_store(store, &OneShotStatusTracker::new());
+        let manifest_store = ManifestStore::from_store(
+            store,
+            &StatusTracker::with_error_behavior(ErrorBehavior::StopOnFirstError),
+        );
         assert!(manifest_store.active_manifest.is_some());
         assert!(!manifest_store.manifests.is_empty());
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         // make sure we have two different ingredients
-        assert_eq!(manifest.ingredients()[0].format(), "image/jpeg");
-        assert_eq!(manifest.ingredients()[1].format(), "image/png");
+        assert_eq!(manifest.ingredients()[0].format(), Some("image/jpeg"));
+        assert_eq!(manifest.ingredients()[1].format(), Some("image/png"));
 
         let full_report = manifest_store.to_string();
         assert!(!full_report.is_empty());
@@ -576,6 +634,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "v1_api")]
+    #[allow(deprecated)]
     fn manifest_report_image() {
         let image_bytes = include_bytes!("../tests/fixtures/CA.jpg");
 
@@ -585,7 +644,7 @@ mod tests {
         assert!(manifest_store.active_label().is_some());
         assert!(manifest_store.get_active().is_some());
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         assert_eq!(manifest.issuer().unwrap(), "C2PA Test Signing Cert");
@@ -593,8 +652,13 @@ mod tests {
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), actix::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg_attr(
+        all(target_arch = "wasm32", not(target_os = "wasi")),
+        wasm_bindgen_test
+    )]
+    #[cfg_attr(target_os = "wasi", wstd::test)]
     #[cfg(feature = "v1_api")]
+    #[allow(deprecated)]
     async fn manifest_report_image_async() {
         let image_bytes = include_bytes!("../tests/fixtures/CA.jpg");
 
@@ -606,7 +670,7 @@ mod tests {
         assert!(manifest_store.active_label().is_some());
         assert!(manifest_store.get_active().is_some());
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         assert_eq!(manifest.issuer().unwrap(), "C2PA Test Signing Cert");
@@ -616,14 +680,15 @@ mod tests {
     #[test]
     #[cfg(feature = "file_io")]
     #[cfg(feature = "v1_api")]
+    #[allow(deprecated)]
     fn manifest_report_from_file() {
-        let manifest_store = ManifestStore::from_file("tests/fixtures/CA.jpg", true).unwrap();
+        let manifest_store = ManifestStore::from_file("tests/fixtures/CA.jpg").unwrap();
         println!("{manifest_store}");
 
         assert!(manifest_store.active_label().is_some());
         assert!(manifest_store.get_active().is_some());
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         assert_eq!(manifest.issuer().unwrap(), "C2PA Test Signing Cert");
@@ -631,7 +696,12 @@ mod tests {
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), actix::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg_attr(
+        all(target_arch = "wasm32", not(target_os = "wasi")),
+        wasm_bindgen_test
+    )]
+    #[cfg_attr(target_os = "wasi", wstd::test)]
+    #[allow(deprecated)]
     #[cfg(feature = "v1_api")]
     async fn manifest_report_from_manifest_and_asset_bytes_async() {
         let asset_bytes = include_bytes!("../tests/fixtures/cloud.jpg");
@@ -645,13 +715,14 @@ mod tests {
         .await
         .unwrap();
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         println!("{manifest_store}");
     }
 
+    // WASI cannot read files in the target directory
     #[test]
-    #[cfg(feature = "file_io")]
-    #[cfg(feature = "v1_api")]
+    #[cfg(all(feature = "file_io", feature = "v1_api", not(target_arch = "wasm32")))]
+    #[allow(deprecated)]
     fn manifest_report_from_file_with_resources() {
         let manifest_store = ManifestStore::from_file_with_resources(
             "tests/fixtures/CIE-sig-CA.jpg",
@@ -664,7 +735,7 @@ mod tests {
         assert!(manifest_store.active_label().is_some());
         assert!(manifest_store.get_active().is_some());
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         assert_eq!(manifest.issuer().unwrap(), "C2PA Test Signing Cert");
@@ -673,6 +744,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "v1_api")]
+    #[allow(deprecated)]
     fn manifest_report_from_stream() {
         let image_bytes: &[u8] = include_bytes!("../tests/fixtures/CA.jpg");
         let stream = std::io::Cursor::new(image_bytes);
@@ -682,7 +754,7 @@ mod tests {
         assert!(manifest_store.active_label().is_some());
         assert!(manifest_store.get_active().is_some());
         assert!(!manifest_store.manifests().is_empty());
-        assert!(manifest_store.validation_status().is_none());
+        assert_eq!(manifest_store.validation_status(), None);
         let manifest = manifest_store.get_active().unwrap();
         assert!(!manifest.ingredients().is_empty());
         assert_eq!(manifest.issuer().unwrap(), "C2PA Test Signing Cert");

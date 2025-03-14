@@ -206,28 +206,36 @@ pub(crate) fn get_supported_file_extension(path: &Path) -> Option<String> {
 }
 
 #[cfg(feature = "file_io")]
-/// save_jumbf to a file
-/// in_path - path is source file
-/// out_path - path to the output file
+/// Save JUMBF data to a file.
+///
+/// Parameters:
+/// * save_jumbf to a file
+/// * in_path - path is source file
+/// * out_path - path to the output file
+///
 /// If no output file is given an new file will be created with "-c2pa" appending to file name e.g. "test.jpg" => "test-c2pa.jpg"
 /// If input == output then the input file will be overwritten.
-pub fn save_jumbf_to_file(data: &[u8], in_path: &Path, out_path: Option<&Path>) -> Result<()> {
-    let ext = get_file_extension(in_path).ok_or(Error::UnsupportedType)?;
+pub fn save_jumbf_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
+    data: &[u8],
+    in_path: P1,
+    out_path: Option<P2>,
+) -> Result<()> {
+    let ext = get_file_extension(in_path.as_ref()).ok_or(Error::UnsupportedType)?;
 
     // if no output path make a new file based off of source file name
-    let asset_out_path: PathBuf = match out_path {
-        Some(p) => p.to_owned(),
+    let asset_out_path: PathBuf = match out_path.as_ref() {
+        Some(p) => p.as_ref().to_owned(),
         None => {
-            let filename_osstr = in_path.file_stem().ok_or(Error::UnsupportedType)?;
+            let filename_osstr = in_path.as_ref().file_stem().ok_or(Error::UnsupportedType)?;
             let filename = filename_osstr.to_str().ok_or(Error::UnsupportedType)?;
 
             let out_name = format!("{filename}-c2pa.{ext}");
-            in_path.to_owned().with_file_name(out_name)
+            in_path.as_ref().to_owned().with_file_name(out_name)
         }
     };
 
     // clone output to be overwritten
-    if in_path != asset_out_path {
+    if in_path.as_ref() != asset_out_path {
         fs::copy(in_path, &asset_out_path).map_err(Error::IoError)?;
     }
 
@@ -277,16 +285,16 @@ pub(crate) fn update_file_jumbf(
 
 #[cfg(feature = "file_io")]
 /// load the JUMBF block from an asset if available
-pub fn load_jumbf_from_file(in_path: &Path) -> Result<Vec<u8>> {
-    let ext = get_file_extension(in_path).ok_or(Error::UnsupportedType)?;
+pub fn load_jumbf_from_file<P: AsRef<Path>>(in_path: P) -> Result<Vec<u8>> {
+    let ext = get_file_extension(in_path.as_ref()).ok_or(Error::UnsupportedType)?;
 
     match get_assetio_handler(&ext) {
-        Some(asset_handler) => asset_handler.read_cai_store(in_path),
+        Some(asset_handler) => asset_handler.read_cai_store(in_path.as_ref()),
         _ => Err(Error::UnsupportedType),
     }
 }
 
-#[cfg(feature = "file_io")]
+#[cfg(all(feature = "v1_api", feature = "file_io"))]
 pub(crate) fn object_locations(in_path: &Path) -> Result<Vec<HashObjectPositions>> {
     let ext = get_file_extension(in_path).ok_or(Error::UnsupportedType)?;
 
@@ -333,18 +341,17 @@ where
     }
 }
 
-#[cfg(feature = "file_io")]
 /// removes the C2PA JUMBF from an asset
 /// Note: Use with caution since this deletes C2PA data
 /// It is useful when creating remote manifests from embedded manifests
 ///
 /// path - path to file to be updated
 /// returns Unsupported type or errors from remove_cai_store
-#[allow(dead_code)]
-pub fn remove_jumbf_from_file(path: &Path) -> Result<()> {
-    let ext = get_file_extension(path).ok_or(Error::UnsupportedType)?;
+#[cfg(feature = "file_io")]
+pub fn remove_jumbf_from_file<P: AsRef<Path>>(path: P) -> Result<()> {
+    let ext = get_file_extension(path.as_ref()).ok_or(Error::UnsupportedType)?;
     match get_assetio_handler(&ext) {
-        Some(asset_handler) => asset_handler.remove_cai_store(path),
+        Some(asset_handler) => asset_handler.remove_cai_store(path.as_ref()),
         _ => Err(Error::UnsupportedType),
     }
 }
@@ -361,10 +368,12 @@ pub mod tests {
 
     use std::io::Seek;
 
+    use c2pa_crypto::raw_signature::SigningAlg;
+
     use super::*;
     use crate::{
         asset_io::RemoteRefEmbedType,
-        utils::test::{create_test_store, temp_signer},
+        utils::{test::create_test_store, test_signer::test_signer},
     };
 
     #[test]
@@ -434,6 +443,28 @@ pub mod tests {
     }
 
     #[test]
+    fn test_get_writer_tiff() {
+        let h = TiffIO::new("");
+        // Writing native formats is beyond the scope of the SDK.
+        // Only the following are supported.
+        let supported_tiff_types: [&str; 6] = [
+            "tif",
+            "tiff",
+            "image/tiff",
+            "dng",
+            "image/dng",
+            "image/x-adobe-dng",
+        ];
+        for tiff_type in h.supported_types() {
+            if supported_tiff_types.contains(tiff_type) {
+                assert!(get_caiwriter_handler(tiff_type).is_some());
+            } else {
+                assert!(get_caiwriter_handler(tiff_type).is_none());
+            }
+        }
+    }
+
+    #[test]
     fn test_get_supported_list() {
         let supported = get_supported_types();
 
@@ -459,7 +490,7 @@ pub mod tests {
     fn test_jumbf(asset_type: &str, reader: &mut dyn CAIRead) {
         let mut writer = Cursor::new(Vec::new());
         let store = create_test_store().unwrap();
-        let signer = temp_signer();
+        let signer = test_signer(SigningAlg::Ps256);
         let jumbf = store.to_jumbf(&*signer).unwrap();
         save_jumbf_to_stream(asset_type, reader, &mut writer, &jumbf).unwrap();
         writer.set_position(0);

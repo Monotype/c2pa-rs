@@ -16,16 +16,17 @@
 //! The `callback_signer` module provides a way to obtain a [`Signer`] or [`AsyncSigner`]
 //! using a callback and public signing certificates.
 
-use crate::{
-    error::{Error, Result},
-    AsyncSigner, Signer, SigningAlg,
-};
+use async_trait::async_trait;
+use c2pa_crypto::raw_signature::SigningAlg;
+
+use crate::{AsyncSigner, Error, Result, Signer};
 
 /// Defines a callback function interface for a [`CallbackSigner`].
 ///
 /// The callback should return a signature for the given data.
 /// The callback should return an error if the data cannot be signed.
-pub type CallbackFunc = dyn Fn(*const (), &[u8]) -> std::result::Result<Vec<u8>, Error>;
+pub type CallbackFunc =
+    dyn Fn(*const (), &[u8]) -> std::result::Result<Vec<u8>, Error> + Send + Sync;
 
 /// Defines a signer that uses a callback to sign data.
 ///
@@ -51,18 +52,18 @@ pub struct CallbackSigner {
 }
 
 unsafe impl Send for CallbackSigner {}
-
 unsafe impl Sync for CallbackSigner {}
 
 impl CallbackSigner {
     /// Create a new callback signer.
     pub fn new<F, T>(callback: F, alg: SigningAlg, certs: T) -> Self
     where
-        F: Fn(*const (), &[u8]) -> std::result::Result<Vec<u8>, Error> + 'static,
+        F: Fn(*const (), &[u8]) -> std::result::Result<Vec<u8>, Error> + Send + Sync + 'static,
         T: Into<Vec<u8>>,
     {
         let certs = certs.into();
         let reserve_size = 10000 + certs.len();
+
         Self {
             context: std::ptr::null(),
             callback: Box::new(callback),
@@ -111,13 +112,14 @@ impl CallbackSigner {
 
         // Parse the PEM data to get the private key
         let pem = parse(private_key).map_err(|e| Error::OtherError(Box::new(e)))?;
+
         // For Ed25519, the key is 32 bytes long, so we skip the first 16 bytes of the PEM data
-        let key_bytes = &pem.contents()[16..];
+        let key_bytes = pem.contents().get(16..).ok_or(Error::InvalidSigningKey)?;
         let signing_key =
             SigningKey::try_from(key_bytes).map_err(|e| Error::OtherError(Box::new(e)))?;
+
         // Sign the data
         let signature: Signature = signing_key.sign(data);
-
         Ok(signature.to_bytes().to_vec())
     }
 }
@@ -159,11 +161,8 @@ impl Signer for CallbackSigner {
     }
 }
 
-use async_trait::async_trait;
-
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-// I'm not sure if this is useful since the callback is still synchronous.
 impl AsyncSigner for CallbackSigner {
     async fn sign(&self, data: Vec<u8>) -> Result<Vec<u8>> {
         (self.callback)(self.context, &data)

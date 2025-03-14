@@ -47,8 +47,8 @@ use crate::{
 /// implementation for remote manifests.
 ///
 /// # Remarks
-/// This module depends on the `feature = "xmp_write"` to be enabled.
-#[cfg(feature = "xmp_write")]
+/// This module depends on the `feature = "font_xmp"` to be enabled.
+#[cfg(feature = "font_xmp")]
 mod font_xmp_support {
     use super::*;
     use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
@@ -593,12 +593,12 @@ impl RemoteRefEmbed for WoffIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
                         .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
                 }
@@ -617,7 +617,7 @@ impl RemoteRefEmbed for WoffIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "xmp_write")]
+                #[cfg(feature = "font_xmp")]
                 {
                     font_xmp_support::add_reference_as_xmp_to_stream(
                         reader,
@@ -626,7 +626,7 @@ impl RemoteRefEmbed for WoffIO {
                     )
                     .map_err(wrap_font_err)
                 }
-                #[cfg(not(feature = "xmp_write"))]
+                #[cfg(not(feature = "font_xmp"))]
                 {
                     add_reference_to_stream(reader, output_stream, &manifest_uri)
                         .map_err(wrap_font_err)
@@ -658,7 +658,7 @@ pub mod tests {
 
     #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(not(feature = "xmp_write"))]
+    #[cfg(not(feature = "font_xmp"))]
     // Key to cryptic test comments.
     //
     //   IIP - Invalid/Ignored/Passthrough
@@ -712,7 +712,7 @@ pub mod tests {
     /// expected.
     #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     fn add_c2pa_ref() {
         use crate::utils::xmp_inmemory_utils::extract_provenance;
 
@@ -781,17 +781,14 @@ pub mod tests {
         assert_eq!(0, positions.first().unwrap().offset());
         assert_eq!(
             size_of::<Woff1Header>(),
-            positions.first().unwrap().length() as usize
+            positions.first().unwrap().length()
         );
         assert_eq!(
             &WoffChunkType::Header,
             positions.first().unwrap().chunk_type()
         );
-        assert_eq!(
-            size_of::<Woff1Header>(),
-            positions.get(1).unwrap().offset() as usize
-        );
-        assert_eq!(0, positions.get(1).unwrap().length() as usize);
+        assert_eq!(size_of::<Woff1Header>(), positions.get(1).unwrap().offset());
+        assert_eq!(0, positions.get(1).unwrap().length());
         assert_eq!(
             &WoffChunkType::DirectoryEntry,
             positions.get(1).unwrap().chunk_type()
@@ -835,21 +832,18 @@ pub mod tests {
         let hdr_chunk = positions.first().unwrap();
         assert_eq!(&WoffChunkType::Header, hdr_chunk.chunk_type());
         assert_eq!(0, hdr_chunk.offset());
-        assert_eq!(size_of::<Woff1Header>(), hdr_chunk.length() as usize);
+        assert_eq!(size_of::<Woff1Header>(), hdr_chunk.length());
 
         let dir_chunk = positions.get(1).unwrap();
         assert_eq!(&WoffChunkType::DirectoryEntry, dir_chunk.chunk_type());
-        assert_eq!(size_of::<Woff1Header>(), dir_chunk.offset() as usize);
-        assert_eq!(
-            size_of::<Woff1DirectoryEntry>(),
-            dir_chunk.length() as usize
-        );
+        assert_eq!(size_of::<Woff1Header>(), dir_chunk.offset());
+        assert_eq!(size_of::<Woff1DirectoryEntry>(), dir_chunk.length());
 
         let tbl_chunk = positions.get(2).unwrap();
         assert_eq!(&WoffChunkType::TableData, tbl_chunk.chunk_type());
         assert_eq!(
             size_of::<Woff1Header>() + size_of::<Woff1DirectoryEntry>(),
-            tbl_chunk.offset() as usize
+            tbl_chunk.offset()
         );
         assert_eq!(7, tbl_chunk.length());
     }
@@ -999,7 +993,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature = "xmp_write")]
+    #[cfg(feature = "font_xmp")]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::fs::File;
