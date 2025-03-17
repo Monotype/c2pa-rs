@@ -782,7 +782,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "font_xmp"))]
+    #[cfg(all(not(feature = "font_xmp"), not(target_arch = "wasm32")))]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
     fn add_c2pa_ref() {
@@ -828,7 +828,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_arch = "wasm32")))]
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     fn add_c2pa_ref() {
