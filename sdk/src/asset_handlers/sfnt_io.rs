@@ -725,6 +725,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn get_object_locations_c2pa_absent() {
         // Load the basic OTF test fixture
         let source = fixture_path("font.otf");
@@ -751,6 +752,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn get_object_locations_c2pa_present() {
         // Load the basic OTF test fixture
         let source = fixture_path("font_c2pa.otf");
@@ -782,7 +784,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "font_xmp"))]
+    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
     fn add_c2pa_ref() {
@@ -828,7 +830,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     fn add_c2pa_ref() {
@@ -1104,6 +1106,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn remove_c2pa_manifest_store() {
@@ -1139,6 +1142,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn write_read_c2pa_from_font() {
@@ -1196,6 +1200,7 @@ pub mod tests {
         }
 
         #[test]
+        #[cfg(not(target_os = "wasi"))]
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
@@ -1405,6 +1410,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn test_remove_c2pa() {
         let source = fixture_path("font_c2pa.otf");
         let temp_dir = tempfile::tempdir().unwrap();
