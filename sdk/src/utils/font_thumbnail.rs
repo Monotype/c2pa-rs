@@ -640,15 +640,10 @@ pub fn make_svg(
                 .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
         bounding_box = bounding_box.max(tree.root().abs_bounding_box())?;
 
-        // Setup the y translate
-        let y_translate = if bounding_box.y() < 0.0 {
-            // We need the height of the bounding box, minus the absolute value of the y
-            // origin. The reason for the 2nd part is that the y origin is negative, so
-            // so we need the data to be positive
-            bounding_box.height() - (2.0 * bounding_box.y().abs())
-        } else {
-            bounding_box.height()
-        };
+        // We will want to translate in the Y-direction by the height of the bounding box
+        // plus the top of the box by one and then a 2nd time to take care of baseline height.
+        // Basically, we want it to float above the baseline
+        let y_translate = bounding_box.height() + (2.0 * bounding_box.y());
         group.assign(
             "transform",
             format!("translate(0, {}) scale(1, -1)", y_translate),
