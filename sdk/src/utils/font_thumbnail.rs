@@ -643,20 +643,29 @@ pub fn make_svg(
         // We will want to translate in the Y-direction by the height of the bounding box
         // plus the top of the box by one and then a 2nd time to take care of baseline height.
         // Basically, we want it to float above the baseline
-        let y_translate = bounding_box.height() + (2.0 * bounding_box.y());
+        let y_translate = bounding_box.height() + (2.0 * bounding_box.top());
         group.assign(
             "transform",
             format!("translate(0, {}) scale(1, -1)", y_translate),
         );
         svg_doc.append(group);
     }
+    // Round the bounding box outwards and then convert it to a rect
+    let bounding_box = bounding_box
+        .round_out()
+        .ok_or(FontThumbnailError::InvalidRect)?
+        .to_rect();
+    // Set the view box with a 1-pixel padding around the bounding box, as there are some
+    // corner cases (when the font is bold?) where the bounding box is not quite
+    // right and 1 pixel row is being clipped for items where the character goes
+    // below the baseline.
     svg_doc = svg_doc.set(
         "viewBox",
         (
-            bounding_box.x().floor(),
-            bounding_box.y().floor(),
-            bounding_box.width().ceil(),
-            bounding_box.height().ceil(),
+            bounding_box.x() - 1.0,
+            bounding_box.y() - 1.0,
+            bounding_box.width() + 2.0,
+            bounding_box.height() + 2.0,
         ),
     );
 
