@@ -312,8 +312,7 @@ impl From<Arc<Font>> for FontNameInfo {
                             && n.encoding_id == encoding
                     })
                 })
-                .map(|name| name.to_string())
-                .flatten()
+                .and_then(|name| name.to_string())
         };
 
         let full_name = find_name(name_id::FULL_NAME);
