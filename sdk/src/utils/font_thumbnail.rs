@@ -7,6 +7,7 @@ use std::{
 
 use cosmic_text::{
     fontdb::{Database, ID},
+    ttf_parser::{name_id, PlatformId},
     Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
     SwashCache,
 };
@@ -27,10 +28,6 @@ const MINIMUM_POINT_SIZE: f32 = 72.0;
 /// Maximum width for the PNG
 const MAXIMUM_WIDTH: u32 = 1024;
 
-/// The name ID for the full name of the font from the name table
-const FULL_NAME_ID: u16 = 4;
-/// The name ID for the sample text of the font from the name table
-const SAMPLE_TEXT_ID: u16 = 19;
 /// The MIME type for the thumbnail
 const THUMBNAIL_IMG_MIME_TYPE: &str = "image/png";
 /// The MIME type for an SVG thumbnail
@@ -291,16 +288,37 @@ fn measure_text_in_buffer(buffer: &mut BorrowedWithFontSystem<Buffer>) -> Result
 
 impl From<Arc<Font>> for FontNameInfo {
     fn from(font: Arc<Font>) -> Self {
+        // The US English language ID; currently localization is still a work in
+        // progress
+        const US_EN_LANGUAGE_ID: u16 = 0x0409;
+
         let face = font.rustybuzz();
-        let mut full_name = None;
-        let mut sample_text = None;
-        for name in face.names() {
-            match name.name_id {
-                FULL_NAME_ID => full_name = name.to_string(),
-                SAMPLE_TEXT_ID => sample_text = name.to_string(),
-                _ => {}
-            }
-        }
+        // We want to use PlatformID::Unicode/LanguageID::English for the name table when possible,
+        // if not available, we will look for Windows, and then finally Macintosh
+        let preferred_search_order = [
+            (PlatformId::Unicode, US_EN_LANGUAGE_ID, 3), // Unicode, English, Unicode BMP encoding
+            (PlatformId::Windows, US_EN_LANGUAGE_ID, 0), // Windows, English, Symbol encoding
+            (PlatformId::Windows, US_EN_LANGUAGE_ID, 1), // Windows, Symbol, BMP encoding
+        ];
+
+        let find_name = |name_id: u16| {
+            preferred_search_order
+                .iter()
+                .find_map(|&(platform, lang, encoding)| {
+                    face.names().into_iter().find(|n| {
+                        n.name_id == name_id
+                            && n.platform_id == platform
+                            && n.language_id == lang
+                            && n.encoding_id == encoding
+                    })
+                })
+                .map(|name| name.to_string())
+                .flatten()
+        };
+
+        let full_name = find_name(name_id::FULL_NAME);
+        let sample_text = find_name(name_id::SAMPLE_TEXT);
+
         FontNameInfo {
             full_name,
             sample_text,
