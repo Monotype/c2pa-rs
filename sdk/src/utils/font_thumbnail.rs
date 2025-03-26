@@ -291,14 +291,24 @@ impl From<Arc<Font>> for FontNameInfo {
         // The US English language ID; currently localization is still a work in
         // progress
         const US_EN_LANGUAGE_ID: u16 = 0x0409;
+        // The Unicode BMP encoding
+        const UNICODE_BMP_ENCODING: u16 = 3;
+        // The Windows Symbol encoding
+        const WINDOWS_SYMBOL_ENCODING: u16 = 0;
+        // The Windows BMP encoding
+        const WINDOWS_BMP_ENCODING: u16 = 1;
 
         let face = font.rustybuzz();
         // We want to use PlatformID::Unicode/LanguageID::English for the name table when possible,
         // if not available, we will look for Windows, and then finally Macintosh
         let preferred_search_order = [
-            (PlatformId::Unicode, US_EN_LANGUAGE_ID, 3), // Unicode, English, Unicode BMP encoding
-            (PlatformId::Windows, US_EN_LANGUAGE_ID, 0), // Windows, English, Symbol encoding
-            (PlatformId::Windows, US_EN_LANGUAGE_ID, 1), // Windows, Symbol, BMP encoding
+            (PlatformId::Unicode, US_EN_LANGUAGE_ID, UNICODE_BMP_ENCODING),
+            (
+                PlatformId::Windows,
+                US_EN_LANGUAGE_ID,
+                WINDOWS_SYMBOL_ENCODING,
+            ),
+            (PlatformId::Windows, US_EN_LANGUAGE_ID, WINDOWS_BMP_ENCODING),
         ];
 
         let find_name = |name_id: u16| {
