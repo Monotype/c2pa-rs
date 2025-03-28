@@ -556,15 +556,9 @@ pub fn make_svg(
     for layout_run in text_buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
         // Add a style to have the fill as black and the stroke to none
-        group = group.add(
-            svg::node::element::Style::new(
-                format!(
-                    "path {{ fill: {}; }}",
-                    SVG_GLYPH_FILL_COLOR
-                )
-                .as_str(),
-            ),
-        );
+        group = group.add(svg::node::element::Style::new(
+            format!("path {{ fill: {}; }}", SVG_GLYPH_FILL_COLOR).as_str(),
+        ));
         for glyph in layout_run.glyphs {
             let mut data = svg::node::element::path::Data::new();
             // Get the x/y offsets
@@ -703,6 +697,9 @@ mod tests {
         assert!(!image_data.is_empty());
         // Matter of fact, make sure it matches the expected output
         let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
-        assert_eq!(String::from_utf8_lossy(&image_data), String::from_utf8_lossy(expected_svg));
+        assert_eq!(
+            String::from_utf8_lossy(&image_data),
+            String::from_utf8_lossy(expected_svg)
+        );
     }
 }
