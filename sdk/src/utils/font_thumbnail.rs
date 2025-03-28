@@ -82,6 +82,10 @@ enum FontThumbnailError {
     /// Failed to get a pixel from the image
     #[error("Failed to get pixel from image; x: {x}, y: {y}")]
     FailedToGetPixel { x: u32, y: u32 },
+    /// Failed to create a SVG tree from string
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    #[error("Failed to create a SVG tree from string: {0}")]
+    FailedToCreateSvgTree(String),
     #[cfg(not(feature = "add_svg_font_thumbnails"))]
     /// The SVG feature is not enabled
     #[error("The SVG feature is not enabled")]
@@ -322,32 +326,6 @@ fn get_skia_paint_for_color<'a>(color: Color) -> tiny_skia::Paint<'a> {
     }
 }
 
-/// Determines the maximum viewable bounding box from a the tiny_skia rect object
-#[cfg(feature = "add_svg_font_thumbnails")]
-trait MaxBoundingBox: Sized {
-    /// Finds the maximum bounding box from the given rect
-    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error>;
-}
-
-#[cfg(feature = "add_svg_font_thumbnails")]
-impl MaxBoundingBox for tiny_skia::Rect {
-    fn max(&self, other: Self) -> core::result::Result<Self, crate::Error> {
-        // If the width and height are 0, then we can just return the other rect
-        if self.width() == 0.0 && self.height() == 0.0 {
-            Ok(other)
-        } else if other.width() == 0.0 && other.height() == 0.0 {
-            Ok(*self)
-        } else {
-            let left = self.left().min(other.left());
-            let top = self.top().min(other.top());
-            let right = self.right().max(other.right());
-            let bottom = self.bottom().max(other.bottom());
-            tiny_skia::Rect::from_ltrb(left, top, right, bottom)
-                .ok_or(FontThumbnailError::InvalidRect.into())
-        }
-    }
-}
-
 #[cfg(feature = "add_svg_font_thumbnails")]
 trait PrecisionRound {
     fn round_to(&self, precision: u32) -> Self;
@@ -574,11 +552,19 @@ pub fn make_svg(
 ) -> std::result::Result<Vec<u8>, crate::error::Error> {
     use svg::Node;
     let mut svg_doc = svg::Document::new();
-    // Start with a zero width/height box
-    let mut bounding_box: tiny_skia::Rect =
-        tiny_skia::Rect::from_xywh(0.0, 0.0, 0.0, 0.0).ok_or(FontThumbnailError::InvalidRect)?;
+    let mut tmp_doc = svg::Document::new();
     for layout_run in text_buffer.layout_runs() {
         let mut group = svg::node::element::Group::new();
+        // Add a style to have the fill as black and the stroke to none
+        group = group.add(
+            svg::node::element::Style::new(
+                format!(
+                    "path {{ fill: {}; }}",
+                    SVG_GLYPH_FILL_COLOR
+                )
+                .as_str(),
+            ),
+        );
         for glyph in layout_run.glyphs {
             let mut data = svg::node::element::path::Data::new();
             // Get the x/y offsets
@@ -623,7 +609,6 @@ pub fn make_svg(
             // Don't add empty data paths
             if !data.is_empty() {
                 let path = svg::node::element::Path::new()
-                    .set("fill", SVG_GLYPH_FILL_COLOR)
                     .set(
                         "transform",
                         format!("translate({}, {})", x_offset, y_offset),
@@ -632,26 +617,22 @@ pub fn make_svg(
                 group = group.add(path);
             }
         }
+
+        group.assign("transform", "scale(1, -1)");
         // We will need to create a temporary document to get the bounding box
         // of the entire group
-        let tmp_doc = svg::Document::new().add(group.clone());
-        let tree =
-            resvg::usvg::Tree::from_str(&tmp_doc.to_string(), &resvg::usvg::Options::default())
-                .map_err(|_e| FontThumbnailError::FailedToCreatePixmap)?;
-        bounding_box = bounding_box.max(tree.root().abs_bounding_box())?;
-
-        // We will want to translate in the Y-direction by the height of the bounding box
-        // plus the top of the box by one and then a 2nd time to take care of baseline height.
-        // Basically, we want it to float above the baseline
-        let y_translate = bounding_box.height() + (2.0 * bounding_box.top());
-        group.assign(
-            "transform",
-            format!("translate(0, {}) scale(1, -1)", y_translate),
-        );
+        tmp_doc = tmp_doc.add(group.clone());
         svg_doc.append(group);
     }
+    // Convert the temporary document to a string, so we can get the bounding box
+    let svg_str = tmp_doc.to_string();
+    // Generate the SVG tree from the string
+    let tree = resvg::usvg::Tree::from_str(&svg_str, &resvg::usvg::Options::default())
+        .map_err(|_e| FontThumbnailError::FailedToCreateSvgTree(svg_str))?;
     // Round the bounding box outwards and then convert it to a rect
-    let bounding_box = bounding_box
+    let bounding_box = tree
+        .root()
+        .abs_bounding_box()
         .round_out()
         .ok_or(FontThumbnailError::InvalidRect)?
         .to_rect();
@@ -706,32 +687,22 @@ mod tests {
 
     #[cfg(feature = "add_svg_font_thumbnails")]
     #[test]
-    fn test_max_rect() {
-        let rect1 = tiny_skia::Rect::from_ltrb(0.0, 0.0, 10.0, 10.0).unwrap();
-        let rect2 = tiny_skia::Rect::from_ltrb(5.0, 5.0, 10.0, 10.0).unwrap();
-        let max = rect1.max(rect2).unwrap();
-        assert_eq!(max.x(), 0.0);
-        assert_eq!(max.y(), 0.0);
-        assert_eq!(max.width(), 10.0);
-        assert_eq!(max.height(), 10.0);
+    fn test_svg_creation() {
+        use crate::utils::thumbnail::make_thumbnail_from_stream;
 
-        let empty_rect = tiny_skia::Rect::from_ltrb(0.0, 0.0, 0.0, 0.0).unwrap();
-        let max = rect2.max(empty_rect).unwrap();
-        assert_eq!(max.x(), 5.0);
-        assert_eq!(max.y(), 5.0);
-        assert_eq!(max.width(), 5.0);
-        assert_eq!(max.height(), 5.0);
-        let max = empty_rect.max(rect2).unwrap();
-        assert_eq!(max.x(), 5.0);
-        assert_eq!(max.y(), 5.0);
-        assert_eq!(max.width(), 5.0);
-        assert_eq!(max.height(), 5.0);
-
-        let neg_rect = tiny_skia::Rect::from_ltrb(-5.0, -5.0, 10.0, 10.0).unwrap();
-        let max = rect2.max(neg_rect).unwrap();
-        assert_eq!(max.x(), -5.0);
-        assert_eq!(max.y(), -5.0);
-        assert_eq!(max.width(), 15.0);
-        assert_eq!(max.height(), 15.0);
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = include_bytes!("../../tests/fixtures/font.otf");
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_from_stream("font/otf", &mut stream);
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap();
+        // Assert the result is a valid SVG
+        assert_eq!(mime_type, THUMBNAIL_SVG_MIME_TYPE);
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
+        assert_eq!(String::from_utf8_lossy(&image_data), String::from_utf8_lossy(expected_svg));
     }
 }
