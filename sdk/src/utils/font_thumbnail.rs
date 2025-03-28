@@ -698,8 +698,8 @@ mod tests {
         // Matter of fact, make sure it matches the expected output
         let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
         assert_eq!(
-            String::from_utf8_lossy(&image_data),
-            String::from_utf8_lossy(expected_svg)
+            String::from_utf8_lossy(&image_data).replace("\\r", ""),
+            String::from_utf8_lossy(expected_svg).replace("\\r", "")
         );
     }
 }
