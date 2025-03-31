@@ -1455,4 +1455,31 @@ pub mod tests {
             _ => unreachable!(),
         }
     }
+
+    #[test]
+    fn test_remove_c2pa_from_stream_which_doesnot_have_one() {
+        let source = fixture_path("font.otf");
+
+        let source_bytes = std::fs::read(source).unwrap();
+        let mut source_stream = Cursor::new(source_bytes);
+
+        let sfnt_io = SfntIO {};
+        let sfnt_writer = sfnt_io.get_writer("ttf").unwrap();
+
+        let output_bytes = Vec::new();
+        let mut output_stream = Cursor::new(output_bytes);
+
+        sfnt_writer
+            .remove_cai_store_from_stream(&mut source_stream, &mut output_stream)
+            .unwrap();
+
+        // read back in asset, JumbfNotFound is expected since it was removed
+        let sfnt_reader = sfnt_io.get_reader();
+        assert_ok!(output_stream.rewind());
+        match sfnt_reader.read_cai(&mut output_stream) {
+            Err(Error::JumbfNotFound) => (),
+            _ => unreachable!(),
+        }
+
+    }
 }
