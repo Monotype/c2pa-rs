@@ -1480,6 +1480,5 @@ pub mod tests {
             Err(Error::JumbfNotFound) => (),
             _ => unreachable!(),
         }
-
     }
 }
