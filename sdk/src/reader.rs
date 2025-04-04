@@ -71,7 +71,7 @@ pub trait AsyncPostValidator {
 
 /// A reader for the manifest store.
 #[skip_serializing_none]
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct Reader {
     /// A label for the active (most recent) manifest in the store
