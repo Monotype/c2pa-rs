@@ -8,8 +8,8 @@ use std::{
 use cosmic_text::{
     fontdb::{Database, ID},
     ttf_parser::{name_id, PlatformId},
-    Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Font, FontSystem, Metrics,
-    SwashCache,
+    Attrs, BorrowedWithFontSystem, Buffer, CacheKeyFlags, Color, Fallback, Font, FontFeatures,
+    FontSystem, Metrics, SwashCache,
 };
 use image::{ImageOutputFormat, Pixel};
 use tiny_skia::Pixmap;
@@ -92,6 +92,26 @@ enum FontThumbnailError {
 impl From<FontThumbnailError> for crate::Error {
     fn from(e: FontThumbnailError) -> Self {
         crate::Error::OtherError(e.to_string().into())
+    }
+}
+
+/// The cosmic-text crate provides a [`Fallback`] trait that is used to provide fallback fonts
+/// In our scenario, we do not want to use any fallback fonts for generating the thumbnail,
+/// so we implement a no-op version of the trait
+#[derive(Default)]
+struct NoFallback {}
+
+impl Fallback for NoFallback {
+    fn common_fallback(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn script_fallback(&self, _script: unicode_script::Script, _locale: &str) -> &[&'static str] {
+        &[]
     }
 }
 
@@ -180,13 +200,13 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
     while font_size > minimum_point_size {
         borrowed_buffer.set_size(Some(width), Some(height));
         borrowed_buffer.set_wrap(cosmic_text::Wrap::Glyph);
-        borrowed_buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
+        borrowed_buffer.set_text(text, &attrs, cosmic_text::Shaping::Advanced);
         borrowed_buffer.shape_until_scroll(true);
         // Get the number of layout runs, we expect one if it fits on one line
         let count = borrowed_buffer.layout_runs().count();
         // If it is one, we have found the right size
         if count == 1 {
-            let size = measure_text(text, attrs, &mut borrowed_buffer)?;
+            let size = measure_text(text, &attrs, &mut borrowed_buffer)?;
             // There instances where the measured width was 0, but maybe this is
             // caught now by counting the number of layout runs?
             if size.w > 0.0 && size.w <= width {
@@ -214,8 +234,8 @@ fn get_buffer_with_pt_size_fits_width<T: Fn(f32) -> f32>(
     } else {
         text.to_string()
     };
-    borrowed_buffer.set_text(&text, attrs, cosmic_text::Shaping::Advanced);
-    let size = measure_text(&text, attrs, &mut borrowed_buffer)?;
+    borrowed_buffer.set_text(&text, &attrs, cosmic_text::Shaping::Advanced);
+    let size = measure_text(&text, &attrs, &mut borrowed_buffer)?;
     // We still run the chance of an invalid size returned, so take that into
     // account
     if size.w > 0.0 && size.w <= width && size.h <= height {
@@ -245,6 +265,8 @@ fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFon
         metadata: 0,
         cache_key_flags: CacheKeyFlags::empty(),
         metrics_opt: None,
+        letter_spacing_opt: None,
+        font_features: FontFeatures::new(),
     };
     Ok(LoadedFont { id: face.id, attrs })
 }
@@ -256,7 +278,7 @@ fn load_font_data<'a>(font_db: &mut Database, data: Vec<u8>) -> Result<LoadedFon
 /// too small.
 fn measure_text(
     text: &str,
-    attrs: Attrs,
+    attrs: &Attrs,
     buffer: &mut BorrowedWithFontSystem<Buffer>,
 ) -> Result<Size> {
     buffer.set_text(text, attrs, cosmic_text::Shaping::Advanced);
@@ -401,9 +423,10 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     let LoadedFont { id: font_id, attrs } = load_font_data(&mut font_db, font_data)?;
 
     // And build a font system from this local database
-    let mut font_system = cosmic_text::FontSystem::new_with_locale_and_db(
+    let mut font_system = cosmic_text::FontSystem::new_with_locale_and_db_and_fallback(
         DEFAULT_LOCALE.to_string(),
         font_db.clone(),
+        NoFallback::default(),
     );
     // Get reference to the font from the font system
     let f = font_system
