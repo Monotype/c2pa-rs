@@ -3407,7 +3407,10 @@ impl Store {
     pub fn load_jumbf_from_stream(asset_type: &str, stream: &mut dyn CAIRead) -> Result<Vec<u8>> {
         match load_jumbf_from_stream(asset_type, stream) {
             Ok(manifest_bytes) => Ok(manifest_bytes),
+            // if the asset returns a remote Manifest URL, handle it
+            Err(Error::RemoteManifestUrl(ext_ref)) => Store::handle_remote_manifest(&ext_ref),
             Err(Error::JumbfNotFound) => {
+                // todo, remove direct XMP check when all assets support RemoteManifesturl errors
                 stream.rewind()?;
                 if let Some(ext_ref) =
                     crate::utils::xmp_inmemory_utils::XmpInfo::from_source(stream, asset_type)
