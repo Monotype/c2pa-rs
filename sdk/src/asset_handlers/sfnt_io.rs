@@ -462,7 +462,13 @@ impl CAIReader for SfntIO {
         })?;
         match c2pa_table.manifest_store {
             Some(manifest_store) => Ok(manifest_store.to_vec()),
-            _ => Err(Error::JumbfNotFound),
+            None => {
+                if let Some(uri) = c2pa_table.active_manifest_uri {
+                    Err(Error::RemoteManifestUrl(uri))
+                } else {
+                    Err(Error::JumbfNotFound)
+                }
+            },
         }
     }
 
