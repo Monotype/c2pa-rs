@@ -27,8 +27,8 @@ use lazy_static::lazy_static;
 use crate::asset_handlers::pdf_io::PdfIO;
 #[cfg(feature = "sfnt")]
 use crate::asset_handlers::sfnt_io::SfntIO;
-//#[cfg(feature = "woff")]
-//use crate::asset_handlers::woff_io::WoffIO;
+#[cfg(feature = "woff")]
+use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
         bmff_io::BmffIO, c2pa_io::C2paIO, gif_io::GifIO, jpeg_io::JpegIO, mp3_io::Mp3IO,
@@ -55,8 +55,8 @@ lazy_static! {
             Box::new(GifIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
-            //#[cfg(feature = "woff")]
-            //Box::new(WoffIO::new("")),
+            #[cfg(feature = "woff")]
+            Box::new(WoffIO::new("")),
         ];
 
         let mut handler_map = HashMap::new();
@@ -88,8 +88,8 @@ lazy_static! {
             Box::new(GifIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
-            //#[cfg(feature = "woff")]
-            //Box::new(WoffIO::new("")),
+            #[cfg(feature = "woff")]
+            Box::new(WoffIO::new("")),
         ];
         let mut handler_map = HashMap::new();
 

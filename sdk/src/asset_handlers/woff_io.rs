@@ -16,7 +16,13 @@ use std::{
     path::*,
 };
 
-use c2pa_font_handler::{chunks::ChunkReader, woff1::font::Woff1Font, FontDataRead};
+use c2pa_font_handler::{
+    c2pa::{UpdatableC2PA, UpdateContentCredentialRecord},
+    chunks::ChunkReader,
+    tag::FontTag,
+    woff1::{font::Woff1Font, table::NamedTable},
+    Font, FontDataRead, MutFontDataWrite,
+};
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -214,24 +220,21 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 /// destination stream.
 fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
-    _destination: &mut TDest,
-    _manifest_store_data: &[u8],
+    destination: &mut TDest,
+    manifest_store_data: &[u8],
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    todo!("C2PA record update not supported in crate yet");
-    /*
     let mut font = Woff1Font::from_reader(source)?;
     let c2pa_record = UpdateContentCredentialRecord::builder()
         .with_content_credential(manifest_store_data.to_vec())
         .build();
-    font.update_c2pa_record(c2pa_record);
+    font.update_c2pa_record(c2pa_record)?;
     font.write(destination)?;
     Ok(())
-    */
 }
 
 /// Adds the manifest URI reference to the font at the given path.
@@ -429,8 +432,15 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(
     reader: &mut T,
 ) -> Result<c2pa_font_handler::sfnt::table::TableC2PA> {
     // Convert all errors from the reader to a deserialization error.
-    let _woff = Woff1Font::from_reader(reader)?;
-    todo!("C2PA record update not supported in crate yet; will be updated to WOFF1 C2PA table");
+    let woff = Woff1Font::from_reader(reader)?;
+    // Convert all errors from the reader to a deserialization error.
+    match woff.table(&FontTag::C2PA) {
+        None => Err(FontError::JumbfNotFound),
+        // If there is, return its `manifest_store` value.
+        Some(NamedTable::C2PA(c2pa)) => Ok((*c2pa).clone()),
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
+    }
 }
 
 /// Main WOFF IO feature.
@@ -450,16 +460,21 @@ impl WoffIO {
 
 /// WOFF implementation of the CAILoader trait.
 impl CAIReader for WoffIO {
-    fn read_cai(&self, _asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
-        todo!("C2PA record update not supported in crate yet");
-        /*
-        let mut font = Woff1Font::from_reader(asset_reader)?;
-        if let Some(record) = font.get_c2pa_record() {
-            Ok(record.get_content_credential().to_vec())
-        } else {
-            Err(FontError::JumbfNotFound.into())
+    fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
+        let c2pa_table = read_c2pa_from_stream(asset_reader).map_err(|e| match e {
+            FontError::JumbfNotFound => Error::JumbfNotFound,
+            _ => wrap_font_err(e),
+        })?;
+        match c2pa_table.manifest_store {
+            Some(manifest_store) => Ok(manifest_store.to_vec()),
+            None => {
+                if let Some(uri) = c2pa_table.active_manifest_uri {
+                    Err(Error::RemoteManifestUrl(uri))
+                } else {
+                    Err(Error::JumbfNotFound)
+                }
+            }
         }
-        */
     }
 
     fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
@@ -560,6 +575,10 @@ impl AssetIO for WoffIO {
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for WoffIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
+        // The SDK doesn't necessarily promise the input stream is rewound, so do so
+        // now to make sure we can parse the font.
+        input_stream.rewind()?;
+
         // Get the chunk positions
         let positions = Woff1Font::get_chunk_positions(input_stream)
             .map_err(FontError::from)
