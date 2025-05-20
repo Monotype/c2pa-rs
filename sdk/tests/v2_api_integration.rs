@@ -17,8 +17,7 @@ mod integration_v2 {
     use std::io::{Cursor, Seek};
 
     use anyhow::Result;
-    use c2pa::{Builder, CallbackSigner, Reader};
-    use c2pa_crypto::raw_signature::SigningAlg;
+    use c2pa::{crypto::raw_signature::SigningAlg, Builder, CallbackSigner, Reader};
     use serde_json::json;
 
     const PARENT_JSON: &str = r#"
@@ -74,9 +73,17 @@ mod integration_v2 {
                             "action": "c2pa.created",
                             "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia",
                             "softwareAgent": "Adobe Firefly 0.1.0",
+                            "description": "This image was edited by Adobe Firefly",
+                            "when": "2025-04-22T17:25:28Z",
                             "parameters": {
                                 "description": "This image was edited by Adobe Firefly",
-                            }
+                            },
+                            "softwareAgentIndex": 0,
+                        }
+                    ],
+                    "softwareAgents": [
+                        {
+                            "name": "Adobe Firefly",
                         }
                     ]
                 }

@@ -16,12 +16,6 @@ use std::path::Path;
 use std::{borrow::Cow, collections::HashMap, fmt};
 
 use async_generic::async_generic;
-use c2pa_crypto::{
-    base64,
-    cose::{parse_cose_sign1, CertificateInfo, CertificateTrustPolicy, OcspFetchPolicy},
-    ocsp::OcspResponse,
-};
-use c2pa_status_tracker::{log_item, ErrorBehavior, StatusTracker};
 use chrono::{DateTime, Utc};
 use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
 use serde_json::{json, Map, Value};
@@ -40,6 +34,11 @@ use crate::{
     asset_io::CAIRead,
     cbor_types::map_cbor_to_type,
     cose_validator::{get_signing_info, get_signing_info_async, verify_cose, verify_cose_async},
+    crypto::{
+        base64,
+        cose::{parse_cose_sign1, CertificateInfo, CertificateTrustPolicy, OcspFetchPolicy},
+        ocsp::OcspResponse,
+    },
     error::{Error, Result},
     hashed_uri::HashedUri,
     jumbf::{
@@ -54,8 +53,10 @@ use crate::{
         },
     },
     jumbf_io::get_assetio_handler,
+    log_item,
     salt::{DefaultSalt, SaltGenerator, NO_SALT},
     settings::get_settings_value,
+    status_tracker::{ErrorBehavior, StatusTracker},
     utils::hash_utils::{hash_by_alg, vec_compare, verify_by_alg},
     validation_status, ClaimGeneratorInfo,
 };
@@ -63,7 +64,7 @@ use crate::{
 const BUILD_HASH_ALG: &str = "sha256";
 const BUILD_VER_SUPPORT: usize = 2;
 
-/// JSON structure representing an Assertion reference in a Claim's "assertions" list
+/// JSON structure representing an Assertion reference in a Claim's "assertions" list.
 use HashedUri as C2PAAssertion;
 
 const GH_FULL_VERSION_LIST: &str = "Sec-CH-UA-Full-Version-List";
@@ -2892,7 +2893,7 @@ pub(crate) fn check_ocsp_status(
     };
 
     if _sync {
-        Ok(c2pa_crypto::cose::check_ocsp_status(
+        Ok(crate::crypto::cose::check_ocsp_status(
             sign1,
             data,
             fetch_policy,
@@ -2900,7 +2901,7 @@ pub(crate) fn check_ocsp_status(
             validation_log,
         )?)
     } else {
-        Ok(c2pa_crypto::cose::check_ocsp_status_async(
+        Ok(crate::crypto::cose::check_ocsp_status_async(
             sign1,
             data,
             fetch_policy,
