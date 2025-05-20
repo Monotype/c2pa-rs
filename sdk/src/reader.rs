@@ -23,8 +23,6 @@ use std::{
 
 use async_generic::async_generic;
 use async_trait::async_trait;
-use c2pa_crypto::base64;
-use c2pa_status_tracker::StatusTracker;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,11 +31,14 @@ use serde_with::skip_serializing_none;
 
 use crate::{
     claim::ClaimAssetData,
+    crypto::base64,
     dynamic_assertion::PartialClaim,
     error::{Error, Result},
     jumbf::labels::{manifest_label_from_uri, to_absolute_uri, to_relative_uri},
+    manifest::StoreOptions,
     manifest_store_report::ManifestStoreReport,
     settings::get_settings_value,
+    status_tracker::StatusTracker,
     store::Store,
     validation_results::{ValidationResults, ValidationState},
     validation_status::ValidationStatus,
@@ -73,6 +74,7 @@ pub trait AsyncPostValidator {
 #[skip_serializing_none]
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
+#[derive(Default)]
 pub struct Reader {
     /// A label for the active (most recent) manifest in the store
     active_manifest: Option<String>,
@@ -233,7 +235,7 @@ impl Reader {
             }?;
         }
 
-        Ok(Self::from_store(store, &validation_log))
+        Self::from_store(store, &validation_log)
     }
 
     /// Create a [`Reader`] from an initial segment and a fragment stream.
@@ -268,7 +270,7 @@ impl Reader {
             }?;
         };
 
-        Ok(Self::from_store(store, &validation_log))
+        Self::from_store(store, &validation_log)
     }
 
     #[cfg(feature = "file_io")]
@@ -295,7 +297,7 @@ impl Reader {
             verify,
             &mut validation_log,
         ) {
-            Ok(store) => Ok(Self::from_store(store, &validation_log)),
+            Ok(store) => Self::from_store(store, &validation_log),
             Err(e) => Err(e),
         }
     }
@@ -628,28 +630,19 @@ impl Reader {
     }
 
     #[async_generic()]
-    fn from_store(store: Store, validation_log: &StatusTracker) -> Self {
+    fn from_store(store: Store, validation_log: &StatusTracker) -> Result<Self> {
         let mut validation_results = ValidationResults::from_store(&store, validation_log);
 
         let active_manifest = store.provenance_label();
         let mut manifests = HashMap::new();
+        let mut options = StoreOptions::default();
 
         for claim in store.claims() {
             let manifest_label = claim.label();
             let result = if _sync {
-                #[cfg(feature = "file_io")]
-                {
-                    Manifest::from_store(&store, manifest_label, None)
-                }
-                #[cfg(not(feature = "file_io"))]
-                Manifest::from_store(&store, manifest_label)
+                Manifest::from_store(&store, manifest_label, &mut options)
             } else {
-                #[cfg(feature = "file_io")]
-                {
-                    Manifest::from_store_async(&store, manifest_label, None).await
-                }
-                #[cfg(not(feature = "file_io"))]
-                Manifest::from_store_async(&store, manifest_label).await
+                Manifest::from_store_async(&store, manifest_label, &mut options).await
             };
             match result {
                 Ok(manifest) => {
@@ -657,12 +650,38 @@ impl Reader {
                 }
                 Err(e) => {
                     validation_results.add_status(ValidationStatus::from_error(&e));
+                    return Err(e);
                 }
             };
         }
 
+        // resolve redactions
+        // Even though we validate
+        // compare options.redacted_assertions and options.missing_assertions
+        // remove all overlapping values from both arrays
+        // any remaining redacted assertions are not actually redacted
+        // any remaining missing assertions are not actually missing
+
+        let mut redacted = options.redacted_assertions.clone();
+        let mut missing = options.missing_assertions.clone();
+        redacted.retain(|item| !missing.contains(item));
+        missing.retain(|item| !options.redacted_assertions.contains(item));
+
+        // Add any remaining redacted assertions to the validation results
+        // todo: figure out what to do here!
+        if !redacted.is_empty() {
+            eprintln!("Not Redacted: {:?}", redacted);
+            return Err(Error::AssertionRedactionNotFound);
+        }
+        if !missing.is_empty() {
+            eprintln!("Assertion Missing: {:?}", missing);
+            return Err(Error::AssertionMissing {
+                url: redacted[0].to_owned(),
+            });
+        }
+
         let validation_state = validation_results.validation_state();
-        Self {
+        Ok(Self {
             active_manifest,
             manifests,
             validation_status: validation_results.validation_errors(),
@@ -670,7 +689,7 @@ impl Reader {
             validation_state: Some(validation_state),
             store,
             assertion_values: HashMap::new(),
-        }
+        })
     }
 
     /// Post-validate the reader. This function is called after the reader is created.
@@ -790,20 +809,6 @@ impl Reader {
     }
 }
 
-impl Default for Reader {
-    fn default() -> Self {
-        Self {
-            active_manifest: None,
-            manifests: HashMap::<String, Manifest>::new(),
-            validation_status: None,
-            validation_results: None,
-            validation_state: None,
-            store: Store::new(),
-            assertion_values: HashMap::new(),
-        }
-    }
-}
-
 /// Convert the Reader to a JSON value.
 impl TryFrom<Reader> for serde_json::Value {
     type Error = Error;
@@ -919,12 +924,14 @@ pub mod tests {
         reader.to_folder(temp_dir.path())?;
         let path = temp_dir_path(&temp_dir, "manifest.json");
         assert!(path.exists());
+        #[cfg(target_os = "wasi")]
+        crate::utils::io_utils::wasm_remove_dir_all(temp_dir)?;
         Ok(())
     }
 
     #[test]
     fn test_reader_post_validate() -> Result<()> {
-        use c2pa_status_tracker::{log_item, StatusTracker};
+        use crate::{log_item, status_tracker::StatusTracker};
 
         let mut reader =
             Reader::from_stream("image/jpeg", std::io::Cursor::new(IMAGE_WITH_MANIFEST))?;

@@ -22,21 +22,21 @@ use std::{
 
 #[cfg(feature = "v1_api")]
 use async_trait::async_trait;
-use c2pa_crypto::{cose::CertificateTrustPolicy, raw_signature::SigningAlg};
+use tempfile::TempDir;
+
 #[cfg(feature = "v1_api")]
-use c2pa_crypto::{
+use crate::crypto::{
     cose::TimeStampStorage,
     raw_signature::{AsyncRawSigner, RawSignerError},
     time_stamp::{AsyncTimeStampProvider, TimeStampError},
 };
-use tempfile::TempDir;
-
 #[cfg(feature = "v1_api")]
 use crate::signer::RemoteSigner;
 use crate::{
     assertions::{labels, Action, Actions, Ingredient, ReviewRating, SchemaDotOrg, Thumbnail},
     asset_io::CAIReadWrite,
     claim::Claim,
+    crypto::{cose::CertificateTrustPolicy, raw_signature::SigningAlg},
     hash_utils::Hasher,
     jumbf_io::get_assetio_handler,
     salt::DefaultSalt,
@@ -207,9 +207,7 @@ pub fn fixture_path(file_name: &str) -> PathBuf {
 /// returns a path to a file in the temp_dir folder
 // note, you must pass TempDir from the caller's context
 pub fn temp_dir_path(temp_dir: &TempDir, file_name: &str) -> PathBuf {
-    let mut path = PathBuf::from(temp_dir.path());
-    path.push(file_name);
-    path
+    temp_dir.path().join(file_name)
 }
 
 // copies a fixture to a temp file and returns path to copy
@@ -250,7 +248,7 @@ pub fn temp_signer_file() -> Box<dyn crate::Signer> {
 
 /// Create a [`CertificateTrustPolicy`] instance that has the test certificate bundles included.
 ///
-/// [`CertificateTrustPolicy`]: c2pa_crypto::cose::CertificateTrustPolicy
+/// [`CertificateTrustPolicy`]: crate::crypto::cose::CertificateTrustPolicy
 pub fn test_certificate_acceptance_policy() -> CertificateTrustPolicy {
     let mut ctp = CertificateTrustPolicy::default();
     ctp.add_trust_anchors(include_bytes!(
