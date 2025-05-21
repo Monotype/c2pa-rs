@@ -468,7 +468,7 @@ impl CAIReader for SfntIO {
                 } else {
                     Err(Error::JumbfNotFound)
                 }
-            },
+            }
         }
     }
 
