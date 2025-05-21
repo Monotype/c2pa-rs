@@ -88,7 +88,8 @@ bcder = "0.7.3"
 bytes = "1.7.2"
 byteorder = { version = "1.4.3", default-features = false }
 byteordered = "0.6.0"
-c2pa-font-handler = { tag = "v0.4.0", git = "https://github.com/Monotype/c2pa-font-handler", optional = true }
+#c2pa-font-handler = { tag = "v0.4.0", git = "https://github.com/Monotype/c2pa-font-handler", optional = true }
+c2pa-font-handler = { path="../../c2pa-font-handler/c2pa-font-handler", optional = true, features = ["woff"] }
 chrono = { version = "0.4.39", default-features = false, features = ["serde"] }
 ciborium = "0.2.2"
 config = { version = "0.14.0", default-features = false, features = [
