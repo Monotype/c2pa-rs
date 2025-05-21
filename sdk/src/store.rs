@@ -22,11 +22,6 @@ use std::{
 
 use async_generic::async_generic;
 use async_recursion::async_recursion;
-use c2pa_crypto::{
-    cose::{parse_cose_sign1, CertificateTrustPolicy, TimeStampStorage},
-    hash::sha256,
-};
-use c2pa_status_tracker::{log_item, ErrorBehavior, StatusTracker};
 use log::error;
 
 #[cfg(feature = "v1_api")]
@@ -58,6 +53,10 @@ use crate::{
     },
     cose_sign::{cose_sign, cose_sign_async},
     cose_validator::{verify_cose, verify_cose_async},
+    crypto::{
+        cose::{parse_cose_sign1, CertificateTrustPolicy, TimeStampStorage},
+        hash::sha256,
+    },
     dynamic_assertion::{
         AsyncDynamicAssertion, DynamicAssertion, DynamicAssertionContent, PartialClaim,
     },
@@ -73,9 +72,11 @@ use crate::{
         get_assetio_handler, is_bmff_format, load_jumbf_from_stream, object_locations_from_stream,
         save_jumbf_to_stream,
     },
+    log_item,
     manifest_store_report::ManifestStoreReport,
     salt::DefaultSalt,
     settings::get_settings_value,
+    status_tracker::{ErrorBehavior, StatusTracker},
     utils::{hash_utils::HashRange, io_utils::stream_len, patch::patch_bytes},
     validation_status, AsyncSigner, Signer,
 };
@@ -398,8 +399,8 @@ impl Store {
         let (label, instance) = Claim::assertion_label_from_link(uri);
         claim
             .get_claim_assertion(&label, instance)
-            .ok_or_else(|| Error::ClaimMissing {
-                label: label.to_owned(),
+            .ok_or_else(|| Error::AssertionMissing {
+                url: uri.to_owned(),
             })
     }
 
@@ -3864,7 +3865,6 @@ impl Store {
     /// data: jumbf data block
     pub fn load_ingredient_to_claim(
         claim: &mut Claim,
-        provenance_label: &str,
         data: &[u8],
         redactions: Option<Vec<String>>,
     ) -> Result<Store> {
@@ -3879,7 +3879,7 @@ impl Store {
             return Err(Error::OtherError("ingredient version too new".into()));
         }
 
-        claim.add_ingredient_data(provenance_label, store.claims.clone(), redactions)?;
+        claim.add_ingredient_data(pc.label(), store.claims.clone(), redactions)?;
         Ok(store)
     }
 }
@@ -3969,8 +3969,6 @@ pub mod tests {
 
     use std::{fs, io::Write};
 
-    use c2pa_crypto::raw_signature::SigningAlg;
-    use c2pa_status_tracker::{LogItem, StatusTracker};
     use memchr::memmem;
     use serde::Serialize;
     use sha2::{Digest, Sha256};
@@ -3980,8 +3978,10 @@ pub mod tests {
         assertion::AssertionJson,
         assertions::{labels::BOX_HASH, Action, Actions, BoxHash, Uuid},
         claim::AssertionStoreJsonFormat,
+        crypto::raw_signature::SigningAlg,
         hashed_uri::HashedUri,
         jumbf_io::{get_assetio_handler_from_path, update_file_jumbf},
+        status_tracker::{LogItem, StatusTracker},
         utils::{
             hash_utils::Hasher,
             patch::patch_file,
@@ -4372,9 +4372,7 @@ pub mod tests {
     #[test]
     #[cfg(feature = "file_io")]
     fn test_sign_with_expired_cert() {
-        use c2pa_crypto::raw_signature::SigningAlg;
-
-        use crate::create_signer;
+        use crate::{create_signer, crypto::raw_signature::SigningAlg};
 
         // test adding to actual image
         let ap = fixture_path("earth_apollo17.jpg");
@@ -5443,7 +5441,7 @@ pub mod tests {
         const REPLACE_BYTES: &[u8] =
             b"c2pa_manifest\xA3\x63url\x78\x4aself#jumbf=/c2pa/contentauth:urn:uuix:";
         let report = patch_and_report("CIE-sig-CA.jpg", SEARCH_BYTES, REPLACE_BYTES);
-        let errors: Vec<c2pa_status_tracker::LogItem> = report.filter_errors().cloned().collect();
+        let errors: Vec<crate::status_tracker::LogItem> = report.filter_errors().cloned().collect();
         assert_eq!(
             errors[0].validation_status.as_deref(),
             Some(validation_status::ASSERTION_HASHEDURI_MISMATCH)

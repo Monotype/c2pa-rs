@@ -684,7 +684,6 @@ pub mod tests {
     use std::num::Wrapping;
 
     use byteorder::{BigEndian, ByteOrder};
-    use claims::*;
     use tempfile::tempdir;
 
     use super::*;
@@ -1185,7 +1184,6 @@ pub mod tests {
     pub mod font_xmp_support_tests {
         use std::{fs::File, io::Cursor, path::Path};
 
-        use claims::*;
         use tempfile::tempdir;
 
         use super::{process_file_with_streams, remove_reference_from_stream};
@@ -1225,16 +1223,12 @@ pub mod tests {
             std::fs::copy(source, &output).unwrap();
 
             // Add a reference to the font
-            assert_ok!(font_xmp_support::add_reference_as_xmp_to_font(
-                &output,
-                "test data"
-            ));
+            assert!(font_xmp_support::add_reference_as_xmp_to_font(&output, "test data").is_ok());
 
             // Add again, with a new value
-            assert_ok!(font_xmp_support::add_reference_as_xmp_to_font(
-                &output,
-                "new test data"
-            ));
+            assert!(
+                font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data").is_ok()
+            );
             let otf_handler = SfntIO {};
             // Verify the reference was updated
             {
@@ -1248,11 +1242,11 @@ pub mod tests {
                 }
             }
             // Remove the reference
-            assert_ok!(remove_reference_from_font(&output));
+            assert!(remove_reference_from_font(&output).is_ok());
             // Verify the reference was removed
             {
                 let mut f: File = File::open(&output).unwrap();
-                assert_none!(otf_handler.read_xmp(&mut f));
+                assert!(otf_handler.read_xmp(&mut f).is_none());
             }
         }
 
@@ -1310,7 +1304,7 @@ pub mod tests {
                 0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
             ];
             let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-            assert_ok!(font_xmp_support::build_xmp_from_stream(&mut font_stream));
+            assert!(font_xmp_support::build_xmp_from_stream(&mut font_stream).is_ok());
         }
     }
 
@@ -1334,7 +1328,7 @@ pub mod tests {
             .write_cai(&mut stream, &mut output_stream, &data_to_write)
             .is_ok());
         // new data replaces the existing cai data
-        assert_ok!(output_stream.rewind()); // <- Why is this rewind needed? sfnt_io tests don't need to do this...
+        assert!(output_stream.rewind().is_ok()); // <- Why is this rewind needed? sfnt_io tests don't need to do this...
         let data_written = sfnt_io.read_cai(&mut output_stream).unwrap();
         assert_eq!(data_to_write, data_written);
     }
@@ -1361,7 +1355,7 @@ pub mod tests {
             .is_ok());
 
         // assert new cai data is present.
-        assert_ok!(output_stream.rewind());
+        assert!(output_stream.rewind().is_ok());
         let data_written = sfnt_io.read_cai(&mut output_stream).unwrap();
         assert_eq!(data_to_write, data_written);
     }
@@ -1455,7 +1449,7 @@ pub mod tests {
 
         // read back in asset, JumbfNotFound is expected since it was removed
         let sfnt_reader = sfnt_io.get_reader();
-        assert_ok!(output_stream.rewind());
+        assert!(output_stream.rewind().is_ok());
         match sfnt_reader.read_cai(&mut output_stream) {
             Err(Error::JumbfNotFound) => (),
             _ => unreachable!(),
@@ -1481,7 +1475,7 @@ pub mod tests {
 
         // read back in asset, JumbfNotFound is expected since it was removed
         let sfnt_reader = sfnt_io.get_reader();
-        assert_ok!(output_stream.rewind());
+        assert!(output_stream.rewind().is_ok());
         match sfnt_reader.read_cai(&mut output_stream) {
             Err(Error::JumbfNotFound) => (),
             _ => unreachable!(),
