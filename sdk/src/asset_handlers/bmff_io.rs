@@ -33,7 +33,7 @@ use crate::{
     utils::{
         hash_utils::{vec_compare, HashRange},
         io_utils::{stream_len, tempfile_builder, ReaderUtils},
-        xmp_inmemory_utils::{add_provenance, MIN_XMP},
+        xmp_inmemory_utils::{add_provenance, extract_remote_ref, MIN_XMP},
     },
 };
 
@@ -1249,7 +1249,13 @@ pub(crate) fn read_bmff_c2pa_boxes(mut reader: &mut dyn CAIRead) -> Result<C2PAB
 impl CAIReader for BmffIO {
     fn read_cai(&self, reader: &mut dyn CAIRead) -> Result<Vec<u8>> {
         let c2pa_boxes = read_bmff_c2pa_boxes(reader)?;
-
+        if c2pa_boxes.manifest_bytes.is_none() {
+            if let Some(xmp) = c2pa_boxes.xmp {
+                if let Some(remote_url) = extract_remote_ref(&xmp) {
+                    return Err(Error::RemoteManifestUrl(remote_url));
+                }
+            }
+        }
         c2pa_boxes.manifest_bytes.ok_or(Error::JumbfNotFound)
     }
 
