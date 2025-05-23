@@ -18,7 +18,7 @@ use std::{
 
 use c2pa_font_handler::{
     c2pa::{UpdatableC2PA, UpdateContentCredentialRecord},
-    chunks::ChunkReader,
+    chunks::{ChunkReader, ChunkTypeTrait},
     tag::FontTag,
     woff1::{font::Woff1Font, table::NamedTable},
     Font, FontDataRead, MutFontDataWrite,
@@ -586,18 +586,20 @@ impl AssetBoxHash for WoffIO {
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
         for position in positions {
-            let box_map = BoxMap {
-                names: vec![position
-                    .name_as_string()
-                    .map_err(FontError::from)
-                    .map_err(wrap_font_err)?],
-                alg: None,
-                hash: ByteBuf::from(Vec::new()),
-                pad: ByteBuf::from(Vec::new()),
-                range_start: position.offset(),
-                range_len: position.length(),
-            };
-            box_maps.push(box_map);
+            if position.chunk_type().should_hash() {
+                let box_map = BoxMap {
+                    names: vec![position
+                        .name_as_string()
+                        .map_err(FontError::from)
+                        .map_err(wrap_font_err)?],
+                    alg: None,
+                    hash: ByteBuf::from(Vec::new()),
+                    pad: ByteBuf::from(Vec::new()),
+                    range_start: position.offset(),
+                    range_len: position.length(),
+                };
+                box_maps.push(box_map);
+            }
         }
         Ok(box_maps)
     }
