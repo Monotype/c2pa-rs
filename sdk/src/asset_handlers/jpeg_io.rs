@@ -38,7 +38,7 @@ use crate::{
     error::{Error, Result},
     utils::{
         io_utils::tempfile_builder,
-        xmp_inmemory_utils::{add_provenance, MIN_XMP},
+        xmp_inmemory_utils::{add_provenance, extract_remote_ref, MIN_XMP},
     },
 };
 
@@ -234,6 +234,15 @@ impl CAIReader for JpegIO {
 
                                     manifest_store_cnt += 1;
                                 }
+                            }
+                        }
+                    }
+                    if buffer.is_empty() {
+                        // if we have XMP, in APP1, then we need to check for remote URL
+                        let mut segs = jpeg.segments_by_marker(markers::APP1);
+                        if let Some(xmp) = segs.find_map(extract_xmp).map(String::from) {
+                            if let Some(remote_url) = extract_remote_ref(&xmp) {
+                                return Err(Error::RemoteManifestUrl(remote_url));
                             }
                         }
                     }

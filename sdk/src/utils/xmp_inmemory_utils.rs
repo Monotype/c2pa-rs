@@ -186,6 +186,17 @@ pub fn extract_provenance(xmp: &str) -> Option<String> {
     extract_xmp_key(xmp, "dcterms:provenance")
 }
 
+/// extract the the provenance and return if it not a JUMBF URL
+pub fn extract_remote_ref(xmp: &str) -> Option<String> {
+    if let Some(url) = extract_provenance(xmp) {
+        if !url.starts_with("self#jumbf=") {
+            // filter out internal JUMBF URLs
+            return Some(url);
+        }
+    }
+    None
+}
+
 /// extract the xmpMM:InstanceID value from xmp
 fn extract_instance_id(xmp: &str) -> Option<String> {
     extract_xmp_key(xmp, "xmpMM:InstanceID")
