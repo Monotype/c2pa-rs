@@ -865,8 +865,8 @@ dependencies = [
 
 [[package]]
 name = "c2pa-font-handler"
-version = "0.4.2"
-source = "git+https://github.com/Monotype/c2pa-font-handler?branch=spike/C2PA-674/abilityToUpdateC2PA#aabeedad4c8994e45277d61c8db767690008e1b3"
+version = "0.4.3"
+source = "git+https://github.com/Monotype/c2pa-font-handler?tag=v0.4.3#f066403f7e125774f84a31bbdff407c6fdb09268"
 dependencies = [
  "anyhow",
  "byteorder",
