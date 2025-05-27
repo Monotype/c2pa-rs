@@ -1088,7 +1088,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(all(feature = "font_xmp"), not(target_os = "wasi"))]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::fs::File;
