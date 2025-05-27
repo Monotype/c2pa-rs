@@ -355,8 +355,11 @@ where
     source.rewind()?;
     // Load the font from the stream
     let mut font = Woff1Font::from_reader(source)?;
-    // Remove the table from the collection
-    font.remove_c2pa_record()?;
+    // Only attempt to remove if it is present.
+    if font.has_c2pa() {
+        // Remove the table from the collection
+        font.remove_c2pa_record()?;
+    }
     // And write it to the destination stream
     font.write(destination)?;
     Ok(())
@@ -1577,5 +1580,28 @@ pub mod tests {
             .unwrap();
         assert!(!object_locations.is_empty());
         assert_eq!(object_locations.len(), 13);
+    }
+
+    #[test]
+    fn test_remove_c2pa_from_stream_without_c2pa() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Open up the source WOFF file
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = BufReader::new(File::open(source).unwrap());
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        // Try to remove C2PA data from the WOFF file without any C2PA data
+        let result = woff_io.remove_cai_store_from_stream(&mut input_stream, &mut output_stream);
+        assert!(result.is_ok());
+        input_stream.seek(std::io::SeekFrom::Start(0)).unwrap();
+        output_stream.set_position(0);
+        // Compare the two
+        let mut input_data = Vec::new();
+        input_stream.read_to_end(&mut input_data).unwrap();
+        let mut output_data = Vec::new();
+        output_stream.read_to_end(&mut output_data).unwrap();
+        assert_eq!(input_data, output_data);
     }
 }
