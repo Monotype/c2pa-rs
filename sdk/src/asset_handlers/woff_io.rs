@@ -1019,6 +1019,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn remove_c2pa_manifest_store() {
@@ -1058,6 +1059,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn write_read_c2pa_from_font() {
@@ -1086,7 +1088,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp"), not(target_os = "wasi"))]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::fs::File;
@@ -1422,6 +1424,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn test_woff_io_embed_reference_unsupported_types() {
         // Create a WoffIO instance
         let woff_io = WoffIO::new("woff");
