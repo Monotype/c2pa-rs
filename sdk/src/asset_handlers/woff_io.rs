@@ -262,7 +262,7 @@ where
     let c2pa_record = UpdateContentCredentialRecord::builder()
         .with_active_manifest_uri(manifest_uri.to_string())
         .build();
-    let _ = font.update_c2pa_record(c2pa_record)?;
+    font.update_c2pa_record(c2pa_record)?;
     font.write(destination)?;
     Ok(())
 }
@@ -666,7 +666,7 @@ pub mod tests {
     use crate::utils::test::{fixture_path, temp_dir_path};
 
     #[test]
-    #[cfg(not(feature = "font_xmp"))]
+    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
     // Key to cryptic test comments.
     //
     //   IIP - Invalid/Ignored/Passthrough
@@ -717,7 +717,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "font_xmp"))]
+    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
     fn add_c2pa_ref_to_stream() {
         let c2pa_data = "test data";
 
@@ -760,7 +760,7 @@ pub mod tests {
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     #[test]
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     fn add_c2pa_ref() {
         use crate::utils::xmp_inmemory_utils::extract_provenance;
 
@@ -808,7 +808,7 @@ pub mod tests {
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
     #[test]
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     fn add_c2pa_ref_to_stream() {
         use crate::utils::xmp_inmemory_utils::extract_provenance;
 
@@ -945,6 +945,7 @@ pub mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn get_object_locations() {
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
         let source = fixture_path("font.woff");
@@ -1045,10 +1046,9 @@ pub mod tests {
         // Which should work out to be the same in the end
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
 
-        match woff_io.read_cai_store(&output) {
-            Err(Error::JumbfNotFound) => panic!("Should contain C2PA data"),
-            _ => (),
-        };
+        if let Err(Error::JumbfNotFound) = woff_io.read_cai_store(&output) {
+            panic!("Should contain C2PA data");
+        }
 
         woff_io.remove_cai_store(&output).unwrap();
         match woff_io.read_cai_store(&output) {
@@ -1100,6 +1100,7 @@ pub mod tests {
         };
 
         #[test]
+        #[cfg(not(target_os = "wasi"))]
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
