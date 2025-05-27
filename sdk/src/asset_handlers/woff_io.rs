@@ -16,17 +16,22 @@ use std::{
     path::*,
 };
 
-use c2pa_font_handler::{chunks::ChunkReader, woff1::font::Woff1Font, FontDataRead};
+use c2pa_font_handler::{
+    c2pa::{C2PASupport, ContentCredentialRecord, UpdatableC2PA, UpdateContentCredentialRecord},
+    chunks::{ChunkReader, ChunkTypeTrait},
+    tag::FontTag,
+    woff1::{font::Woff1Font, table::NamedTable},
+    Font, FontDataRead, MutFontDataWrite,
+};
 use serde_bytes::ByteBuf;
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use crate::{
     assertions::BoxMap,
     asset_handlers::font_io::*,
     asset_io::{
-        AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashObjectPositions,
-        RemoteRefEmbed, RemoteRefEmbedType,
+        AssetBoxHash, AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashBlockObjectType,
+        HashObjectPositions, RemoteRefEmbed, RemoteRefEmbedType,
     },
     error::Error,
 };
@@ -63,6 +68,7 @@ mod font_xmp_support {
         document_id: Option<String>,
         instance_id: Option<String>,
     ) -> Result<String> {
+        use uuid::Uuid;
         // Start with the default key.
         let xmp = MIN_XMP.to_string();
 
@@ -214,24 +220,21 @@ fn add_c2pa_to_font(font_path: &Path, manifest_store_data: &[u8]) -> Result<()> 
 /// destination stream.
 fn add_c2pa_to_stream<TSource, TDest>(
     source: &mut TSource,
-    _destination: &mut TDest,
-    _manifest_store_data: &[u8],
+    destination: &mut TDest,
+    manifest_store_data: &[u8],
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    todo!("C2PA record update not supported in crate yet");
-    /*
     let mut font = Woff1Font::from_reader(source)?;
     let c2pa_record = UpdateContentCredentialRecord::builder()
         .with_content_credential(manifest_store_data.to_vec())
         .build();
-    font.update_c2pa_record(c2pa_record);
+    font.update_c2pa_record(c2pa_record)?;
     font.write(destination)?;
     Ok(())
-    */
 }
 
 /// Adds the manifest URI reference to the font at the given path.
@@ -247,24 +250,21 @@ fn add_reference_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
 /// the destination stream.
 fn add_reference_to_stream<TSource, TDest>(
     source: &mut TSource,
-    _destination: &mut TDest,
-    _manifest_uri: &str,
+    destination: &mut TDest,
+    manifest_uri: &str,
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    todo!("C2PA record update not supported in crate yet");
-    /*
     let mut font = Woff1Font::from_reader(source)?;
     let c2pa_record = UpdateContentCredentialRecord::builder()
         .with_active_manifest_uri(manifest_uri.to_string())
         .build();
-    font.update_c2pa_record(c2pa_record);
+    font.update_c2pa_record(c2pa_record)?;
     font.write(destination)?;
     Ok(())
-    */
 }
 
 /// Adds the required chunks to the source stream for supporting C2PA, if the
@@ -276,22 +276,19 @@ where
 /// to the caller.
 #[allow(dead_code)]
 fn add_required_chunks_to_stream<TReader, TWriter>(
-    _input_stream: &mut TReader,
-    _output_stream: &mut TWriter,
+    input_stream: &mut TReader,
+    output_stream: &mut TWriter,
 ) -> Result<()>
 where
     TReader: Read + Seek + ?Sized,
     TWriter: Read + Seek + ?Sized + Write,
 {
-    todo!("C2PA record update not supported in crate yet");
-    /*
     let mut font = Woff1Font::from_reader(input_stream)?;
     if !font.has_c2pa() {
         font.add_c2pa_record(ContentCredentialRecord::default())?;
     }
     font.write(output_stream)?;
     Ok(())
-    */
 }
 
 /// Opens a BufReader for the given file path
@@ -349,23 +346,23 @@ fn remove_c2pa_from_font(font_path: &Path) -> Result<()> {
 /// destination.
 fn remove_c2pa_from_stream<TSource, TDest>(
     source: &mut TSource,
-    _destination: &mut TDest,
+    destination: &mut TDest,
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    todo!("C2PA record update not supported in crate yet");
-    /*
     // Load the font from the stream
     let mut font = Woff1Font::from_reader(source)?;
-    // Remove the table from the collection
-    font.remove_c2pa_record()?;
+    // Only attempt to remove if it is present.
+    if font.has_c2pa() {
+        // Remove the table from the collection
+        font.remove_c2pa_record()?;
+    }
     // And write it to the destination stream
     font.write(destination)?;
     Ok(())
-    */
 }
 
 /// Removes the reference to the active manifest from the source stream, writing
@@ -374,15 +371,13 @@ where
 #[allow(dead_code)]
 fn remove_reference_from_stream<TSource, TDest>(
     source: &mut TSource,
-    _destination: &mut TDest,
+    destination: &mut TDest,
 ) -> Result<()>
 where
     TSource: Read + Seek + ?Sized,
     TDest: Write + ?Sized,
 {
     source.rewind()?;
-    todo!("C2PA record update not supported in crate yet");
-    /*
     let mut font = Woff1Font::from_reader(source)?;
     let update_record = UpdateContentCredentialRecord::builder()
         .without_active_manifest_uri()
@@ -390,7 +385,6 @@ where
     font.update_c2pa_record(update_record)?;
     font.write(destination)?;
     Ok(())
-    */
 }
 
 /// Gets a collection of positions of hash objects from the reader which are to
@@ -402,12 +396,10 @@ where
     // The SDK doesn't necessarily promise the input stream is rewound, so do so
     // now to make sure we can parse the font.
     reader.rewind()?;
-    todo!()
-    /*
     // We must take into account a font that may not have a C2PA table in it at
     // this point, adding any required chunks needed for C2PA to work correctly.
     let output_vec: Vec<u8> = Vec::new();
-    let mut output_stream = Cursor::new(output_vec);
+    let mut output_stream = std::io::Cursor::new(output_vec);
     add_required_chunks_to_stream(reader, &mut output_stream)?;
     output_stream.rewind()?;
 
@@ -417,10 +409,21 @@ where
     // Which will be built up from the different chunks from the file
     let chunk_positions = Woff1Font::get_chunk_positions(&mut output_stream)?;
     for chunk_position in chunk_positions {
-        todo!()
+        if chunk_position.chunk_type().should_hash() {
+            positions.push(HashObjectPositions {
+                offset: chunk_position.offset(),
+                length: chunk_position.length(),
+                htype: HashBlockObjectType::Other,
+            })
+        } else {
+            positions.push(HashObjectPositions {
+                offset: chunk_position.offset(),
+                length: chunk_position.length(),
+                htype: HashBlockObjectType::Cai,
+            })
+        }
     }
     Ok(positions)
-    */
 }
 
 /// Reads the `C2PA` font table from the data stream, returning the `C2PA` font
@@ -429,37 +432,37 @@ fn read_c2pa_from_stream<T: Read + Seek + ?Sized>(
     reader: &mut T,
 ) -> Result<c2pa_font_handler::sfnt::table::TableC2PA> {
     // Convert all errors from the reader to a deserialization error.
-    let _woff = Woff1Font::from_reader(reader)?;
-    todo!("C2PA record update not supported in crate yet; will be updated to WOFF1 C2PA table");
+    let woff = Woff1Font::from_reader(reader)?;
+    // Convert all errors from the reader to a deserialization error.
+    match woff.table(&FontTag::C2PA) {
+        None => Err(FontError::JumbfNotFound),
+        // If there is, return its `manifest_store` value.
+        Some(NamedTable::C2PA(c2pa)) => Ok((*c2pa).clone()),
+        // Yikes! Non-C2PA table with C2PA tag!
+        Some(_) => Err(FontError::InvalidNamedTable("Non-C2PA table with C2PA tag")),
+    }
 }
 
 /// Main WOFF IO feature.
 pub(crate) struct WoffIO {}
 
-impl WoffIO {
-    #[allow(dead_code)]
-    pub(crate) fn default_document_id() -> String {
-        format!("fontsoftware:did:{}", Uuid::new_v4())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn default_instance_id() -> String {
-        format!("fontsoftware:iid:{}", Uuid::new_v4())
-    }
-}
-
 /// WOFF implementation of the CAILoader trait.
 impl CAIReader for WoffIO {
-    fn read_cai(&self, _asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
-        todo!("C2PA record update not supported in crate yet");
-        /*
-        let mut font = Woff1Font::from_reader(asset_reader)?;
-        if let Some(record) = font.get_c2pa_record() {
-            Ok(record.get_content_credential().to_vec())
-        } else {
-            Err(FontError::JumbfNotFound.into())
+    fn read_cai(&self, asset_reader: &mut dyn CAIRead) -> crate::error::Result<Vec<u8>> {
+        let c2pa_table = read_c2pa_from_stream(asset_reader).map_err(|e| match e {
+            FontError::JumbfNotFound => Error::JumbfNotFound,
+            _ => wrap_font_err(e),
+        })?;
+        match c2pa_table.manifest_store {
+            Some(manifest_store) => Ok(manifest_store.to_vec()),
+            None => {
+                if let Some(uri) = c2pa_table.active_manifest_uri {
+                    Err(Error::RemoteManifestUrl(uri))
+                } else {
+                    Err(Error::JumbfNotFound)
+                }
+            }
         }
-        */
     }
 
     fn read_xmp(&self, asset_reader: &mut dyn CAIRead) -> Option<String> {
@@ -560,6 +563,10 @@ impl AssetIO for WoffIO {
 // Implementation for the asset box hash trait for general box hash support
 impl AssetBoxHash for WoffIO {
     fn get_box_map(&self, input_stream: &mut dyn CAIRead) -> crate::error::Result<Vec<BoxMap>> {
+        // The SDK doesn't necessarily promise the input stream is rewound, so do so
+        // now to make sure we can parse the font.
+        input_stream.rewind()?;
+
         // Get the chunk positions
         let positions = Woff1Font::get_chunk_positions(input_stream)
             .map_err(FontError::from)
@@ -567,18 +574,20 @@ impl AssetBoxHash for WoffIO {
         // Create a box map vector to map the chunk positions to
         let mut box_maps = Vec::<BoxMap>::new();
         for position in positions {
-            let box_map = BoxMap {
-                names: vec![position
-                    .name_as_string()
-                    .map_err(FontError::from)
-                    .map_err(wrap_font_err)?],
-                alg: None,
-                hash: ByteBuf::from(Vec::new()),
-                pad: ByteBuf::from(Vec::new()),
-                range_start: position.offset(),
-                range_len: position.length(),
-            };
-            box_maps.push(box_map);
+            if position.chunk_type().should_hash() {
+                let box_map = BoxMap {
+                    names: vec![position
+                        .name_as_string()
+                        .map_err(FontError::from)
+                        .map_err(wrap_font_err)?],
+                    alg: None,
+                    hash: ByteBuf::from(Vec::new()),
+                    pad: ByteBuf::from(Vec::new()),
+                    range_start: position.offset(),
+                    range_len: position.length(),
+                };
+                box_maps.push(box_map);
+            }
         }
         Ok(box_maps)
     }
@@ -656,9 +665,8 @@ pub mod tests {
     use super::*;
     use crate::utils::test::{fixture_path, temp_dir_path};
 
-    #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(not(feature = "font_xmp"))]
+    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
     // Key to cryptic test comments.
     //
     //   IIP - Invalid/Ignored/Passthrough
@@ -708,11 +716,51 @@ pub mod tests {
         };
     }
 
+    #[test]
+    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
+    fn add_c2pa_ref_to_stream() {
+        let c2pa_data = "test data";
+
+        // Need WOFF 1 test fixture
+        let source = fixture_path("font.woff");
+        let mut source_stream = BufReader::new(File::open(source).unwrap());
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.woff");
+        let mut output_stream = File::create(&output).unwrap();
+
+        // Create our WoffIO asset handler for testing
+        let woff_io = WoffIO {};
+
+        let expected_manifest_uri = "https://test/ref";
+
+        woff_io
+            .embed_reference_to_stream(
+                &mut source_stream,
+                &mut output_stream,
+                crate::asset_io::RemoteRefEmbedType::Xmp(expected_manifest_uri.to_owned()),
+            )
+            .unwrap();
+        // Save the C2PA manifest store to the file
+        woff_io
+            .save_cai_store(&output, c2pa_data.as_bytes())
+            .unwrap();
+        // Loading it back from the same output file
+        let loaded_c2pa = woff_io.read_cai_store(&output).unwrap();
+        // Which should work out to be the same in the end
+        assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
+
+        match read_reference_from_font(&output) {
+            Ok(Some(manifest_uri)) => assert_eq!(expected_manifest_uri, manifest_uri),
+            _ => panic!("Expected to read a reference from the font file"),
+        };
+    }
+
     /// Verifies the adding of a remote C2PA manifest reference as XMP works as
     /// expected.
-    #[ignore] // Need WOFF 1 test fixture
     #[test]
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     fn add_c2pa_ref() {
         use crate::utils::xmp_inmemory_utils::extract_provenance;
 
@@ -736,6 +784,54 @@ pub mod tests {
         woff_io
             .embed_reference(
                 &output,
+                crate::asset_io::RemoteRefEmbedType::Xmp(expected_manifest_uri.to_owned()),
+            )
+            .unwrap();
+        // Save the C2PA manifest store to the file
+        woff_io
+            .save_cai_store(&output, c2pa_data.as_bytes())
+            .unwrap();
+        // Loading it back from the same output file
+        let loaded_c2pa = woff_io.read_cai_store(&output).unwrap();
+        // Which should work out to be the same in the end
+        assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
+
+        match read_reference_from_font(&output) {
+            Ok(Some(manifest_uri)) => {
+                let provenance = extract_provenance(manifest_uri.as_str()).unwrap();
+                assert_eq!(expected_manifest_uri, provenance);
+            }
+            _ => panic!("Expected to read a reference from the font file"),
+        };
+    }
+
+    /// Verifies the adding of a remote C2PA manifest reference as XMP works as
+    /// expected.
+    #[test]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
+    fn add_c2pa_ref_to_stream() {
+        use crate::utils::xmp_inmemory_utils::extract_provenance;
+
+        let c2pa_data = "test data";
+
+        // Load the basic WOFF 1 test fixture
+        let source = fixture_path("font.woff");
+        let mut source_stream = BufReader::new(File::open(source).unwrap());
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.woff");
+        let mut output_stream = File::create(&output).unwrap();
+
+        // Create our WoffIO asset handler for testing
+        let woff_io = WoffIO {};
+
+        let expected_manifest_uri = "https://test/ref";
+
+        woff_io
+            .embed_reference_to_stream(
+                &mut source_stream,
+                &mut output_stream,
                 crate::asset_io::RemoteRefEmbedType::Xmp(expected_manifest_uri.to_owned()),
             )
             .unwrap();
@@ -848,8 +944,8 @@ pub mod tests {
         assert_eq!(7, tbl_chunk.length());
     }
 
-    #[ignore] // Need WOFF 1 test fixture
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     fn get_object_locations() {
         // Load the basic WOFF 1 test fixture - C2PA-XYZ - Select WOFF 1 test fixture
         let source = fixture_path("font.woff");
@@ -863,19 +959,15 @@ pub mod tests {
 
         // Create our WoffIO asset handler for testing
         let woff_io = WoffIO {};
-        // The font has 11 records, 11 tables, 1 table directory
-        // but the head table will expand from 1 to 3 positions bringing it to 25
-        // And then the required C2PA chunks will be added, bringing it to 27
+        // The font has header, table directory, and 10 tables (12 total)
+        // And then the required C2PA chunks will be added, bringing it to 13
         let object_positions = woff_io.get_object_locations(&output).unwrap();
-        assert_eq!(27, object_positions.len());
+        assert_eq!(13, object_positions.len());
     }
 
     #[test]
-    #[ignore]
     /// Verify the C2PA table data can be read from a font stream
     fn reads_c2pa_table_from_stream() {
-        todo!("C2PA record update not supported in crate yet");
-        /*
         let font_data = vec![
             // WOFFHeader
             0x77, 0x4f, 0x46, 0x46, // wOFF
@@ -922,13 +1014,12 @@ pub mod tests {
         // Verify the embedded C2PA data as well
         assert_eq!(
             Some(vec![0x74, 0x65, 0x73, 0x74, 0x2d, 0x64, 0x61, 0x74, 0x61].as_ref()),
-            c2pa_data.get_manifest_store()
+            c2pa_data.manifest_store.as_ref()
         );
-        */
     }
 
-    #[ignore] // Need WOFF 1 test fixture
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn remove_c2pa_manifest_store() {
@@ -956,6 +1047,10 @@ pub mod tests {
         // Which should work out to be the same in the end
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
 
+        if let Err(Error::JumbfNotFound) = woff_io.read_cai_store(&output) {
+            panic!("Should contain C2PA data");
+        }
+
         woff_io.remove_cai_store(&output).unwrap();
         match woff_io.read_cai_store(&output) {
             Err(Error::JumbfNotFound) => (),
@@ -963,8 +1058,8 @@ pub mod tests {
         };
     }
 
-    #[ignore] // Need WOFF 1 test fixture
     #[test]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the ability to write/read C2PA manifest store data to/from an
     /// OpenType font
     fn write_read_c2pa_from_font() {
@@ -993,7 +1088,7 @@ pub mod tests {
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
     }
 
-    #[cfg(feature = "font_xmp")]
+    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
     #[cfg(test)]
     pub mod font_xmp_support_tests {
         use std::fs::File;
@@ -1006,8 +1101,8 @@ pub mod tests {
             utils::{test::temp_dir_path, xmp_inmemory_utils::extract_provenance},
         };
 
-        #[ignore] // Need WOFF 1 test fixture
         #[test]
+        #[cfg(not(target_os = "wasi"))]
         /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
         /// able to add a reference to as XMP when there is already data in the
         /// reference field.
@@ -1049,10 +1144,7 @@ pub mod tests {
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
         #[test]
-        #[ignore]
         fn build_xmp_from_stream_without_reference() {
-            todo!("C2PA record update not supported in crate yet");
-            /*
             let font_data = vec![
                 // WOFFHeader
                 0x77, 0x4f, 0x46, 0x46, // wOFF
@@ -1076,23 +1168,19 @@ pub mod tests {
                 0x6c, 0x61, 0x73, 0x61, // Major / Minor versions
                 0x67, 0x6e, 0x61,
             ];
-            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+            let mut font_stream: std::io::Cursor<&[u8]> = std::io::Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
                 Ok(_) => panic!("Did not expect an OK result, as data is missing"),
-                Err(FontError::XmpNotFound) => {}
+                Err(super::FontError::XmpNotFound) => {}
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
-            */
         }
 
         /// Verifies the `font_xmp_support::build_xmp_from_stream` method
         /// correctly returns error for NotFound when there is no data in the
         /// stream to return.
         #[test]
-        #[ignore]
         fn build_xmp_from_stream_with_reference_not_xmp() {
-            todo!("C2PA record update not supported in crate yet");
-            /*
             let font_data = vec![
                 // WOFFHeader
                 0x77, 0x4f, 0x46, 0x46, // wOFF
@@ -1132,20 +1220,20 @@ pub mod tests {
                 0x2d, 0x64, 0x61, 0x74, // manifest store data, cont'd
                 0x61, // manifest store data, cont'd
             ];
-            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
+            let mut font_stream: std::io::Cursor<&[u8]> = std::io::Cursor::<&[u8]>::new(&font_data);
             match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
                 Ok(_xmp_data) => {}
                 Err(_) => panic!("Unexpected error when building XMP data"),
             }
-            */
         }
     }
 
-    #[test]
+    /*
     #[ignore]
+    // There is a bug in the c2pa-font-handler where the WOFF header is not updated
+    // C2PA-695 should address this
+    #[test]
     fn add_required_chunks_to_stream_minimal() {
-        todo!("C2PA record update not supported in crate yet");
-        /*
         let min_font_data = vec![
             0x77, 0x4f, 0x46, 0x46, // wOFF
             0x72, 0x73, 0x74, 0x75, // flavor (IIP)
@@ -1188,18 +1276,15 @@ pub mod tests {
         let mut the_reader: Cursor<&[u8]> = Cursor::<&[u8]>::new(&min_font_data);
         let mut the_writer = Cursor::new(Vec::new());
 
-        assert_ok!(add_required_chunks_to_stream(
-            &mut the_reader,
-            &mut the_writer
-        ));
+        assert!(add_required_chunks_to_stream(&mut the_reader, &mut the_writer).is_ok());
 
         // Write into the "file" and seek to the beginning
         assert_eq!(
             expected_min_font_data_min_c2pa,
             the_writer.get_ref().as_slice()
         );
-        */
     }
+    */
 
     #[test]
     fn get_chunk_positions_minimal() {
@@ -1231,5 +1316,296 @@ pub mod tests {
             *directory_posn,
             ChunkPosition::new(44, 0, *b"\x00\x00\x01D", WoffChunkType::DirectoryEntry,)
         );
+    }
+
+    #[test]
+    #[cfg(all(not(target_os = "wasi"), feature = "font_xmp"))]
+    /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
+    /// able to add a reference to as XMP when there is already data in the
+    /// reference field.
+    fn add_reference_as_xmp_to_stream_with_data() {
+        use crate::utils::xmp_inmemory_utils::extract_provenance;
+        // Load the basic OTF test fixture
+        let source = crate::utils::test::fixture_path("font.woff");
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.woff");
+
+        // Copy the source to the output
+        std::fs::copy(source, &output).unwrap();
+
+        // Add a reference to the font
+        assert!(font_xmp_support::add_reference_as_xmp_to_font(&output, "test data").is_ok());
+
+        // Add again, with a new value
+        assert!(font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data").is_ok());
+        let otf_handler = WoffIO {};
+        // Verify the reference was updated
+        {
+            let mut f: File = File::open(&output).unwrap();
+            match otf_handler.read_xmp(&mut f) {
+                Some(xmp_data_str) => {
+                    let xmp_value = extract_provenance(xmp_data_str.as_str()).unwrap();
+                    assert_eq!("new test data", xmp_value);
+                }
+                None => panic!("Expected to read XMP from the resource."),
+            }
+        }
+        // Remove the reference
+        assert!(remove_reference_from_font(&output).is_ok());
+        // Verify the reference was removed
+        {
+            let mut f: File = File::open(&output).unwrap();
+            assert!(otf_handler.read_xmp(&mut f).is_none());
+        }
+    }
+
+    /// Remove any remote manifest reference from any `C2PA` font table which
+    /// exists in the given font file (specified by path).
+    #[allow(dead_code)]
+    fn remove_reference_from_font(font_path: &Path) -> core::result::Result<(), FontError> {
+        process_file_with_streams(font_path, move |input_stream, temp_file| {
+            remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_woff_io_asset_io() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+        assert_eq!(
+            &[
+                "application/font-woff",
+                "application/x-font-woff",
+                "font/woff",
+                "woff",
+            ],
+            woff_io.supported_types()
+        );
+        assert!(woff_io.get_writer("woff").is_some());
+        assert!(woff_io.remote_ref_writer_ref().is_some());
+        assert!(woff_io.asset_box_hash_ref().is_some());
+        let _ = woff_io.get_reader();
+    }
+
+    #[test]
+    fn test_woff_write_cai() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Create a temporary output for the file
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = File::open(source).unwrap();
+        // Write the C2PA data to the font
+        let c2pa_data = "test data";
+        assert!(woff_io
+            .write_cai(&mut input_stream, &mut output_stream, c2pa_data.as_bytes())
+            .is_ok());
+
+        // Read the C2PA data back from the font
+        output_stream.set_position(0);
+        let read_data = woff_io.read_cai(&mut output_stream).unwrap();
+        assert_eq!(c2pa_data.as_bytes(), read_data);
+        let mut input_stream = output_stream;
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+        woff_io
+            .remove_cai_store_from_stream(&mut input_stream, &mut output_stream)
+            .unwrap();
+        output_stream.set_position(0);
+        let read_data = woff_io.read_cai(&mut output_stream);
+        assert!(read_data.is_err());
+        let result = read_data.unwrap_err();
+        println!("Error: {:?}", result);
+        assert!(matches!(result, Error::JumbfNotFound));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "wasi"))]
+    fn test_woff_io_embed_reference_unsupported_types() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Create a temporary output for the file
+        let temp_dir = tempdir().unwrap();
+        let output = temp_dir_path(&temp_dir, "test.woff");
+
+        // Try to embed a reference with an unsupported type
+        let unsupported_type = RemoteRefEmbedType::StegoB(vec![1]);
+        let result = woff_io.embed_reference(output.as_path(), unsupported_type);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+
+        let unsupported_type = RemoteRefEmbedType::StegoS("unsupported".to_string());
+        let result = woff_io.embed_reference(output.as_path(), unsupported_type);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+
+        let unsupported_type = RemoteRefEmbedType::Watermark("unsupported".to_string());
+        let result = woff_io.embed_reference(output.as_path(), unsupported_type);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+    }
+
+    #[test]
+    fn test_woff_io_embed_reference_to_stream_unsupported_types() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        let mut input_stream = Cursor::new(Vec::<u8>::new());
+        // Create a temporary output for the file
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        // Try to embed a reference with an unsupported type
+        let unsupported_type = RemoteRefEmbedType::StegoB(vec![1]);
+        let result = woff_io.embed_reference_to_stream(
+            &mut input_stream,
+            &mut output_stream,
+            unsupported_type,
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+
+        let unsupported_type = RemoteRefEmbedType::StegoS("unsupported".to_string());
+        let result = woff_io.embed_reference_to_stream(
+            &mut input_stream,
+            &mut output_stream,
+            unsupported_type,
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+
+        let unsupported_type = RemoteRefEmbedType::Watermark("unsupported".to_string());
+        let result = woff_io.embed_reference_to_stream(
+            &mut input_stream,
+            &mut output_stream,
+            unsupported_type,
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::UnsupportedType));
+    }
+
+    #[test]
+    fn test_woff_io_get_box_map() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Open up the source WOFF file
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = File::open(source).unwrap();
+
+        // Get the box map from the WoffIO instance
+        let box_map = woff_io.get_box_map(&mut input_stream).unwrap();
+        assert!(!box_map.is_empty());
+        assert_eq!(box_map.len(), 10);
+    }
+
+    #[test]
+    fn test_woff_io_read_cai_with_just_remote_ref() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Open up the source WOFF file
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = File::open(source).unwrap();
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+        woff_io
+            .embed_reference_to_stream(
+                &mut input_stream,
+                &mut output_stream,
+                RemoteRefEmbedType::Xmp("test data".to_string()),
+            )
+            .unwrap();
+        output_stream.set_position(0);
+
+        // Read the CAI data from the WOFF file
+        let result = woff_io.read_cai(&mut output_stream);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::RemoteManifestUrl(_)));
+    }
+
+    #[test]
+    fn test_woff_io_read_cai_with_nothing() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        // Read the CAI data from the WOFF file
+        let result = woff_io.read_cai(&mut output_stream);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(
+            error,
+            Error::FontError(FontError::C2paFontHandlerIoError(_))
+        ));
+    }
+
+    #[test]
+    fn test_woff_io_read_cai_with_no_c2pa() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = File::open(source).unwrap();
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        add_required_chunks_to_stream(&mut input_stream, &mut output_stream).unwrap();
+        output_stream.set_position(0);
+        // Read the CAI data from the WOFF file
+        let result = woff_io.read_cai(&mut output_stream);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::JumbfNotFound));
+    }
+
+    #[test]
+    fn test_get_object_locations_from_stream() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Open up the source WOFF file
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = File::open(source).unwrap();
+
+        // Get the object locations from the WOFF file
+        let object_locations = woff_io
+            .get_object_locations_from_stream(&mut input_stream)
+            .unwrap();
+        assert!(!object_locations.is_empty());
+        assert_eq!(object_locations.len(), 13);
+    }
+
+    #[test]
+    fn test_remove_c2pa_from_stream_without_c2pa() {
+        // Create a WoffIO instance
+        let woff_io = WoffIO::new("woff");
+
+        // Open up the source WOFF file
+        let source = crate::utils::test::fixture_path("font.woff");
+        let mut input_stream = BufReader::new(File::open(source).unwrap());
+        let mut output_stream = Cursor::new(Vec::<u8>::new());
+
+        // Try to remove C2PA data from the WOFF file without any C2PA data
+        let result = woff_io.remove_cai_store_from_stream(&mut input_stream, &mut output_stream);
+        assert!(result.is_ok());
+        input_stream.seek(std::io::SeekFrom::Start(0)).unwrap();
+        output_stream.set_position(0);
+        // Compare the two
+        let mut input_data = Vec::new();
+        input_stream.read_to_end(&mut input_data).unwrap();
+        let mut output_data = Vec::new();
+        output_stream.read_to_end(&mut output_data).unwrap();
+        assert_eq!(input_data, output_data);
     }
 }

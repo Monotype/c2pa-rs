@@ -865,12 +865,13 @@ dependencies = [
 
 [[package]]
 name = "c2pa-font-handler"
-version = "0.4.0"
-source = "git+https://github.com/Monotype/c2pa-font-handler?tag=v0.4.0#d08b9c153f71ae291e5ac0a0f0319bfff1b32139"
+version = "0.4.3"
+source = "git+https://github.com/Monotype/c2pa-font-handler?tag=v0.4.3#f066403f7e125774f84a31bbdff407c6fdb09268"
 dependencies = [
  "anyhow",
  "byteorder",
  "bytes",
+ "flate2",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -1040,6 +1041,15 @@ name = "clap_lex"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
+
+[[package]]
+name = "cmake"
+version = "0.1.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "color_quant"
@@ -1721,6 +1731,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ced92e76e966ca2fd84c8f7aa01a4aea65b0eb6648d72f7c8f3e2764a67fece"
 dependencies = [
  "crc32fast",
+ "libz-ng-sys",
  "libz-rs-sys",
  "miniz_oxide",
 ]
@@ -2730,6 +2741,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0ff37bd590ca25063e35af745c343cb7a0271906fb7b37e4813e8f79f00268d"
 dependencies = [
  "bitflags 2.9.1",
+ "libc",
+]
+
+[[package]]
+name = "libz-ng-sys"
+version = "1.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7118c2c2a3c7b6edc279a8b19507672b9c4d716f95e671172dfa4e23f9fd824"
+dependencies = [
+ "cmake",
  "libc",
 ]
 
