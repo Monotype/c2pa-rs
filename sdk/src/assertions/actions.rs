@@ -239,6 +239,13 @@ impl Action {
         self.changes.as_deref()
     }
 
+    /// Gets the description of the action.
+    ///
+    /// This is only present in the `c2pa.actions.v2` assertion, in other words if `is_v2()` is true.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
     /// Returns the additional parameters for this action.
     ///
     /// These vary by the type of action.
@@ -410,6 +417,15 @@ impl Action {
     /// See <https://c2pa.org/specifications/specifications/1.0/specs/C2PA_Specification.html#_reason>.
     pub fn set_reason<S: Into<String>>(mut self, reason: S) -> Self {
         self.reason = Some(reason.into());
+        self
+    }
+
+    /// Sets a description for the action.
+    ///
+    /// This is only present in the `c2pa.actions.v2` assertion.
+    /// See <https://spec.c2pa.org/specifications/specifications/1.4/specs/C2PA_Specification.html#_actions>.
+    pub fn set_description<S: Into<String>>(mut self, description: S) -> Self {
+        self.description = Some(description.into());
         self
     }
 
