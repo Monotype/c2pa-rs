@@ -239,9 +239,9 @@ impl Action {
         self.changes.as_deref()
     }
 
-    /// Gets the description of the action.
+    /// Returns the description of the action.
     ///
-    /// This is only present in the `c2pa.actions.v2` assertion, in other words if `is_v2()` is true.
+    /// This field is only applicable to the v2 assertion.
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
@@ -396,6 +396,15 @@ impl Action {
         self
     }
 
+    /// Sets the description of the action.
+    ///
+    /// This is only present in the v2 actions assertion.
+    /// See <https://spec.c2pa.org/specifications/specifications/1.4/specs/C2PA_Specification.html#_actions>
+    pub fn set_description<S: Into<String>>(mut self, description: S) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
     /// Set a digitalSourceType URI as defined at <https://cv.iptc.org/newscodes/digitalsourcetype/>.
     pub fn set_source_type<S: Into<String>>(mut self, uri: S) -> Self {
         self.source_type = Some(uri.into());
@@ -417,15 +426,6 @@ impl Action {
     /// See <https://c2pa.org/specifications/specifications/1.0/specs/C2PA_Specification.html#_reason>.
     pub fn set_reason<S: Into<String>>(mut self, reason: S) -> Self {
         self.reason = Some(reason.into());
-        self
-    }
-
-    /// Sets a description for the action.
-    ///
-    /// This is only present in the `c2pa.actions.v2` assertion.
-    /// See <https://spec.c2pa.org/specifications/specifications/1.4/specs/C2PA_Specification.html#_actions>.
-    pub fn set_description<S: Into<String>>(mut self, description: S) -> Self {
-        self.description = Some(description.into());
         self
     }
 
@@ -708,7 +708,8 @@ pub mod tests {
                             ..Default::default()
                         }],
                         ..Default::default()
-                    }),
+                    })
+                    .set_description("Apply a gaussian blur to the image"),
             )
             .add_metadata(
                 Metadata::new()
@@ -743,6 +744,11 @@ pub mod tests {
         assert_eq!(
             result.metadata.unwrap().date_time(),
             original.metadata.unwrap().date_time()
+        );
+        assert!(result.actions[0].description().is_none());
+        assert_eq!(
+            result.actions[1].description(),
+            Some("Apply a gaussian blur to the image")
         );
     }
 
