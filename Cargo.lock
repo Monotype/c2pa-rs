@@ -761,7 +761,6 @@ dependencies = [
  "const-oid",
  "conv",
  "coset",
- "cosmic-text",
  "der",
  "ecdsa",
  "ed25519-dalek",
@@ -807,7 +806,6 @@ dependencies = [
  "rasn-pkix",
  "regex",
  "reqwest",
- "resvg",
  "riff",
  "ring",
  "rsa",
@@ -824,13 +822,10 @@ dependencies = [
  "sha2",
  "spki",
  "static-iref",
- "svg 0.17.0",
  "tempfile",
  "thiserror 2.0.12",
- "tiny-skia",
  "tokio",
  "treeline",
- "unicode-script",
  "ureq",
  "url",
  "uuid",
@@ -866,18 +861,20 @@ dependencies = [
 [[package]]
 name = "c2pa-font-handler"
 version = "0.5.0"
-source = "git+https://github.com/Monotype/c2pa-font-handler?tag=v0.5.0#99cda09066c961aec4b5ff9693f7ad9d6d66c259"
+source = "git+https://github.com/Monotype/c2pa-font-handler?branch=feature/C2PA-744/improveThumbnailFontSizeDetectionUpdate#8b15c1d4455a1061f50df11947352bc6446de5ca"
 dependencies = [
  "anyhow",
  "byteorder",
  "bytes",
  "cosmic-text",
  "flate2",
+ "image 0.25.6",
  "resvg",
  "serde",
  "serde_json",
- "svg 0.18.0",
+ "svg",
  "thiserror 2.0.12",
+ "tiny-skia",
  "tracing",
  "unicode-script",
 ]
@@ -4693,12 +4690,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "svg"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "700efb40f3f559c23c18b446e8ed62b08b56b2bb3197b36d57e0470b4102779e"
 
 [[package]]
 name = "svg"
