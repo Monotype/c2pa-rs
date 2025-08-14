@@ -860,8 +860,8 @@ dependencies = [
 
 [[package]]
 name = "c2pa-font-handler"
-version = "0.5.0"
-source = "git+https://github.com/Monotype/c2pa-font-handler?branch=feature/C2PA-744/improveThumbnailFontSizeDetectionUpdate#8b15c1d4455a1061f50df11947352bc6446de5ca"
+version = "0.6.0"
+source = "git+https://github.com/Monotype/c2pa-font-handler?tag=v0.6.0#173c918a8b0bd3f5e8655d81ac64fac55b14f0dd"
 dependencies = [
  "anyhow",
  "byteorder",
