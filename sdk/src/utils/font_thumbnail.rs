@@ -37,13 +37,7 @@ const TOTAL_WIDTH_PADDING: f32 = 0.1;
 enum FontThumbnailError {
     /// Error from the font thumbnail generator
     #[error(transparent)]
-    C2paFontHandlerError(#[from] c2pa_font_handler::thumbnail::error::FontThumbnailError),
-    /// Error from the image crate
-    #[error(transparent)]
-    ImageError(#[from] image::ImageError),
-    /// error from IO operations
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
+    C2paFontHandler(#[from] c2pa_font_handler::thumbnail::error::FontThumbnailError),
     #[cfg(not(feature = "add_svg_font_thumbnails"))]
     /// The SVG feature is not enabled
     #[error("The SVG feature is not enabled")]
