@@ -194,8 +194,8 @@ impl Manifest {
         self.title.as_deref()
     }
 
-    /// Returns thumbnail tuple with Some((format, bytes)) or None
-    pub fn thumbnail(&self) -> Option<(&str, Cow<Vec<u8>>)> {
+    /// Returns thumbnail tuple with Some((format, bytes)) or `None`.
+    pub fn thumbnail(&self) -> Option<(&str, Cow<'_, Vec<u8>>)> {
         self.thumbnail
             .as_ref()
             .and_then(|t| Some(t.format.as_str()).zip(self.resources.get(&t.identifier).ok()))
@@ -223,8 +223,8 @@ impl Manifest {
         &self.assertions
     }
 
-    /// Returns raw assertion references
-    pub fn assertion_references(&self) -> Iter<HashedUri> {
+    /// Returns raw assertion references.
+    pub fn assertion_references(&self) -> Iter<'_, HashedUri> {
         self.assertion_references.iter()
     }
 
