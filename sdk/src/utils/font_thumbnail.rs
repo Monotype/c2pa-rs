@@ -112,9 +112,10 @@ fn get_font_system_config<'a>() -> FontSystemConfig<'a> {
         .build()
 }
 
-/// Generates a PNG thumbnail from a font file
+/// Makes a PNG (by default) or SVG (when `use_svg` is true) thumbnail from a font file.
+///
 /// # Returns
-/// Returns Result `(format, image_bits)` if successful, otherwise `Error`
+/// Returns Result `(mime_type, image_bits)` if successful, otherwise `Error`
 #[cfg(feature = "file_io")]
 pub fn make_thumbnail(
     path: &std::path::Path,
@@ -125,9 +126,11 @@ pub fn make_thumbnail(
     make_thumbnail_from_stream(&mut font_data, use_svg)
 }
 
-/// Make a PNG thumbnail from a stream, which should be font data bits.
+/// Makes a PNG (by default) or SVG (when `use_svg` is true) thumbnail from a
+/// stream, which should be font data bits.
+///
 /// # Returns
-/// Returns Result `(format, image_bits)` if successful, otherwise `Error`
+/// Returns Result `(mime_type, image_bits)` if successful, otherwise `Error`
 pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
     stream: &mut R,
     use_svg: Option<bool>,
