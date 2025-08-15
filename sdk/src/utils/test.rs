@@ -73,6 +73,37 @@ pub const TEST_VC: &str = r#"{
     }
 }"#;
 
+/// Macro to verify fixture paths at compile time, and builds an absolute path
+/// to the fixture file in the tests/fixtures directory, relative to the project root.
+#[cfg(test)]
+#[macro_export]
+macro_rules! verified_fixture_path {
+    ($file:expr) => {{
+        // Compile-time check: include_bytes! will fail to compile if the file does not exist
+        let _ = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/",
+            $file
+        ));
+        const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/", $file);
+        PATH
+    }};
+}
+
+/// Macro to include fixture bytes for testing
+#[cfg(test)]
+#[macro_export]
+macro_rules! include_fixture_bytes {
+    ($file:expr) => {{
+        // Compile-time check: include_bytes! will fail to compile if the file does not exist
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/",
+            $file
+        ))
+    }};
+}
+
 /// Create new C2PA compatible UUID
 pub(crate) fn gen_c2pa_uuid() -> String {
     let guid = uuid::Uuid::new_v4();

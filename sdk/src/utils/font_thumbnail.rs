@@ -152,8 +152,40 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-    use super::*;
+    use std::path::Path;
 
+    use super::*;
+    use crate::{include_fixture_bytes, verified_fixture_path};
+
+    const SVG_MIME_TYPE: &str = "image/svg+xml";
+    const PNG_MIME_TYPE: &str = "image/png";
+
+    /// Get the path to the "font.otf" fixture
+    const fn font_path() -> &'static str {
+        verified_fixture_path!("font.otf")
+    }
+
+    /// Get the bytes of the "font.otf" fixture
+    const fn font_bytes() -> &'static [u8] {
+        include_fixture_bytes!("font.otf")
+    }
+
+    /// Get the bytes of the expected PNG thumbnail fixture
+    const fn png_thumbnail_bytes() -> &'static [u8] {
+        include_fixture_bytes!("font.thumbnail.png")
+    }
+
+    /// Get the bytes of the expected SVG thumbnail fixture
+    const fn svg_thumbnail_bytes() -> &'static [u8] {
+        include_fixture_bytes!("font.thumbnail.svg")
+    }
+
+    /// Helper function to strip all whitespace from a string
+    fn strip_all(s: &str) -> String {
+        s.split_whitespace().collect::<String>()
+    }
+
+    /// Test to ensure that the font file is a supported type
     #[test]
     fn test_is_supported_font_file() {
         assert!(is_supported_font_file("ttf"));
@@ -163,6 +195,7 @@ mod tests {
         assert!(!is_supported_font_file("woff"));
     }
 
+    /// Test to ensure that the font mime type is a valid supported type
     #[test]
     fn test_is_font_mime_type() {
         assert!(is_font_mime_type("application/font-sfnt"));
@@ -178,28 +211,111 @@ mod tests {
         assert!(!is_font_mime_type("woff"));
     }
 
+    /// Test to ensure that the SVG thumbnail creation works with a file
     #[cfg(feature = "add_svg_font_thumbnails")]
     #[test]
-    fn test_svg_creation() {
-        use crate::utils::thumbnail::make_thumbnail_from_stream;
-
-        // Use a test fixture for generating a thumbnail from a font
-        let font_data = include_bytes!("../../tests/fixtures/font.otf");
-        let mut stream = std::io::Cursor::new(font_data);
+    fn test_svg_creation_with_file() {
+        // Grab the path to the font fixture
+        let font_path = Path::new(font_path());
         // Make the thumbnail
-        let result = make_thumbnail_from_stream("font/otf", &mut stream);
+        let result = make_thumbnail(font_path, Some(true));
         assert!(result.is_ok());
         let (mime_type, image_data) = result.unwrap();
         // Assert the result is a valid SVG
-        assert_eq!(mime_type, "image/svg+xml");
+        assert_eq!(mime_type, SVG_MIME_TYPE);
         // And the image data is NOT empty
         assert!(!image_data.is_empty());
         // Matter of fact, make sure it matches the expected output
-        let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
-        let strip_all = |s: &str| s.split_whitespace().collect::<String>();
+        let expected_svg = svg_thumbnail_bytes();
         assert_eq!(
             strip_all(&String::from_utf8_lossy(&image_data)),
             strip_all(&String::from_utf8_lossy(expected_svg))
         );
+    }
+
+    /// Test to ensure that the SVG thumbnail creation works with a stream
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    #[test]
+    fn test_svg_creation_with_stream() {
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = font_bytes();
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_from_stream(&mut stream, Some(true));
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap();
+        // Assert the result is a valid SVG
+        assert_eq!(mime_type, SVG_MIME_TYPE);
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = svg_thumbnail_bytes();
+        assert_eq!(
+            strip_all(&String::from_utf8_lossy(&image_data)),
+            strip_all(&String::from_utf8_lossy(expected_svg))
+        );
+    }
+
+    /// Test the SVG thumbnail creation fails with error when the feature is not
+    /// enabled
+    ///
+    /// # Remarks
+    ///
+    /// This test is only compiled when the `add_svg_font_thumbnails` feature is
+    /// not enabled. It is recommended to run the following to test:
+    /// ```bash
+    /// cargo test --features "add_font_thumbnails sfnt file_io"
+    /// ```
+    #[cfg(not(feature = "add_svg_font_thumbnails"))]
+    #[test]
+    fn test_svg_creation_with_stream_fails_when_feature_not_enabled() {
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = font_bytes();
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_from_stream(&mut stream, Some(true));
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(matches!(
+            error,
+            crate::error::Error::FontError(FontThumbnailError::SvgFeatureNotEnabled)
+        ));
+    }
+
+    /// Test to ensure that the PNG thumbnail creation works with a file
+    #[test]
+    fn test_png_creation_with_file() {
+        // Grab the path to the font fixture
+        let font_path = Path::new(font_path());
+        // Make the thumbnail
+        let result = make_thumbnail(font_path, None);
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap();
+        // Assert the result is a valid SVG
+        assert_eq!(mime_type, PNG_MIME_TYPE);
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = png_thumbnail_bytes();
+        assert_eq!(&image_data, expected_svg);
+    }
+
+    /// Test to ensure that the PNG thumbnail creation works
+    #[test]
+    fn test_png_creation_with_stream() {
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = font_bytes();
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_from_stream(&mut stream, Some(false));
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap();
+        // Assert the result is a valid PNG
+        assert_eq!(mime_type, PNG_MIME_TYPE);
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = png_thumbnail_bytes();
+        assert_eq!(&image_data, expected_svg);
     }
 }
