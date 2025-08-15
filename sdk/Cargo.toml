@@ -27,8 +27,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 add_thumbnails = ["image"]
-add_font_thumbnails = ["dep:tiny-skia", "dep:cosmic-text", "add_thumbnails", "font", "dep:unicode-script"]
-add_svg_font_thumbnails = ["add_font_thumbnails", "dep:svg", "dep:resvg"]
+add_font_thumbnails = ["add_thumbnails", "font", "dep:c2pa-font-handler", "c2pa-font-handler/png-thumbnails"]
+add_svg_font_thumbnails = ["add_font_thumbnails", "c2pa-font-handler/svg-thumbnails"]
 file_io = []
 serialize_thumbnails = []
 no_interleaved_io = ["file_io"]
@@ -88,7 +88,7 @@ bcder = "0.7.3"
 bytes = "1.7.2"
 byteorder = { version = "1.4.3", default-features = false }
 byteordered = "0.6.0"
-c2pa-font-handler = { tag = "v0.5.0", git = "https://github.com/Monotype/c2pa-font-handler", optional = true }
+c2pa-font-handler = { tag = "v0.6.0", git = "https://github.com/Monotype/c2pa-font-handler", optional = true }
 chrono = { version = "0.4.39", default-features = false, features = ["serde"] }
 ciborium = "0.2.2"
 config = { version = "0.14.0", default-features = false, features = [
@@ -102,7 +102,6 @@ const-hex = "1.14"
 const-oid = { version = "0.9.6", optional = true }
 conv = "0.3.3"
 coset = "0.3.8"
-cosmic-text = { version = "0.14.2", optional = true }
 extfmt = "0.1.1"
 der = { version = "0.7.9", optional = true }
 ecdsa = { version = "0.16.9", features = ["digest", "sha2"] }
@@ -139,7 +138,6 @@ rasn = "0.22.0"
 rasn-ocsp = "0.22.0"
 rasn-pkix = "0.22.0"
 regex = "1.11"
-resvg = { version = "0.45.0", optional = true }
 riff = "2.0.0"
 rsa = { version = "0.9.7", features = ["pem", "sha2", "std"], optional = true }
 schemars = { version = "0.8.21", optional = true }
@@ -154,14 +152,9 @@ sha1 = "0.10.6"
 sha2 = "0.10.6"
 spki = { version = "0.7.3", optional = true }
 static-iref = "3.0"
-svg = { version = "0.17.0", optional = true }
 tempfile = "=3.15.0"
 thiserror = "2.0.8"
-tiny-skia = { version = "0.11.4", default-features = false, features = [
-	"png", "png-format"
-	], optional = true }
 treeline = "0.1.0"
-unicode-script = { version = "0.5.7", optional = true }
 url = "2.5.3"
 uuid = { version = "=1.12.0", features = ["serde", "v4"] }
 web-time = "1.1"

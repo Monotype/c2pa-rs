@@ -116,3 +116,32 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
 #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
 #[path = "font_thumbnail.rs"]
 mod font_thumbnail;
+
+mod tests {
+    /// This test is in place to test the main thumbnail creation, making sure it calls down
+    /// into the font thumbnail creation logic. We have it here
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    #[test]
+    fn test_svg_creation_with_stream() {
+        use crate::utils::thumbnail::make_thumbnail_from_stream;
+
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = include_bytes!("../../tests/fixtures/font.otf");
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_from_stream("font/otf", &mut stream);
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap();
+        // Assert the result is a valid SVG
+        assert_eq!(mime_type, "image/svg+xml");
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
+        let strip_all = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(
+            strip_all(&String::from_utf8_lossy(&image_data)),
+            strip_all(&String::from_utf8_lossy(expected_svg))
+        );
+    }
+}
