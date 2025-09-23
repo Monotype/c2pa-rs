@@ -820,13 +820,12 @@ pub(crate) mod tests {
 
         let signer = test_signer(SigningAlg::Ps256);
 
-        let c2pa_data = manifest
+        let _ = manifest
             .embed(&output, &output, signer.as_ref())
             .expect("embed");
         let mut validation_log = StatusTracker::default();
 
-        let store1 = Store::load_from_memory("c2pa", &c2pa_data, true, &mut validation_log)
-            .expect("load from memory");
+        let store1 = Store::load_from_asset(&output, true, &mut validation_log).unwrap();
         let claim1_label = store1.provenance_label().unwrap();
         let claim = store1.provenance_claim().unwrap();
         assert!(claim.get_claim_assertion(ASSERTION_LABEL, 0).is_some()); // verify the assertion is there

@@ -44,6 +44,8 @@ pub(crate) enum ThumbnailFormat {
     WebP,
     /// An image in TIFF format.
     Tiff,
+    /// An image in SVG format.
+    Svg,
 }
 /// Quality of the thumbnail.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
