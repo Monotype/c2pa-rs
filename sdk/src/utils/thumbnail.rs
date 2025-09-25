@@ -89,6 +89,9 @@ impl From<ThumbnailFormat> for config::ValueKind {
 
 impl fmt::Display for ThumbnailFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if matches!(self, ThumbnailFormat::Svg) {
+            return write!(f, "image/svg+xml");
+        }
         write!(f, "{}", ImageFormat::from(*self).to_mime_type())
     }
 }
