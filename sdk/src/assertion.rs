@@ -66,14 +66,14 @@ pub fn get_thumbnail_type(thumbnail_label: &str) -> String {
     "none".to_string()
 }
 
-pub fn get_thumbnail_image_type(thumbnail_label: &str) -> String {
+pub fn get_thumbnail_image_type(thumbnail_label: &str) -> Option<String> {
     let components: Vec<&str> = thumbnail_label.split('.').collect();
 
     if thumbnail_label.contains("thumbnail") && components.len() >= 4 {
         let image_type: Vec<&str> = components[3].split('_').collect(); // strip and other label adornments
-        image_type[0].to_ascii_lowercase()
+        Some(image_type[0].to_ascii_lowercase())
     } else {
-        "none".to_string()
+        None
     }
 }
 
@@ -177,12 +177,22 @@ pub trait AssertionJson: Serialize + DeserializeOwned + AssertionBase {
 /// the Assertion type (see spec).
 /// For JSON assertions the data is a JSON string and a Vec of u8 values for
 /// binary data and JSON data to be CBOR encoded.
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Hash)]
 pub enum AssertionData {
     Json(String),          // json encoded data
     Binary(Vec<u8>),       // binary data
     Cbor(Vec<u8>),         // binary cbor encoded data
     Uuid(String, Vec<u8>), // user defined content (uuid, data)
+}
+
+impl From<AssertionData> for Vec<u8> {
+    fn from(ad: AssertionData) -> Self {
+        match ad {
+            AssertionData::Json(s) => s.into_bytes(), // json encoded data
+            AssertionData::Binary(x) | AssertionData::Uuid(_, x) => x, // binary data
+            AssertionData::Cbor(x) => x,
+        }
+    }
 }
 
 impl fmt::Debug for AssertionData {
@@ -215,7 +225,7 @@ impl fmt::Debug for AssertionData {
 /// contain its AssertionData.  For the User Assertion type we
 /// allow a String to set the label. The AssertionData contains
 /// the data payload for the assertion and the version number for its schema (if supported).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Assertion {
     label: String,
     version: Option<usize>,
@@ -239,8 +249,8 @@ impl Assertion {
     }
 
     /// return content_type for the the data enclosed in the Assertion
-    pub(crate) fn content_type(&self) -> String {
-        self.content_type.clone()
+    pub(crate) fn content_type(&self) -> &str {
+        self.content_type.as_str()
     }
 
     // pub(crate) fn set_data(mut self, data: &AssertionData) -> Self {
@@ -287,9 +297,9 @@ impl Assertion {
     pub(crate) fn label_root(&self) -> String {
         let label = get_mutable_label(&self.label).0;
         // thumbnails need the image_type added
-        match get_thumbnail_image_type(&self.label).as_str() {
-            "none" => label,
-            image_type => format!("{label}.{image_type}"),
+        match get_thumbnail_image_type(&self.label) {
+            None => label,
+            Some(image_type) => format!("{label}.{image_type}"),
         }
     }
 
@@ -386,6 +396,26 @@ impl Assertion {
             mime_type,
             AssertionData::Binary(binary_data.to_vec()),
         )
+    }
+
+    /// Deconstruct a binary assertion, moving the Vec<u8> out without copying
+    pub(crate) fn binary_deconstruct(
+        assertion: Assertion,
+    ) -> Result<(String, Option<usize>, String, Vec<u8>)> {
+        match assertion.data {
+            AssertionData::Binary(data) => Ok((
+                assertion.label,
+                assertion.version,
+                assertion.content_type,
+                data,
+            )),
+            _ => Err(AssertionDecodeError::from_assertion_unexpected_data_type(
+                &assertion,
+                assertion.decode_data(),
+                "binary",
+            )
+            .into()),
+        }
     }
 
     /// create an assertion from user binary data

@@ -79,16 +79,6 @@ pub enum FontError {
     /// Failed to convert a byte array to a string as UTF-8.
     #[error(transparent)]
     Utf8Error(#[from] std::str::Utf8Error),
-
-    // Failed to read XMP data.
-    #[cfg(feature = "font_xmp")]
-    #[error("Error reading/writing XMP data: {0}")]
-    XmpError(String),
-
-    /// XMP data was not found.
-    #[cfg(feature = "font_xmp")]
-    #[error("XMP data was not found in the font.")]
-    XmpNotFound,
 }
 
 /// Errors that can occur when saving a font.

@@ -11,15 +11,38 @@
 // specific language governing permissions and limitations under
 // each license.
 
+#[cfg(feature = "file_io")]
+use std::path::PathBuf;
 use std::{
     ffi::OsStr,
     io::{Read, Seek, SeekFrom, Write},
+    path::Path,
 };
 
 #[allow(unused)] // different code path for WASI
-use tempfile::{tempdir, Builder, NamedTempFile, TempDir};
+use tempfile::{tempdir, Builder, NamedTempFile, SpooledTempFile, TempDir};
 
-use crate::{Error, Result};
+use crate::{asset_io::rename_or_move, Error, Result};
+// Replace data at arbitrary location and len in a file.
+// start_location is where the replacement data will start
+// replace_len is how many bytes from source to replaced starting a start_location
+// data is the data that will be inserted at start_location
+#[allow(dead_code)]
+pub(crate) fn patch_data_in_file(
+    source_path: &Path,
+    start_location: u64,
+    replace_len: u64,
+    data: &[u8],
+) -> Result<()> {
+    let mut source = std::fs::File::open(source_path)?;
+    let mut dest = tempfile_builder("c2pa_temp")?;
+
+    patch_stream(&mut source, &mut dest, start_location, replace_len, data)?;
+
+    rename_or_move(dest, source_path)?;
+
+    Ok(())
+}
 
 // Insert data at arbitrary location in a stream.
 // location is from the start of the source stream
@@ -93,6 +116,44 @@ pub(crate) fn stream_len<R: Read + Seek + ?Sized>(reader: &mut R) -> Result<u64>
     }
 
     Ok(len)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn stream_with_fs_fallback_wasm(
+    _threshold_override: Option<usize>,
+) -> Result<std::io::Cursor<Vec<u8>>> {
+    Ok(std::io::Cursor::new(Vec::new()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stream_with_fs_fallback_file_io(threshold_override: Option<usize>) -> Result<SpooledTempFile> {
+    let threshold = threshold_override.unwrap_or(crate::settings::get_settings_value::<usize>(
+        "core.backing_store_memory_threshold_in_mb",
+    )?);
+
+    Ok(SpooledTempFile::new(threshold))
+}
+
+/// Will create a [Read], [Write], and [Seek] capable stream that will stay in memory
+/// as long as the threshold is not exceeded. The threshold is specified in MB in the
+/// settings under ""core.backing_store_memory_threshold_in_mb"
+///
+/// # Parameters
+/// - `threshold_override`: Optional override for the threshold value in MB. If provided, this
+///   value will be used instead of the one from settings.
+///
+/// # Errors
+/// - Returns an error if the threshold value from settings is not valid.
+///
+/// # Note
+/// This will return a an in-memory stream when the compilation target doesn't support file I/O.
+pub(crate) fn stream_with_fs_fallback(
+    threshold_override: Option<usize>,
+) -> Result<impl Read + Write + Seek> {
+    #[cfg(target_arch = "wasm32")]
+    return stream_with_fs_fallback_wasm(threshold_override);
+    #[cfg(not(target_arch = "wasm32"))]
+    return stream_with_fs_fallback_file_io(threshold_override);
 }
 
 // Returns a new Vec first making sure it can hold the desired capacity.  Fill
@@ -234,6 +295,29 @@ pub fn wasm_remove_dir_all<P: AsRef<std::path::Path>>(path: P) -> Result<()> {
     ))?
 }
 
+/// Convert a URI to a file path using PathBuf for better path handling.
+#[cfg(feature = "file_io")]
+pub fn uri_to_path(uri: &str, manifest_label: Option<&str>) -> PathBuf {
+    let mut path_str = uri.replace(':', "_");
+    if let Some(stripped) = path_str.strip_prefix("self#jumbf=") {
+        path_str = stripped.to_owned();
+    } else {
+        return PathBuf::from(path_str);
+    }
+
+    let mut path = PathBuf::from(path_str);
+
+    if let Ok(stripped) = path.strip_prefix("/c2pa/") {
+        path = stripped.to_path_buf();
+    } else if let Some(manifest_label) = manifest_label {
+        let mut new_path = PathBuf::from(manifest_label.replace(':', "_"));
+        new_path.push(path);
+        path = new_path;
+    }
+
+    path
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -241,9 +325,44 @@ mod tests {
 
     use std::io::Cursor;
 
+    #[cfg(feature = "file_io")]
+    #[test]
+    fn test_uri_to_path() {
+        let uri = "self#jumbf=/c2pa/urn:uuid:b3386820-9994-4b58-926f-1c47b82504c4:contentauth/c2pa.assertions/c2pa.thumbnail.claim.jpeg";
+        let expected_path = "urn_uuid_b3386820-9994-4b58-926f-1c47b82504c4_contentauth/c2pa.assertions/c2pa.thumbnail.claim.jpeg";
+
+        assert_eq!(uri_to_path(uri, None), PathBuf::from(expected_path));
+        assert_eq!(
+            uri_to_path(expected_path, None),
+            PathBuf::from(expected_path)
+        );
+
+        let uri = "self#jumbf=c2pa.assertions/c2pa.thumbnail.claim";
+        let manifest_label = "test";
+        let expected_path = format!("{manifest_label}/c2pa.assertions/c2pa.thumbnail.claim");
+
+        assert_eq!(
+            uri_to_path(uri, Some(manifest_label)),
+            PathBuf::from(&expected_path)
+        );
+        assert_eq!(
+            uri_to_path(&expected_path, Some(manifest_label)),
+            PathBuf::from(expected_path)
+        );
+
+        // Test manifest label with colon replacement
+        let uri = "self#jumbf=c2pa.assertions/c2pa.thumbnail.claim";
+        let manifest_label_with_colon = "urn:uuid:test:label";
+        let expected_path_with_colon = "urn_uuid_test_label/c2pa.assertions/c2pa.thumbnail.claim";
+
+        assert_eq!(
+            uri_to_path(uri, Some(manifest_label_with_colon)),
+            PathBuf::from(expected_path_with_colon)
+        );
+    }
+
     //use env_logger;
     use super::*;
-
     #[test]
     fn test_patch_stream() {
         let source = "this is a very very good test";
@@ -304,5 +423,44 @@ mod tests {
             &[],
         )
         .is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_safe_stream_threshold_behavior() {
+        let mut stream = stream_with_fs_fallback_file_io(Some(10)).unwrap();
+
+        // Less data written than required to write to the FS.
+        let small_data = b"small"; // 5 bytes
+        stream.write_all(small_data).unwrap();
+        assert!(!stream.is_rolled(), "data still in memory");
+
+        // Adds more data to exceed the threshold.
+        let large_data = b"this is larger than 10 bytes total";
+        stream.write_all(large_data).unwrap();
+        assert!(stream.is_rolled(), "data moved to disk");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_safe_stream_no_threshold_behavior() {
+        let mut stream = stream_with_fs_fallback_file_io(None).unwrap();
+
+        // Less data written than required to write to the FS.
+        let small_data = b"small"; // 5 bytes
+        stream.write_all(small_data).unwrap();
+        assert!(!stream.is_rolled(), "data still in memory");
+
+        let large_data = vec![0; 1024 * 1024]; // 1MB.
+        let threshold = crate::settings::get_settings_value::<usize>(
+            "core.backing_store_memory_threshold_in_mb",
+        )
+        .unwrap();
+
+        for _ in 0..threshold {
+            stream.write_all(&large_data).unwrap();
+        }
+
+        assert!(stream.is_rolled(), "data moved to disk");
     }
 }

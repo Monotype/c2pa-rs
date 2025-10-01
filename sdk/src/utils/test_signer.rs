@@ -29,8 +29,32 @@ pub(crate) fn test_signer(alg: SigningAlg) -> Box<dyn Signer> {
     let (cert_chain, private_key) = cert_chain_and_private_key_for_alg(alg);
 
     Box::new(RawSignerWrapper(
-        signer_from_cert_chain_and_private_key(&cert_chain, &private_key, alg, None).unwrap(),
+        signer_from_cert_chain_and_private_key(cert_chain, private_key, alg, None).unwrap(),
     ))
+}
+
+/// Creates a [`Signer`] instance for testing purposes using test credentials.
+#[cfg(feature = "file_io")] // the only test using this now is file based
+pub(crate) fn test_cawg_signer(
+    alg: SigningAlg,
+    referenced_assertions: &[&str],
+) -> Result<Box<dyn Signer>> {
+    let (cert_chain, private_key) = cert_chain_and_private_key_for_alg(alg);
+
+    let c2pa_raw_signer =
+        signer_from_cert_chain_and_private_key(cert_chain, private_key, alg, None).unwrap();
+    let cawg_raw_signer =
+        signer_from_cert_chain_and_private_key(cert_chain, private_key, alg, None).unwrap();
+
+    let mut ia_signer = crate::identity::builder::IdentityAssertionSigner::new(c2pa_raw_signer);
+
+    let x509_holder = crate::identity::x509::X509CredentialHolder::from_raw_signer(cawg_raw_signer);
+    let mut iab =
+        crate::identity::builder::IdentityAssertionBuilder::for_credential_holder(x509_holder);
+    iab.add_referenced_assertions(referenced_assertions);
+
+    ia_signer.add_identity_assertion(iab);
+    Ok(Box::new(ia_signer))
 }
 
 /// Creates an [`AsyncSigner`] instance for testing purposes using test credentials.
@@ -40,7 +64,7 @@ pub(crate) fn async_test_signer(alg: SigningAlg) -> Box<dyn AsyncSigner + Sync +
     let (cert_chain, private_key) = cert_chain_and_private_key_for_alg(alg);
 
     Box::new(AsyncRawSignerWrapper(
-        async_signer_from_cert_chain_and_private_key(&cert_chain, &private_key, alg, None).unwrap(),
+        async_signer_from_cert_chain_and_private_key(cert_chain, private_key, alg, None).unwrap(),
     ))
 }
 
@@ -54,41 +78,43 @@ pub(crate) fn async_test_signer(alg: SigningAlg) -> Box<dyn AsyncSigner> {
     ))
 }
 
-fn cert_chain_and_private_key_for_alg(alg: SigningAlg) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn cert_chain_and_private_key_for_alg(
+    alg: SigningAlg,
+) -> (&'static [u8], &'static [u8]) {
     match alg {
         SigningAlg::Ps256 => (
-            include_bytes!("../../tests/fixtures/certs/ps256.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/ps256.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/ps256.pub"),
+            include_bytes!("../../tests/fixtures/certs/ps256.pem"),
         ),
 
         SigningAlg::Ps384 => (
-            include_bytes!("../../tests/fixtures/certs/ps384.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/ps384.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/ps384.pub"),
+            include_bytes!("../../tests/fixtures/certs/ps384.pem"),
         ),
 
         SigningAlg::Ps512 => (
-            include_bytes!("../../tests/fixtures/certs/ps512.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/ps512.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/ps512.pub"),
+            include_bytes!("../../tests/fixtures/certs/ps512.pem"),
         ),
 
         SigningAlg::Es256 => (
-            include_bytes!("../../tests/fixtures/certs/es256.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/es256.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/es256.pub"),
+            include_bytes!("../../tests/fixtures/certs/es256.pem"),
         ),
 
         SigningAlg::Es384 => (
-            include_bytes!("../../tests/fixtures/certs/es384.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/es384.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/es384.pub"),
+            include_bytes!("../../tests/fixtures/certs/es384.pem"),
         ),
 
         SigningAlg::Es512 => (
-            include_bytes!("../../tests/fixtures/certs/es512.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/es512.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/es512.pub"),
+            include_bytes!("../../tests/fixtures/certs/es512.pem"),
         ),
 
         SigningAlg::Ed25519 => (
-            include_bytes!("../../tests/fixtures/certs/ed25519.pub").to_vec(),
-            include_bytes!("../../tests/fixtures/certs/ed25519.pem").to_vec(),
+            include_bytes!("../../tests/fixtures/certs/ed25519.pub"),
+            include_bytes!("../../tests/fixtures/certs/ed25519.pem"),
         ),
     }
 }

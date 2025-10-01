@@ -43,140 +43,6 @@ use crate::{
 /// Font software IO object
 pub(crate) struct SfntIO {}
 
-/// This module is a temporary implementation of a very basic support for XMP in
-/// fonts. Ideally the reading/writing of the following should be independent of
-/// XMP support:
-///
-/// - `InstanceID` - Unique identifier of the instance
-/// - `DocumentID` - Unique identifier of the document
-/// - `Provenance` - Url/Uri of the provenance
-///
-/// But as the authoring of this module the Rust SDK still assumes the remote
-/// manifest reference comes from the XMP when building the `Ingredient` (as
-/// seen in the ingredient module). The instance/document ID also are read from
-/// the XMP when building the ingredient, so until this type of logic has been
-/// abstracted this is meant as a temporary hack to provide a working
-/// implementation for remote manifests.
-///
-/// # Remarks
-/// This module is only compiled when the `font_xmp` feature is enabled.
-#[cfg(feature = "font_xmp")]
-mod font_xmp_support {
-    use std::io::SeekFrom;
-
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::utils::xmp_inmemory_utils::{add_provenance, add_xmp_key, MIN_XMP};
-
-    /// Creates a default `XmpMeta` object for fonts, using the specified
-    /// document and instance identifiers.
-    ///
-    /// # Remarks
-    /// Default/random values will be used for the document/instance IDs as
-    /// needed.
-    fn default_font_xmp_meta(
-        document_id: Option<String>,
-        instance_id: Option<String>,
-    ) -> Result<String> {
-        // Start with the default key.
-        let mut xmp = MIN_XMP.to_string();
-
-        // Add in the namespace for DocumentID and InstanceID.
-        xmp =
-            add_xmp_key(&xmp, "xmlns:xmpMM", "http://ns.adobe.com/xap/1.0/mm/").map_err(|_e| {
-                FontError::XmpError("Unable to add media management namespace".to_string())
-            })?;
-
-        // Add in DocumentID and InstanceID.
-        xmp = add_xmp_key(
-            &xmp,
-            "xmpMM:DocumentID",
-            document_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
-        )
-        .map_err(|_e| FontError::XmpError("Unable to add DocumentID".to_string()))?;
-        xmp = add_xmp_key(
-            &xmp,
-            "xmpMM:InstanceID",
-            instance_id.unwrap_or(Uuid::new_v4().to_string()).as_str(),
-        )
-        .map_err(|_e| FontError::XmpError("Unable to add InstanceID".to_string()))?;
-
-        Ok(xmp)
-    }
-
-    /// Builds a `XmpMeta` element from the data within the source stream, based
-    /// on either the information already in the stream or default values.
-    ///
-    /// # Remarks
-    /// The use of this function really shouldn't be needed, but currently the SDK
-    /// is tightly coupled to the use of XMP with assets.
-    pub(crate) fn build_xmp_from_stream<TSource>(source: &mut TSource) -> Result<String>
-    where
-        TSource: Read + Seek + ?Sized,
-    {
-        match read_reference_from_stream(source)? {
-            // For now we pretend the reference read from the stream is really XMP
-            // data
-            Some(xmp) => Ok(xmp),
-            // Mention there is no data representing XMP found
-            None => Err(FontError::XmpNotFound),
-        }
-    }
-
-    /// Adds a C2PA manifest reference (specified by URI, JUMBF or URL based) as
-    /// XMP data to a font file (specified by path).
-    ///
-    /// # Remarks
-    /// This method is considered a stop-gap for now until the official SDK
-    /// offers a more generic method to indicate a document ID, instance ID,
-    /// and a reference to the a remote manifest.
-    pub(crate) fn add_reference_as_xmp_to_font(font_path: &Path, manifest_uri: &str) -> Result<()> {
-        process_file_with_streams(font_path, move |input_stream, temp_file| {
-            // Write the manifest URI to the stream
-            add_reference_as_xmp_to_stream(input_stream, temp_file.get_mut_file(), manifest_uri)
-        })
-    }
-
-    /// Adds a C2PA manifest reference (specified as a URI, JUMBF or URL based)
-    /// as XMP data to the stream, writing the result to the destination stream.
-    ///
-    /// # Remarks
-    /// This method is considered a stop-gap for now until the official SDK
-    /// offers a more generic method to indicate a document ID, instance ID,
-    /// and a reference to the a remote manifest.
-    #[allow(dead_code)]
-    pub(crate) fn add_reference_as_xmp_to_stream<TSource, TDest>(
-        source: &mut TSource,
-        destination: &mut TDest,
-        manifest_uri: &str,
-    ) -> Result<()>
-    where
-        TSource: Read + Seek + ?Sized,
-        TDest: Write + ?Sized,
-    {
-        // Build a simple XMP meta element from the current source stream
-        let mut xmp_meta = match build_xmp_from_stream(source) {
-            // Use the data already available
-            Ok(meta) => meta,
-            // If data was not found for building out the XMP, we will default
-            // to some good starting points
-            Err(FontError::XmpNotFound) => default_font_xmp_meta(None, None)?,
-            // At this point, the font is considered to be invalid possibly
-            Err(error) => return Err(error),
-        };
-        // Reset the source stream to the beginning
-        source.seek(SeekFrom::Start(0))?;
-        // Add the provenance to the XMP data.
-        xmp_meta = add_provenance(&xmp_meta, manifest_uri)
-            .map_err(|_e| FontError::XmpError("Unable to add provenance".to_string()))?;
-        // Finally write the XMP data as a string to the stream
-        add_reference_to_stream(source, destination, &xmp_meta)?;
-
-        Ok(())
-    }
-}
-
 struct TempFile {
     // The temp_dir must be referenced during the duration of the use of the
     // temporary file, as soon as it is dropped the temporary directory and the
@@ -596,8 +462,9 @@ impl AssetBoxHash for SfntIO {
                     alg: None,
                     hash: ByteBuf::from(Vec::new()),
                     pad: ByteBuf::from(Vec::new()),
-                    range_start: chunk.offset(),
-                    range_len: chunk.length(),
+                    range_start: chunk.offset() as u64,
+                    range_len: chunk.length() as u64,
+                    excluded: None,
                 };
                 box_maps.push(box_map);
                 Ok::<(), FontError>(())
@@ -629,15 +496,7 @@ impl RemoteRefEmbed for SfntIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "font_xmp")]
-                {
-                    font_xmp_support::add_reference_as_xmp_to_font(asset_path, &manifest_uri)
-                        .map_err(wrap_font_err)
-                }
-                #[cfg(not(feature = "font_xmp"))]
-                {
-                    add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
-                }
+                add_reference_to_font(asset_path, &manifest_uri).map_err(wrap_font_err)
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -653,20 +512,7 @@ impl RemoteRefEmbed for SfntIO {
     ) -> crate::error::Result<()> {
         match embed_ref {
             crate::asset_io::RemoteRefEmbedType::Xmp(manifest_uri) => {
-                #[cfg(feature = "font_xmp")]
-                {
-                    font_xmp_support::add_reference_as_xmp_to_stream(
-                        reader,
-                        output_stream,
-                        &manifest_uri,
-                    )
-                    .map_err(wrap_font_err)
-                }
-                #[cfg(not(feature = "font_xmp"))]
-                {
-                    add_reference_to_stream(reader, output_stream, &manifest_uri)
-                        .map_err(wrap_font_err)
-                }
+                add_reference_to_stream(reader, output_stream, &manifest_uri).map_err(wrap_font_err)
             }
             crate::asset_io::RemoteRefEmbedType::StegoS(_) => Err(Error::UnsupportedType),
             crate::asset_io::RemoteRefEmbedType::StegoB(_) => Err(Error::UnsupportedType),
@@ -792,7 +638,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(all(not(feature = "font_xmp"), not(target_os = "wasi")))]
+    #[cfg(not(target_os = "wasi"))]
     /// Verifies the adding of a remote C2PA manifest reference works as
     /// expected.
     fn add_c2pa_ref() {
@@ -830,57 +676,6 @@ pub mod tests {
 
         match read_reference_from_font(&output) {
             Ok(Some(manifest_uri)) => assert_eq!(expected_manifest_uri, manifest_uri),
-            _ => panic!("Expected to read a reference from the font file"),
-        };
-
-        let output_data = std::fs::read(&output).unwrap();
-        assert_eq!(checksum(&output_data).0, SFNT_EXPECTED_CHECKSUM);
-    }
-
-    #[test]
-    #[cfg(all(feature = "font_xmp", not(target_os = "wasi")))]
-    /// Verifies the adding of a remote C2PA manifest reference as XMP works as
-    /// expected.
-    fn add_c2pa_ref() {
-        use crate::utils::xmp_inmemory_utils::extract_provenance;
-
-        let c2pa_data = "test data";
-
-        // Load the basic OTF test fixture
-        let source = fixture_path("font.otf");
-
-        // Create a temporary output for the file
-        let temp_dir = tempdir().unwrap();
-        let output = temp_dir_path(&temp_dir, "test.otf");
-
-        // Copy the source to the output
-        std::fs::copy(source, &output).unwrap();
-
-        // Create our SfntIO asset handler for testing
-        let sfnt_io = SfntIO {};
-
-        let expected_manifest_uri = "https://test/ref";
-
-        sfnt_io
-            .embed_reference(
-                &output,
-                crate::asset_io::RemoteRefEmbedType::Xmp(expected_manifest_uri.to_owned()),
-            )
-            .unwrap();
-        // Save the C2PA manifest store to the file
-        sfnt_io
-            .save_cai_store(&output, c2pa_data.as_bytes())
-            .unwrap();
-        // Loading it back from the same output file
-        let loaded_c2pa = sfnt_io.read_cai_store(&output).unwrap();
-        // Which should work out to be the same in the end
-        assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
-
-        match read_reference_from_font(&output) {
-            Ok(Some(manifest_uri)) => {
-                let provenance = extract_provenance(manifest_uri.as_str()).unwrap();
-                assert_eq!(expected_manifest_uri, provenance);
-            }
             _ => panic!("Expected to read a reference from the font file"),
         };
 
@@ -1177,135 +972,6 @@ pub mod tests {
         let loaded_c2pa = sfnt_io.read_cai_store(&output).unwrap();
         // Which should work out to be the same in the end
         assert_eq!(&loaded_c2pa, c2pa_data.as_bytes());
-    }
-
-    #[cfg(feature = "font_xmp")]
-    #[cfg(test)]
-    pub mod font_xmp_support_tests {
-        use std::{fs::File, io::Cursor, path::Path};
-
-        use tempfile::tempdir;
-
-        use super::{process_file_with_streams, remove_reference_from_stream};
-        use crate::{
-            asset_handlers::{
-                font_io::FontError,
-                sfnt_io::{font_xmp_support, SfntIO},
-            },
-            asset_io::CAIReader,
-            utils::{test::temp_dir_path, xmp_inmemory_utils::extract_provenance},
-        };
-
-        /// Remove any remote manifest reference from any `C2PA` font table which
-        /// exists in the given font file (specified by path).
-        #[allow(dead_code)]
-        fn remove_reference_from_font(font_path: &Path) -> Result<(), FontError> {
-            process_file_with_streams(font_path, move |input_stream, temp_file| {
-                remove_reference_from_stream(input_stream, temp_file.get_mut_file())?;
-                Ok(())
-            })
-        }
-
-        #[test]
-        #[cfg(not(target_os = "wasi"))]
-        /// Verifies the `font_xmp_support::add_reference_as_xmp_to_stream` is
-        /// able to add a reference to as XMP when there is already data in the
-        /// reference field.
-        fn add_reference_as_xmp_to_stream_with_data() {
-            // Load the basic OTF test fixture
-            let source = crate::utils::test::fixture_path("font.otf");
-
-            // Create a temporary output for the file
-            let temp_dir = tempdir().unwrap();
-            let output = temp_dir_path(&temp_dir, "test.otf");
-
-            // Copy the source to the output
-            std::fs::copy(source, &output).unwrap();
-
-            // Add a reference to the font
-            assert!(font_xmp_support::add_reference_as_xmp_to_font(&output, "test data").is_ok());
-
-            // Add again, with a new value
-            assert!(
-                font_xmp_support::add_reference_as_xmp_to_font(&output, "new test data").is_ok()
-            );
-            let otf_handler = SfntIO {};
-            // Verify the reference was updated
-            {
-                let mut f: File = File::open(&output).unwrap();
-                match otf_handler.read_xmp(&mut f) {
-                    Some(xmp_data_str) => {
-                        let xmp_value = extract_provenance(xmp_data_str.as_str()).unwrap();
-                        assert_eq!("new test data", xmp_value);
-                    }
-                    None => panic!("Expected to read XMP from the resource."),
-                }
-            }
-            // Remove the reference
-            assert!(remove_reference_from_font(&output).is_ok());
-            // Verify the reference was removed
-            {
-                let mut f: File = File::open(&output).unwrap();
-                assert!(otf_handler.read_xmp(&mut f).is_none());
-            }
-        }
-
-        #[test]
-        /// Verifies the `font_xmp_support::build_xmp_from_stream` method
-        /// correctly returns error for NotFound when there is no data in the
-        /// stream to return.
-        fn build_xmp_from_stream_without_reference() {
-            let font_data = vec![
-                0x4f, 0x54, 0x54, 0x4f, // OTTO
-                0x00, 0x01, // 1 tables
-                0x00, 0x00, // search range
-                0x00, 0x00, // entry selector
-                0x00, 0x00, // range shift
-                0x43, 0x32, 0x50, 0x42, // C2PB table tag
-                0x00, 0x00, 0x00, 0x00, // Checksum
-                0x00, 0x00, 0x00, 0x1c, // offset to table data
-                0x00, 0x00, 0x00, 0x01, // length of table data
-                0x00, // C2PB data
-            ];
-            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-            // Note - We could improve code-coverage here (eliminating all these
-            // match-arms) if we could just do:
-            //   assert_err_eq!(font_xmp_support::build_xmp_from_stream(&mut font_stream), Err(FontError::XmpNotFound));
-            // but that requires adding PartialOrd to FontError...
-            match font_xmp_support::build_xmp_from_stream(&mut font_stream) {
-                Ok(_) => panic!("Did not expect an OK result, as data is missing"),
-                Err(FontError::XmpNotFound) => {}
-                Err(_) => panic!("Unexpected error when building XMP data"),
-            }
-        }
-
-        #[test]
-        /// Verifies the `font_xmp_support::build_xmp_from_stream` method
-        /// correctly returns error for NotFound when there is no data in the
-        /// stream to return.
-        fn build_xmp_from_stream_with_reference_not_xmp() {
-            let font_data = vec![
-                0x4f, 0x54, 0x54, 0x4f, // OTTO - OpenType tag
-                0x00, 0x01, // 1 tables
-                0x00, 0x00, // search range
-                0x00, 0x00, // entry selector
-                0x00, 0x00, // range shift
-                0x43, 0x32, 0x50, 0x41, // C2PA table tag
-                0x00, 0x00, 0x00, 0x00, // Checksum
-                0x00, 0x00, 0x00, 0x1c, // offset to table data
-                0x00, 0x00, 0x00, 0x1c, // length of table data
-                0x00, 0x00, // Major version
-                0x00, 0x01, // Minor version
-                0x00, 0x00, 0x00, 0x14, // Active manifest URI offset
-                0x00, 0x08, // Active manifest URI length
-                0x00, 0x00, // reserved
-                0x00, 0x00, 0x00, 0x00, // C2PA manifest store offset
-                0x00, 0x00, 0x00, 0x00, // C2PA manifest store length
-                0x66, 0x69, 0x6c, 0x65, 0x3a, 0x2f, 0x2f, 0x61, // active manifest uri data
-            ];
-            let mut font_stream: Cursor<&[u8]> = Cursor::<&[u8]>::new(&font_data);
-            assert!(font_xmp_support::build_xmp_from_stream(&mut font_stream).is_ok());
-        }
     }
 
     #[test]

@@ -56,6 +56,9 @@ pub enum Error {
     #[error("required feature missing")]
     MissingFeature(String),
 
+    #[error("validation rule was violated: {0}")]
+    ValidationRule(String),
+
     #[error("feature implementation incomplete")]
     NotImplemented(String),
 
@@ -65,7 +68,7 @@ pub enum Error {
 
     /// The attempt to deserialize the claim from CBOR failed.
     #[error("claim could not be converted from CBOR")]
-    ClaimDecoding,
+    ClaimDecoding(String),
 
     #[error("claim already signed, no further changes allowed")]
     ClaimAlreadySigned,
@@ -102,6 +105,9 @@ pub enum Error {
 
     #[error("more than one manifest store detected")]
     TooManyManifestStores,
+
+    #[error("manifest is not refernced by any ingredient")]
+    UnreferencedManifest,
 
     /// The COSE Sign1 structure can not be parsed.
     #[error("COSE Sign1 structure can not be parsed: {coset_error}")]
@@ -186,6 +192,9 @@ pub enum Error {
     #[error("WASM could not load crypto library")]
     WasmNoCrypto,
 
+    #[error("remote signers are not supported for WASM")]
+    WasmNoRemoteSigner,
+
     /// Unable to generate valid JUMBF for a claim.
     #[error("could not create valid JUMBF for claim")]
     JumbfCreationError,
@@ -205,6 +214,12 @@ pub enum Error {
     #[error("must fetch remote manifests from url {0}")]
     RemoteManifestUrl(String),
 
+    #[error("failed to fetch the remote settings")]
+    FailedToFetchSettings,
+
+    #[error("failed to remotely sign data")]
+    FailedToRemoteSign,
+
     #[error("stopped because of logged error")]
     LogStop,
 
@@ -213,6 +228,15 @@ pub enum Error {
 
     #[error("type is unsupported")]
     UnsupportedType,
+
+    #[error("thumbnail format {0} is unsupported")]
+    UnsupportedThumbnailFormat(String),
+
+    #[error("`trust.signer_info` is missing from settings")]
+    MissingSignerSettings,
+
+    #[error("`builder.auto_created_action.source_type` must be set if this feature is enabled")]
+    MissingAutoCreatedActionSourceType,
 
     #[error("embedding error")]
     EmbeddingError,
@@ -297,6 +321,9 @@ pub enum Error {
     CborError(#[from] serde_cbor::Error),
 
     #[error(transparent)]
+    TomlSerializationError(#[from] toml::ser::Error),
+
+    #[error(transparent)]
     OtherError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 
     #[error("prerelease content detected")]
@@ -333,6 +360,11 @@ pub enum Error {
     /// response.
     #[error("internal error ({0})")]
     InternalError(String),
+
+    // A C2PA specific error that needs to propagate up to the caller.
+    // The string should be one of the C2PA validation codes
+    #[error("C2PA Validation Error: {0}")]
+    C2PAValidation(String),
 }
 
 /// A specialized `Result` type for C2PA toolkit operations.
