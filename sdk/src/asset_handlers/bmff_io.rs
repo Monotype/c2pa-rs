@@ -35,7 +35,7 @@ use crate::{
         hash_utils::{vec_compare, HashRange},
         io_utils::{patch_stream, stream_len, tempfile_builder, ReaderUtils},
         patch::patch_bytes,
-        xmp_inmemory_utils::{add_provenance, MIN_XMP},
+        xmp_inmemory_utils::{add_provenance, extract_remote_ref, MIN_XMP},
     },
 };
 
@@ -1558,6 +1558,13 @@ impl CAIReader for BmffIO {
             }
         }
 
+        if c2pa_boxes.manifest_bytes.is_none() {
+            if let Some(xmp) = c2pa_boxes.xmp {
+                if let Some(remote_url) = extract_remote_ref(&xmp) {
+                    return Err(Error::RemoteManifestUrl(remote_url));
+                }
+            }
+        }
         c2pa_boxes.manifest_bytes.ok_or(Error::JumbfNotFound)
     }
 

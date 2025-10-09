@@ -501,13 +501,12 @@ pub mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use xmp_inmemory_utils::extract_provenance;
-
     use super::*;
     use crate::utils::{
         hash_utils::vec_compare,
         io_utils::tempdirectory,
         test::{fixture_path, temp_dir_path},
+        xmp_inmemory_utils::extract_provenance,
     };
 
     #[test]

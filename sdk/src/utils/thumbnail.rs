@@ -68,6 +68,7 @@ impl From<ThumbnailFormat> for ImageFormat {
             ThumbnailFormat::Gif => ImageFormat::Gif,
             ThumbnailFormat::WebP => ImageFormat::WebP,
             ThumbnailFormat::Tiff => ImageFormat::Tiff,
+            ThumbnailFormat::Svg => panic!("SVG is not supported by the image crate"),
         }
     }
 }
@@ -80,6 +81,7 @@ impl From<ThumbnailFormat> for config::ValueKind {
             ThumbnailFormat::Gif => "gif",
             ThumbnailFormat::WebP => "webp",
             ThumbnailFormat::Tiff => "tiff",
+            ThumbnailFormat::Svg => "svg",
         };
         config::ValueKind::String(variant.to_owned())
     }
@@ -87,6 +89,9 @@ impl From<ThumbnailFormat> for config::ValueKind {
 
 impl fmt::Display for ThumbnailFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if matches!(self, ThumbnailFormat::Svg) {
+            return write!(f, "image/svg+xml");
+        }
         write!(f, "{}", ImageFormat::from(*self).to_mime_type())
     }
 }
@@ -104,6 +109,18 @@ pub fn make_thumbnail_bytes_from_stream<R>(
 where
     R: BufRead + Seek,
 {
+    #[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
+    {
+        if font_thumbnail::is_supported_font_file(format)
+            || font_thumbnail::is_font_mime_type(format)
+        {
+            let mut input = input;
+            return font_thumbnail::make_thumbnail_from_stream(
+                &mut input,
+                Some(cfg!(feature = "add_svg_font_thumbnails")),
+            );
+        }
+    }
     let result = {
         match ThumbnailFormat::new(format) {
             Some(input_format) => {
@@ -214,8 +231,12 @@ where
     Ok(output_format)
 }
 
+#[cfg(all(feature = "sfnt", feature = "add_font_thumbnails"))]
+#[path = "font_thumbnail.rs"]
+mod font_thumbnail;
+
 #[cfg(test)]
-pub mod tests {
+mod tests {
     #![allow(clippy::unwrap_used)]
 
     use image::GenericImageView;
@@ -225,6 +246,31 @@ pub mod tests {
 
     const TEST_JPEG: &[u8] = include_bytes!("../../tests/fixtures/CA.jpg");
     const TEST_PNG: &[u8] = include_bytes!("../../tests/fixtures/sample1.png");
+
+    /// This test is in place to test the main thumbnail creation, making sure it calls down
+    /// into the font thumbnail creation logic. We have it here
+    #[cfg(feature = "add_svg_font_thumbnails")]
+    #[test]
+    fn test_svg_creation_with_stream() {
+        // Use a test fixture for generating a thumbnail from a font
+        let font_data = include_bytes!("../../tests/fixtures/font.otf");
+        let mut stream = std::io::Cursor::new(font_data);
+        // Make the thumbnail
+        let result = make_thumbnail_bytes_from_stream("font/otf", &mut stream);
+        assert!(result.is_ok());
+        let (mime_type, image_data) = result.unwrap().unwrap();
+        // Assert the result is a valid SVG
+        assert_eq!(mime_type, ThumbnailFormat::Svg);
+        // And the image data is NOT empty
+        assert!(!image_data.is_empty());
+        // Matter of fact, make sure it matches the expected output
+        let expected_svg = include_bytes!("../../tests/fixtures/font.thumbnail.svg");
+        let strip_all = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(
+            strip_all(&String::from_utf8_lossy(&image_data)),
+            strip_all(&String::from_utf8_lossy(expected_svg))
+        );
+    }
 
     fn create_test_jpeg_with_orientation(orientation: u16) -> Vec<u8> {
         use image::{ImageBuffer, Rgb, RgbImage};
