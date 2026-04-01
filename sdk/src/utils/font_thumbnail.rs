@@ -150,21 +150,20 @@ pub fn make_thumbnail_from_stream<R: Read + Seek + ?Sized>(
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::include_fixture_bytes;
 
     /// Get the bytes of the "font.otf" fixture
     const fn font_bytes() -> &'static [u8] {
-        include_fixture_bytes!("font.otf")
+        include_bytes!("../../tests/fixtures/font.otf")
     }
 
     /// Get the bytes of the expected PNG thumbnail fixture
     const fn png_thumbnail_bytes() -> &'static [u8] {
-        include_fixture_bytes!("font.thumbnail.png")
+        include_bytes!("../../tests/fixtures/font.thumbnail.png")
     }
 
     /// Get the bytes of the expected SVG thumbnail fixture
     const fn svg_thumbnail_bytes() -> &'static [u8] {
-        include_fixture_bytes!("font.thumbnail.svg")
+        include_bytes!("../../tests/fixtures/font.thumbnail.svg")
     }
 
     /// Helper function to strip all whitespace from a string

@@ -20,10 +20,11 @@ use std::{
 
 use range_set::RangeSet;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 // direct sha functions
 use sha2::{Digest, Sha256, Sha384, Sha512};
 
-use crate::{utils::io_utils::stream_len, Error, Result};
+use crate::{crypto::base64::encode, utils::io_utils::stream_len, Error, Result};
 
 const MAX_HASH_BUF: usize = 256 * 1024 * 1024; // cap memory usage to 256MB
 
@@ -85,11 +86,17 @@ pub fn vec_compare(va: &[u8], vb: &[u8]) -> bool {
        .all(|(a,b)| a == b)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Hasher {
     SHA256(Sha256),
     SHA384(Sha384),
     SHA512(Sha512),
+}
+
+impl Default for Hasher {
+    fn default() -> Self {
+        Hasher::SHA256(Sha256::new())
+    }
 }
 
 impl Hasher {
@@ -112,6 +119,26 @@ impl Hasher {
             SHA256(d) => d.finalize().to_vec(),
             SHA384(d) => d.finalize().to_vec(),
             SHA512(d) => d.finalize().to_vec(),
+        }
+    }
+
+    pub fn finalize_reset(&mut self) -> Vec<u8> {
+        use Hasher::*;
+
+        // return the hash and leave the Hasher open and reset
+        match self {
+            SHA256(ref mut d) => d.finalize_reset().to_vec(),
+            SHA384(ref mut d) => d.finalize_reset().to_vec(),
+            SHA512(ref mut d) => d.finalize_reset().to_vec(),
+        }
+    }
+
+    pub fn new(alg: &str) -> Result<Hasher> {
+        match alg {
+            "sha256" => Ok(Hasher::SHA256(Sha256::new())),
+            "sha384" => Ok(Hasher::SHA384(Sha384::new())),
+            "sha512" => Ok(Hasher::SHA512(Sha512::new())),
+            _ => Err(Error::UnsupportedType),
         }
     }
 }
@@ -188,11 +215,16 @@ pub fn hash_asset_by_alg_with_inclusions(
 
     The data is again split into range sets breaking at the exclusion points and now also the markers.
 */
-pub fn hash_stream_by_alg<R>(
+/// Internal implementation of [`hash_stream_by_alg`] with an optional per-range
+/// progress/cancellation callback.  SDK internals that have a [`Context`] available
+/// pass a closure that calls [`Context::check_progress`]; the public wrapper supplies
+/// `None` so external callers are unaffected.
+pub(crate) fn hash_stream_by_alg_with_progress<R>(
     alg: &str,
     data: &mut R,
     hash_range: Option<Vec<HashRange>>,
     is_exclusion: bool,
+    mut progress: Option<&mut dyn FnMut(u32, u32) -> Result<()>>,
 ) -> Result<Vec<u8>>
 where
     R: Read + Seek + ?Sized,
@@ -246,7 +278,16 @@ where
                         continue;
                     }
 
-                    let end = exclusion.start() + exclusion.length() - 1;
+                    if exclusion.length() == 0 {
+                        continue;
+                    }
+
+                    let end = exclusion
+                        .start()
+                        .checked_add(exclusion.length())
+                        .ok_or(Error::BadParam("No exclusion range".to_string()))?
+                        .checked_sub(1)
+                        .ok_or(Error::BadParam("No exclusion range".to_string()))?;
                     let exclusion_start = exclusion.start();
                     ranges.remove_range(exclusion_start..=end);
                 }
@@ -309,6 +350,10 @@ where
                 //build final ranges
                 let mut ranges_vec: Vec<RangeInclusive<u64>> = Vec::new();
                 for inclusion in hr {
+                    if inclusion.length() == 0 {
+                        continue;
+                    }
+
                     let end = inclusion.start() + inclusion.length() - 1;
                     let inclusion_start = inclusion.start();
 
@@ -334,9 +379,17 @@ where
         }
     };
 
+    let total = ranges.len() as u32;
+    let mut step: u32 = 0;
+
     if cfg!(target_arch = "wasm32") {
         // hash the data for ranges
         for r in ranges {
+            step += 1;
+            if let Some(cb) = progress.as_mut() {
+                cb(step, total)?;
+            }
+
             let start = r.start();
             let end = r.end();
             let mut chunk_left = end - start + 1;
@@ -366,6 +419,11 @@ where
     } else {
         // hash the data for ranges
         for r in ranges {
+            step += 1;
+            if let Some(cb) = progress.as_mut() {
+                cb(step, total)?;
+            }
+
             let start = r.start();
             let end = r.end();
             let mut chunk_left = end - start + 1;
@@ -417,6 +475,19 @@ where
 
     // return the hash
     Ok(Hasher::finalize(hasher_enum))
+}
+
+/// May be used to generate hashes in combination with embeddable APIs.
+pub fn hash_stream_by_alg<R>(
+    alg: &str,
+    data: &mut R,
+    hash_range: Option<Vec<HashRange>>,
+    is_exclusion: bool,
+) -> Result<Vec<u8>>
+where
+    R: Read + Seek + ?Sized,
+{
+    hash_stream_by_alg_with_progress(alg, data, hash_range, is_exclusion, None)
 }
 
 // verify the hash using the specified algorithm
@@ -472,4 +543,77 @@ pub fn concat_and_hash(alg: &str, left: &[u8], right: Option<&[u8]>) -> Vec<u8> 
     }
 
     hash_by_alg(alg, &temp, None)
+}
+
+/// replace byte arrays with base64 encoded strings
+pub fn hash_to_b64(mut value: Value) -> Value {
+    use std::collections::VecDeque;
+
+    let mut queue = VecDeque::new();
+    queue.push_back(&mut value);
+
+    while let Some(current) = queue.pop_front() {
+        match current {
+            Value::Object(obj) => {
+                for (_, v) in obj.iter_mut() {
+                    if let Value::Array(hash_arr) = v {
+                        if !hash_arr.is_empty() && hash_arr.iter().all(|x| x.is_number()) {
+                            // Pre-allocate with capacity to avoid reallocations
+                            let mut hash_bytes = Vec::with_capacity(hash_arr.len());
+                            // Convert numbers to bytes safely
+                            for n in hash_arr.iter() {
+                                if let Some(num) = n.as_u64() {
+                                    hash_bytes.push(num as u8);
+                                }
+                            }
+                            *v = Value::String(encode(&hash_bytes));
+                        }
+                    }
+                    queue.push_back(v);
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr.iter_mut() {
+                    queue.push_back(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn progress_callback_is_called() {
+        let data = vec![0u8; 64];
+        let mut called = false;
+        let mut reader = Cursor::new(&data);
+        let mut cb = |_step, _total| {
+            called = true;
+            Ok(())
+        };
+        hash_stream_by_alg_with_progress("sha256", &mut reader, None, true, Some(&mut cb)).unwrap();
+        assert!(called, "progress callback should have been invoked");
+    }
+
+    #[test]
+    fn progress_callback_can_cancel() {
+        let data = vec![0u8; 64];
+        let mut reader = Cursor::new(&data);
+        let mut cb = |_step, _total| Err(Error::OperationCancelled);
+        let result =
+            hash_stream_by_alg_with_progress("sha256", &mut reader, None, true, Some(&mut cb));
+        assert!(
+            matches!(result, Err(Error::OperationCancelled)),
+            "expected OperationCancelled, got {result:?}"
+        );
+    }
 }
