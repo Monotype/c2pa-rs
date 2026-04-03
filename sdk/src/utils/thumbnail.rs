@@ -254,7 +254,7 @@ mod tests {
         let font_data = include_bytes!("../../tests/fixtures/font.otf");
         let mut stream = std::io::Cursor::new(font_data);
         // Make the thumbnail
-        let result = make_thumbnail_bytes_from_stream("font/otf", &mut stream);
+        let result = make_thumbnail_bytes_from_stream("font/otf", &mut stream, &Settings::default());
         assert!(result.is_ok());
         let (mime_type, image_data) = result.unwrap().unwrap();
         // Assert the result is a valid SVG
