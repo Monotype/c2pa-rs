@@ -29,8 +29,8 @@ use crate::{
     assertion::{Assertion, AssertionBase, AssertionData, AssertionDecodeError},
     assertions::{
         labels::{self, CLAIM},
-        BmffHash, BoxHash, CertificateStatus, DataBox, DataHash,
-        Ingredient, Relationship, TimeStamp, User, UserCbor,
+        BmffHash, BoxHash, CertificateStatus, DataBox, DataHash, Ingredient, Relationship,
+        TimeStamp, User, UserCbor,
     },
     asset_io::{
         AssetBoxHash, CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions,
@@ -3355,7 +3355,7 @@ impl Store {
                 else {
                     let mut new_hash_ranges =
                         object_locations_from_stream(format, &mut intermediate_stream)?;
-                    
+
                     if !pc.update_manifest() {
                         // if we removed the manifest fixup the hash range to be empty
                         if remove_manifests {
@@ -3369,8 +3369,9 @@ impl Store {
                             });
                         }
 
-                        let mut cb =
-                            |step, total| context.check_progress(ProgressPhase::Hashing, step, total);
+                        let mut cb = |step, total| {
+                            context.check_progress(ProgressPhase::Hashing, step, total)
+                        };
                         let updated_hashes = Store::generate_data_hashes_for_stream(
                             &mut intermediate_stream,
                             pc.alg(),

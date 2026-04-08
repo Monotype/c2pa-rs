@@ -237,10 +237,7 @@ pub mod tests {
     use crate::{
         asset_handlers::id3_helper::test_helpers,
         error::Error,
-        utils::{
-            io_utils::tempdirectory,
-            test::fixture_path,
-        },
+        utils::{io_utils::tempdirectory, test::fixture_path},
     };
 
     fn fixture() -> std::path::PathBuf {
