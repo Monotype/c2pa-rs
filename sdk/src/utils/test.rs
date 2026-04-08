@@ -229,7 +229,6 @@ pub fn test_context() -> Context {
         .with_settings(test_settings())
         .expect("test_settings should always be valid")
 }
-}
 
 /// Create new C2PA compatible UUID
 pub(crate) fn gen_c2pa_uuid() -> String {
