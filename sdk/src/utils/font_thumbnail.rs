@@ -182,8 +182,9 @@ mod tests {
     /// This allows for differences in PNG compression while ensuring the
     /// images are visually identical.
     fn assert_png_images_equal(actual: &[u8], expected: &[u8]) -> std::result::Result<(), String> {
-        use image::ImageReader;
         use std::io::Cursor;
+
+        use image::ImageReader;
 
         // Decode both PNGs
         let actual_img = ImageReader::new(Cursor::new(actual))

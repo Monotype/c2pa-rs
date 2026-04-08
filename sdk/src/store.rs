@@ -3276,11 +3276,14 @@ impl Store {
                 // hash assertion.
                 if let Some(box_hash_handler) = get_box_hash_handler(format) {
                     let mut box_hash = BoxHash::new();
-                    box_hash.generate_box_hash_from_stream(
+                    let cb =
+                        |step, total| context.check_progress(ProgressPhase::Hashing, step, total);
+                    box_hash.generate_box_hash_from_stream_with_progress(
                         &mut intermediate_stream,
                         pc.alg(),
                         box_hash_handler,
                         false,
+                        cb,
                     )?;
                     pc.add_assertion(&box_hash)?;
                 // Otherwise, fall back to data hashing.
@@ -3343,11 +3346,14 @@ impl Store {
                 // the existing box hash assertion.
                 if let Some(box_hash_handler) = get_box_hash_handler(format) {
                     let mut box_hash = BoxHash::new();
-                    box_hash.generate_box_hash_from_stream(
+                    let cb =
+                        |step, total| context.check_progress(ProgressPhase::Hashing, step, total);
+                    box_hash.generate_box_hash_from_stream_with_progress(
                         &mut intermediate_stream,
                         pc.alg(),
                         box_hash_handler,
                         false,
+                        cb,
                     )?;
                     pc.replace_box_hash(box_hash)?;
                 }
