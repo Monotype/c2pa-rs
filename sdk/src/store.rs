@@ -29,8 +29,8 @@ use crate::{
     assertion::{Assertion, AssertionBase, AssertionData, AssertionDecodeError},
     assertions::{
         labels::{self, CLAIM},
-        BmffHash, BoxHash, CertificateStatus, DataBox, DataHash, DataMap, ExclusionsMap,
-        Ingredient, MerkleMap, Relationship, SubsetMap, TimeStamp, User, UserCbor, VecByteBuf,
+        BmffHash, BoxHash, CertificateStatus, DataBox, DataHash,
+        Ingredient, Relationship, TimeStamp, User, UserCbor,
     },
     asset_io::{
         AssetBoxHash, CAIRead, CAIReadWrite, HashBlockObjectType, HashObjectPositions,
