@@ -11,8 +11,12 @@
 .vscode
 
 /semver-checks/target/
+sdk/target/
 
 # Unit test output lands here. TO DO: Fix
 cli/target
 
 .vscode/
+.cursor/rules/manifest.json
+.cursor/rules/security-global/*
+.cursor/rules/security-lang/*

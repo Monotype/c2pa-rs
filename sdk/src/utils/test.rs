@@ -19,10 +19,10 @@ use std::{
     collections::HashMap,
     io::{Cursor, Read, Write},
     path::PathBuf,
+    sync::LazyLock,
 };
 
 use env_logger;
-use once_cell::sync::Lazy;
 use tempfile::TempDir;
 
 use crate::{
@@ -32,11 +32,11 @@ use crate::{
     },
     asset_io::CAIReadWrite,
     claim::Claim,
+    context::Context,
     crypto::{cose::CertificateTrustPolicy, raw_signature::SigningAlg},
     hash_utils::Hasher,
     jumbf_io::get_assetio_handler,
     resource_store::UriOrResource,
-    salt::DefaultSalt,
     store::Store,
     utils::{io_utils::tempdirectory, mime::extension_to_mime},
     AsyncSigner, ClaimGeneratorInfo, Result,
@@ -85,7 +85,7 @@ macro_rules! define_fixtures {
         )*
 
         // Create the registry mapping filenames to data and format
-        static EMBEDDED_FIXTURES: Lazy<HashMap<&'static str, (&'static [u8], &'static str)>> = Lazy::new(|| {
+        static EMBEDDED_FIXTURES: LazyLock<HashMap<&'static str, (&'static [u8], &'static str)>> = LazyLock::new(|| {
             let mut map = HashMap::new();
             $(
                 // Convert to &[u8] slice to avoid fixed-size array type issues
@@ -120,6 +120,7 @@ define_fixtures!(
     SAMPLE_HEIF => ("sample1.heif", "image/heif"),
     SAMPLE_MP4 => ("video1.mp4", "video/mp4"),
     LEGACY_MP4 => ("legacy.mp4", "video/mp4"),
+    NO_MANIFEST_MP4 => ("video1_no_manifest.mp4", "video/mp4"),
     LEGACY_INGREDIENT_HASH => ("legacy_ingredient_hash.jpg", "image/jpeg"),
     NO_MANIFEST => ("no_manifest.jpg", "image/jpeg"),
     NO_ALG => ("no_alg.jpg", "image/jpeg"),
@@ -127,6 +128,7 @@ define_fixtures!(
     SAMPLE_PSD => ("Purple Square.psd", "image/vnd.adobe.photoshop"),
     TEST_TEXT_PLAIN => ("unsupported_type.txt", "text/plain"),
     PRE_RELEASE => ("prerelease.jpg", "image/jpeg"),
+    C_MOV => ("c.mov", "video/quicktime"),
 
     // Add more as needed
 );
@@ -169,6 +171,66 @@ macro_rules! include_fixture_bytes {
     }};
 }
 
+/// Returns Settings configured for testing.
+///
+/// This loads the standard test settings from `tests/fixtures/test_settings.toml`,
+/// which includes trust anchors, signer configuration, and verification settings
+/// appropriate for testing.
+///
+/// # Panics
+///
+/// Panics if test settings cannot be loaded.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use crate::utils::test::test_settings;
+///
+/// // Use directly with Context
+/// let context = Context::new().with_settings(test_settings())?;
+///
+/// // Or modify for specific test needs
+/// let mut settings = test_settings();
+/// settings.verify.verify_trust = false;
+/// let context = Context::new().with_settings(settings)?;
+/// ```
+#[allow(clippy::expect_used)]
+pub fn test_settings() -> crate::Settings {
+    crate::Settings::new()
+        .with_toml(include_str!("../../tests/fixtures/test_settings.toml"))
+        .expect("built-in test_settings.toml should be valid")
+}
+
+/// Creates a Context configured with standard test settings.
+///
+/// This is equivalent to `Context::new().with_settings(test_settings())`.
+/// Use this for most tests that need a configured context.
+///
+/// # Panics
+///
+/// Panics if test settings cannot be loaded.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use crate::utils::test::test_context;
+///
+/// // Single use
+/// let builder = Builder::from_context(test_context());
+///
+/// // Shared across multiple components
+/// let ctx = test_context().into_shared();
+/// let builder1 = Builder::from_shared_context(&ctx);
+/// let builder2 = Builder::from_shared_context(&ctx);
+/// ```
+#[allow(clippy::expect_used)]
+pub fn test_context() -> Context {
+    Context::new()
+        .with_settings(test_settings())
+        .expect("test_settings should always be valid")
+}
+}
+
 /// Create new C2PA compatible UUID
 pub(crate) fn gen_c2pa_uuid() -> String {
     let guid = uuid::Uuid::new_v4();
@@ -182,14 +244,33 @@ pub(crate) fn static_test_v1_uuid() -> &'static str {
     const TEST_GUID: &str = "urn:uuid:f75ddc48-cdc8-4723-bcfe-77a8d68a5920";
     TEST_GUID
 }
+
+/// Creates a minimal valid claim for testing (v2)
+///
+/// This claim has just enough information to be valid, including a
+/// claim_generator_info and a c2pa.created action assertion.
+pub fn create_min_test_claim() -> Result<Claim> {
+    let mut claim = Claim::new("contentauth unit test", Some("contentauth"), 2);
+
+    let mut cg_info = ClaimGeneratorInfo::new("test app");
+    cg_info.version = Some("2.3.4".to_string());
+    claim.add_claim_generator_info(cg_info);
+
+    let created_action = Action::new("c2pa.created").set_source_type(DigitalSourceType::Empty);
+    let actions = Actions::new().add_action(created_action);
+
+    claim.add_assertion(&actions)?;
+
+    Ok(claim)
+}
+
 /// Creates a claim for testing (v2)
 pub fn create_test_claim() -> Result<Claim> {
-    // First create and add a claim thumbnail (we don't need to reference this anywhere)
     let mut claim = Claim::new("contentauth unit test", Some("contentauth"), 2);
 
     // Add an icon for the claim_generator
     let icon = EmbeddedData::new(labels::ICON, "image/jpeg", vec![0xde, 0xad, 0xbe, 0xef]);
-    let icon_ref = claim.add_assertion_with_salt(&icon, &DefaultSalt::default())?;
+    let icon_ref = claim.add_assertion(&icon)?;
 
     let mut cg_info = ClaimGeneratorInfo::new("test app");
     cg_info.version = Some("2.3.4".to_string());
@@ -204,8 +285,7 @@ pub fn create_test_claim() -> Result<Claim> {
         "image/jpeg",
         vec![0xde, 0xad, 0xbe, 0xef],
     );
-    let _claim_thumbnail_ref =
-        claim.add_assertion_with_salt(&claim_thumbnail, &DefaultSalt::default())?;
+    let _claim_thumbnail_ref = claim.add_assertion(&claim_thumbnail)?;
 
     // Create and add a thumbnail for an ingredient
     let ingredient_thumbnail = EmbeddedData::new(
@@ -213,22 +293,21 @@ pub fn create_test_claim() -> Result<Claim> {
         "image/jpeg",
         vec![0xde, 0xad, 0xbe, 0xef],
     );
-    let ingredient_thumbnail_ref =
-        claim.add_assertion_with_salt(&ingredient_thumbnail, &DefaultSalt::default())?;
+    let ingredient_thumbnail_ref = claim.add_assertion(&ingredient_thumbnail)?;
 
     // create a new v3 ingredient and add the thumbnail reference
     let ingredient = Ingredient::new_v3(Relationship::ComponentOf)
         .set_title("image_1.jpg")
         .set_format("image/jpeg")
         .set_thumbnail(Some(&ingredient_thumbnail_ref));
-    let ingredient_ref = claim.add_assertion_with_salt(&ingredient, &DefaultSalt::default())?;
+    let ingredient_ref = claim.add_assertion(&ingredient)?;
 
     // create a second v3 ingredient and add the thumbnail reference
     let ingredient2 = Ingredient::new_v3(Relationship::ComponentOf)
         .set_title("image_2.jpg")
         .set_format("image/png")
         .set_thumbnail(Some(&ingredient_thumbnail_ref));
-    let ingredient_ref2 = claim.add_assertion_with_salt(&ingredient2, &DefaultSalt::default())?;
+    let ingredient_ref2 = claim.add_assertion(&ingredient2)?;
 
     let created_action = Action::new("c2pa.created").set_source_type(DigitalSourceType::Empty);
 
@@ -306,7 +385,7 @@ pub fn create_test_claim_v1() -> Result<Claim> {
     claim.add_assertion(&thumbnail_claim)?;
     claim.add_assertion(&user_assertion)?;
 
-    let thumb_uri = claim.add_assertion_with_salt(&thumbnail_ingred, &DefaultSalt::default())?;
+    let thumb_uri = claim.add_assertion(&thumbnail_ingred)?;
 
     let review = ReviewRating::new(
         "a 3rd party plugin was used",
@@ -332,8 +411,8 @@ pub fn create_test_claim_v1() -> Result<Claim> {
     )
     .set_thumbnail(Some(&thumb_uri));
 
-    claim.add_assertion_with_salt(&ingredient, &DefaultSalt::default())?;
-    claim.add_assertion_with_salt(&ingredient2, &DefaultSalt::default())?;
+    claim.add_assertion(&ingredient)?;
+    claim.add_assertion(&ingredient2)?;
 
     Ok(claim)
 }
@@ -341,7 +420,7 @@ pub fn create_test_claim_v1() -> Result<Claim> {
 /// Creates a store with an unsigned claim for testing
 pub fn create_test_store() -> Result<Store> {
     // Create claims store.
-    let mut store = Store::new();
+    let mut store = Store::from_context(&Context::new());
 
     let claim = create_test_claim()?;
     store.commit_claim(claim).unwrap();
@@ -351,7 +430,7 @@ pub fn create_test_store() -> Result<Store> {
 /// Creates a store with an unsigned v1 claim for testing
 pub fn create_test_store_v1() -> Result<Store> {
     // Create claims store.
-    let mut store = Store::new();
+    let mut store = Store::from_context(&Context::new());
 
     let claim = create_test_claim_v1()?;
     store.commit_claim(claim).unwrap();
@@ -640,6 +719,61 @@ where
     output_file.write_all(&out_stream.into_inner()).unwrap();
 
     Ok(box_len)
+}
+
+/// Utility to create a BMFF (MP4) test asset with a placeholder for a manifest. Note
+/// that is not real.  Inserting a box this way will break the MP4 structure, but it
+/// is sufficient for testing.
+///
+/// Inserts `placeholder` (a composed C2PA UUID box, as returned by
+/// `Builder::composed_manifest` for BMFF formats) immediately after the `ftyp`
+/// box, which is the standard C2PA insertion point in BMFF assets.
+///
+/// Returns the byte offset where the placeholder was inserted (i.e. the end of
+/// the `ftyp` box).
+pub fn write_bmff_placeholder_stream<R>(
+    placeholder: &[u8],
+    input: &mut R,
+    output_file: &mut dyn CAIReadWrite,
+) -> Result<usize>
+where
+    R: Read + std::io::Seek + Send,
+{
+    input.rewind().unwrap();
+
+    // Read the ftyp box header: 4-byte big-endian size + 4-byte box type.
+    let mut size_bytes = [0u8; 4];
+    input.read_exact(&mut size_bytes).unwrap();
+    let mut type_bytes = [0u8; 4];
+    input.read_exact(&mut type_bytes).unwrap();
+    assert_eq!(
+        &type_bytes, b"ftyp",
+        "BMFF stream must start with an ftyp box"
+    );
+
+    let ftyp_size = u32::from_be_bytes(size_bytes) as usize;
+
+    // Build the output stream with a hole for the manifest.
+    let outbuf = Vec::new();
+    let mut out_stream = Cursor::new(outbuf);
+    input.rewind().unwrap();
+
+    // Copy the ftyp box verbatim.
+    let mut before = vec![0u8; ftyp_size];
+    input.read_exact(before.as_mut_slice()).unwrap();
+    out_stream.write_all(&before).unwrap();
+
+    // Insert the composed placeholder (C2PA UUID box).
+    out_stream.write_all(placeholder).unwrap();
+
+    // Copy the remainder of the asset.
+    let mut after_buf = Vec::new();
+    input.read_to_end(&mut after_buf).unwrap();
+    out_stream.write_all(&after_buf).unwrap();
+
+    output_file.write_all(&out_stream.into_inner()).unwrap();
+
+    Ok(ftyp_size)
 }
 
 pub(crate) struct TestGoodSigner {}

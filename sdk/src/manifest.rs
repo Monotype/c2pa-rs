@@ -26,14 +26,17 @@ use uuid::Uuid;
 use crate::{
     assertion::{AssertionBase, AssertionData},
     assertions::{labels, Actions, AssertionMetadata, EmbeddedData, Metadata, SoftwareAgent},
-    claim::RemoteManifest,
+    claim::{ClaimAssertionType, RemoteManifest},
     crypto::raw_signature::SigningAlg,
     error::{Error, Result},
     hashed_uri::HashedUri,
+    identity::IdentityAssertion,
     ingredient::Ingredient,
     jumbf::labels::{to_absolute_uri, to_assertion_uri},
     manifest_assertion::ManifestAssertion,
-    resource_store::{mime_from_uri, skip_serializing_resources, ResourceRef, ResourceStore},
+    resource_store::{mime_from_uri, ResourceRef, ResourceStore},
+    settings::Settings,
+    status_tracker::StatusTracker,
     store::Store,
     ClaimGeneratorInfo, ManifestAssertionKind,
 };
@@ -89,7 +92,8 @@ pub struct Manifest {
 
     /// A List of ingredients
     #[serde(default = "default_vec::<Ingredient>")]
-    ingredients: Vec<Ingredient>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) ingredients: Vec<Ingredient>,
 
     /// A List of verified credentials
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,7 +101,7 @@ pub struct Manifest {
 
     /// A list of assertions
     #[serde(default = "default_vec::<ManifestAssertion>")]
-    assertions: Vec<ManifestAssertion>,
+    pub(crate) assertions: Vec<ManifestAssertion>,
 
     /// A list of assertion hash references.
     #[serde(skip)]
@@ -105,7 +109,7 @@ pub struct Manifest {
 
     /// A list of redactions - URIs to a redacted assertions
     #[serde(skip_serializing_if = "Option::is_none")]
-    redactions: Option<Vec<String>>,
+    pub(crate) redactions: Option<Vec<String>>,
 
     /// Signature data (only used for reporting)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,13 +118,25 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     label: Option<String>,
 
+    /// The version of the claim, parsed from the claim label.
+    ///
+    /// For example:
+    /// - `c2pa.claim.v2` -> 2
+    /// - `c2pa.claim` -> 1
+    claim_version: Option<u8>,
+
+    /// The [`CoseSign1::signature`] value.
+    ///
+    /// [`CoseSign1::signature`]: coset::CoseSign1::signature
+    #[serde(skip)]
+    signature: Option<Vec<u8>>,
+
     /// Indicates where a generated manifest goes
     #[serde(skip)]
     remote_manifest: Option<RemoteManifest>,
 
     /// container for binary assets (like thumbnails)
-    #[serde(skip_deserializing)]
-    #[serde(skip_serializing_if = "skip_serializing_resources")]
+    #[serde(skip)]
     resources: ResourceStore,
 }
 
@@ -231,6 +247,21 @@ impl Manifest {
 
     pub fn signature_info(&self) -> Option<&SignatureInfo> {
         self.signature_info.as_ref()
+    }
+
+    /// Returns the signature field of the `COSE_Sign1_Tagged` structure found in the
+    /// claim signature box.
+    pub fn signature(&self) -> Option<&[u8]> {
+        self.signature.as_deref()
+    }
+
+    /// Returns the version of the claim, parsed from the claim label.
+    ///
+    /// For example:
+    /// - `c2pa.claim.v2` -> 2
+    /// - `c2pa.claim` -> 1
+    pub fn claim_version(&self) -> Option<u8> {
+        self.claim_version
     }
 
     /// Returns the parent ingredient if it exists.
@@ -350,6 +381,8 @@ impl Manifest {
         store: &Store,
         manifest_label: &str,
         options: &mut StoreOptions,
+        validation_log: &mut StatusTracker,
+        settings: &Settings,
     ) -> Result<Self> {
         let claim = store
             .get_claim(manifest_label)
@@ -363,6 +396,11 @@ impl Manifest {
             format: claim.format().map(|s| s.to_owned()),
             instance_id: claim.instance_id().to_owned(),
             label: Some(claim.label().to_owned()),
+            signature: claim
+                .cose_sign1()
+                .ok()
+                .map(|cose_sign1| cose_sign1.signature),
+            claim_version: Some(claim.version().try_into()?),
             ..Default::default()
         };
 
@@ -434,6 +472,8 @@ impl Manifest {
             })
             .collect();
 
+        let decode_identity_assertions = settings.core.decode_identity_assertions;
+
         for assertion in claim.assertions() {
             let claim_assertion = match store
                 .get_claim_assertion_from_uri(&to_absolute_uri(claim.label(), &assertion.url()))
@@ -451,6 +491,7 @@ impl Manifest {
             let assertion = claim_assertion.assertion();
             let label = claim_assertion.label();
             let base_label = assertion.label();
+            let created = claim_assertion.assertion_type() == ClaimAssertionType::Created;
             debug!("assertion = {}", &label);
             match base_label.as_ref() {
                 base if base.starts_with(labels::ACTIONS) => {
@@ -493,7 +534,8 @@ impl Manifest {
                         }
                     }
                     let manifest_assertion = ManifestAssertion::from_assertion(&actions)?
-                        .set_instance(claim_assertion.instance());
+                        .set_instance(claim_assertion.instance())
+                        .set_created(created);
                     manifest.assertions.push(manifest_assertion);
                 }
                 base if base.starts_with(labels::INGREDIENT) => {
@@ -535,13 +577,53 @@ impl Manifest {
                         .set_instance(claim_assertion.instance());
                     manifest.assertions.push(manifest_assertion);
                 }
+                label
+                    if decode_identity_assertions
+                        && (label == "cawg.identity" || label.starts_with("cawg.identity__")) =>
+                {
+                    let value = assertion.as_json_object()?;
+                    let mut ma = ManifestAssertion::new(label.to_string(), value)
+                        .set_instance(claim_assertion.instance());
+
+                    let mut partial_claim = crate::dynamic_assertion::PartialClaim::default();
+                    for a in claim.assertions() {
+                        partial_claim.add_assertion(a);
+                    }
+
+                    let uri = to_assertion_uri(manifest_label, label);
+                    validation_log.push_current_uri(&uri);
+                    let value: Option<serde_json::Value> = if _sync {
+                        crate::log_item!(
+                            uri,
+                            "decoding identity assertions not supported in sync",
+                            "from_store - validating cawg.identity"
+                        )
+                        .validation_status("cawg.validation_skipped")
+                        .informational(validation_log);
+                        None
+                    } else {
+                        let identity_assertion: IdentityAssertion = ma.to_assertion()?;
+                        identity_assertion
+                            .validate_partial_claim(&partial_claim, validation_log)
+                            .await
+                            .ok()
+                    };
+                    if let Some(v) = value {
+                        //debug!("cawg.identity validation returned: {v}");
+                        ma = ManifestAssertion::new(label.to_string(), v)
+                            .set_instance(claim_assertion.instance());
+                    }
+                    validation_log.pop_current_uri();
+                    manifest.assertions.push(ma);
+                }
                 _ => {
                     // inject assertions for all other assertions
                     match assertion.decode_data() {
                         AssertionData::Cbor(_) => {
                             let value = assertion.as_json_object()?;
                             let ma = ManifestAssertion::new(label, value)
-                                .set_instance(claim_assertion.instance());
+                                .set_instance(claim_assertion.instance())
+                                .set_created(created);
 
                             manifest.assertions.push(ma);
                         }
@@ -549,7 +631,8 @@ impl Manifest {
                             let value = assertion.as_json_object()?;
                             let ma = ManifestAssertion::new(label, value)
                                 .set_instance(claim_assertion.instance())
-                                .set_kind(ManifestAssertionKind::Json);
+                                .set_kind(ManifestAssertionKind::Json)
+                                .set_created(created);
 
                             manifest.assertions.push(ma);
                         }
@@ -768,7 +851,7 @@ pub(crate) mod tests {
         const LABEL: &str = "org.cai.test";
         const DATA: &str = r#"{ "l1":"some data", "l2":"some other data" }"#;
         let json: serde_json::Value = serde_json::from_str(DATA).unwrap();
-        let data = serde_cbor::to_vec(&json).unwrap();
+        let data = c2pa_cbor::to_vec(&json).unwrap();
         let cbor = UserCbor::new(LABEL, data);
         let mut manifest = test_manifest();
         manifest.add_assertion(&cbor).expect("add_assertion");
@@ -1283,7 +1366,6 @@ pub(crate) mod tests {
 
     // This is only used for testing obsolete v1 manifest creation code
     const MANIFEST_JSON: &str = r#"{
-
         "claim_version": 1,
         "claim_generator": "test",
         "claim_generator_info": [

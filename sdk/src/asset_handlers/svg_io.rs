@@ -221,9 +221,21 @@ fn detect_manifest_location(
                 let name = String::from_utf8_lossy(e.name().into_inner()).into_owned();
                 xml_path.push(name);
 
-                if xml_path.len() == 2 && xml_path[0] == SVG && xml_path[1] == METADATA {
-                    detected_level = DetectedTagsDepth::Metadata;
-                    insertion_point = xml_reader.buffer_position();
+                if xml_path.len() == 2 {
+                    if xml_path[0] == SVG {
+                        if xml_path[1] == METADATA {
+                            detected_level = DetectedTagsDepth::Metadata;
+                            insertion_point = xml_reader.buffer_position();
+                        }
+                    } else {
+                        return Err(SvgError::InvalidFileSignature {
+                            reason: format!(
+                                "invalid tag structure: root element must be \"{}\", found \"{}\"",
+                                SVG, xml_path[0]
+                            ),
+                        }
+                        .into());
+                    }
                 }
 
                 if xml_path.len() == 3
@@ -240,23 +252,24 @@ fn detect_manifest_location(
                     insertion_point = xml_reader.buffer_position();
                 }
             }
-            Ok(Event::Text(e)) => {
+            Ok(Event::Text(e))
                 if xml_path.len() == 3
                     && xml_path[0] == SVG
                     && xml_path[1] == METADATA
-                    && xml_path[2] == MANIFEST
-                {
-                    let encoded_content = e
-                        .unescape()
-                        .map_err(|_e| {
-                            Error::InvalidAsset("XML incorrectly escaped character".to_string())
-                        })?
-                        .into_owned();
-                    output = Some(base64::decode(&encoded_content).map_err(|_e| {
+                    && xml_path[2] == MANIFEST =>
+            {
+                let encoded_content = e
+                    .decode()
+                    .map_err(|_e| {
+                        Error::InvalidAsset("XML incorrectly escaped character".to_string())
+                    })?
+                    .into_owned();
+                output =
+                    Some(base64::decode(&encoded_content).map_err(|_e| {
                         Error::InvalidAsset("XML bad base64 encoding".to_string())
                     })?);
-                }
             }
+            Ok(Event::Text(_)) => {}
             Ok(Event::End(_)) => {
                 let _p = xml_path.pop();
             }
@@ -734,6 +747,12 @@ impl RemoteRefEmbed for SvgIO {
             _ => Err(Error::UnsupportedType),
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SvgError {
+    #[error("invalid file signature: {reason}")]
+    InvalidFileSignature { reason: String },
 }
 
 #[cfg(test)]
