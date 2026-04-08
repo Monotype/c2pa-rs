@@ -172,6 +172,80 @@ mod tests {
         s.split_whitespace().collect::<String>()
     }
 
+    /// Compare two PNG images by their decoded content, not compressed bytes.
+    ///
+    /// This function decodes both PNGs and compares:
+    /// - Image dimensions (width x height)
+    /// - Color format
+    /// - Decoded pixel data
+    ///
+    /// This allows for differences in PNG compression while ensuring the
+    /// images are visually identical.
+    fn assert_png_images_equal(actual: &[u8], expected: &[u8]) -> std::result::Result<(), String> {
+        use image::ImageReader;
+        use std::io::Cursor;
+
+        // Decode both PNGs
+        let actual_img = ImageReader::new(Cursor::new(actual))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to decode actual PNG: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode actual PNG: {}", e))?;
+
+        let expected_img = ImageReader::new(Cursor::new(expected))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to decode expected PNG: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode expected PNG: {}", e))?;
+
+        // Compare dimensions
+        if actual_img.width() != expected_img.width() {
+            return Err(format!(
+                "Width mismatch: actual={}, expected={}",
+                actual_img.width(),
+                expected_img.width()
+            ));
+        }
+
+        if actual_img.height() != expected_img.height() {
+            return Err(format!(
+                "Height mismatch: actual={}, expected={}",
+                actual_img.height(),
+                expected_img.height()
+            ));
+        }
+
+        // Compare color type
+        if actual_img.color() != expected_img.color() {
+            return Err(format!(
+                "Color type mismatch: actual={:?}, expected={:?}",
+                actual_img.color(),
+                expected_img.color()
+            ));
+        }
+
+        // Compare pixel data by converting to bytes and comparing
+        let actual_bytes = actual_img.as_bytes();
+        let expected_bytes = expected_img.as_bytes();
+
+        if actual_bytes != expected_bytes {
+            // Count different pixels
+            let diff_count = actual_bytes
+                .iter()
+                .zip(expected_bytes.iter())
+                .filter(|(a, b)| a != b)
+                .count();
+
+            return Err(format!(
+                "Pixel data mismatch: {} bytes differ out of {}",
+                diff_count,
+                actual_bytes.len()
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Test to ensure that the font file is a supported type
     #[test]
     fn test_is_supported_font_file() {
@@ -261,8 +335,11 @@ mod tests {
         assert_eq!(mime_type, ThumbnailFormat::Png);
         // And the image data is NOT empty
         assert!(!image_data.is_empty());
-        // Matter of fact, make sure it matches the expected output
+        
+        // Compare decoded PNG content, not compressed bytes
+        // This allows for compression differences while ensuring visual identity
         let expected_png = png_thumbnail_bytes();
-        assert_eq!(&image_data, expected_png);
+        assert_png_images_equal(&image_data, expected_png)
+            .expect("PNG images should be visually identical");
     }
 }
