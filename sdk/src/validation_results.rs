@@ -11,6 +11,7 @@
 // specific language governing permissions and limitations under
 // each license.
 
+use chrono::Utc;
 #[cfg(feature = "json_schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,30 +22,42 @@ use crate::{
     jumbf::labels::manifest_label_from_uri,
     status_tracker::{LogKind, StatusTracker},
     store::Store,
-    validation_status::{log_kind, ValidationStatus},
+    validation_status::{self, log_kind, ValidationStatus},
 };
 
+/// Represents the levels of assurance a manifest store achieves when evaluated against the C2PA
+/// specifications structural, cryptographic, and trust requirements.
+///
+/// See [Validation states - C2PA Technical Specification](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_validation_states).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-/// Indicates if the manifest store is valid and trusted.
-///
-/// The Trusted state implies the manifest store is valid and the active signature is trusted.
 pub enum ValidationState {
-    /// Errors were found in the manifest store.
+    /// The manifest store fails to meet ValidationState::WellFormed requirements, meaning it cannot
+    /// even be parsed or its basic structure is non-compliant.
+    ///
+    /// This case may also occur if validation is disabled in the SDK.
     Invalid,
-    /// No errors were found in validation, but the active signature is not trusted.
+    /// The manifest store is well-formed and the cryptographic integrity checks succeed.
+    ///
+    /// See [Valid Manifest - C2PA Technical Specification](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_valid_manifest).
     Valid,
-    /// The manifest store is valid and the active signature is trusted.
+    /// The manifest store is valid and signed by a certificate that chains up to a trusted root or known
+    /// authority in the trust list.
+    ///
+    /// See [Trusted Manifest - C2PA Technical Specification](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_trusted_manifest).
     Trusted,
 }
 
+/// Contains a set of success, informational, and failure validation status codes.
 #[derive(Clone, Serialize, Default, Deserialize, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "json_schema", derive(JsonSchema))]
-/// Contains a set of success, informational, and failure validation status codes.
 pub struct StatusCodes {
-    pub success: Vec<ValidationStatus>, // an array of validation success codes. May be empty.
-    pub informational: Vec<ValidationStatus>, // an array of validation informational codes. May be empty.
-    pub failure: Vec<ValidationStatus>,       // an array of validation failure codes. May be empty.
+    /// An array of validation success codes. May be empty.
+    pub success: Vec<ValidationStatus>,
+    /// An array of validation informational codes. May be empty.
+    pub informational: Vec<ValidationStatus>,
+    /// An array of validation failure codes. May be empty.
+    pub failure: Vec<ValidationStatus>,
 }
 
 impl StatusCodes {
@@ -85,18 +98,26 @@ impl StatusCodes {
     }
 }
 
-#[derive(Clone, Serialize, Default, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 /// A map of validation results for a manifest store.
 ///
 /// The map contains the validation results for the active manifest and any ingredient deltas.
 /// It is normal for there to be many
+#[derive(Clone, Serialize, Default, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "json_schema", derive(JsonSchema))]
 pub struct ValidationResults {
+    /// Validation status codes for the ingredient's active manifest. Present if ingredient is a C2PA
+    /// asset. Not present if the ingredient is not a C2PA asset.
     #[serde(rename = "activeManifest", skip_serializing_if = "Option::is_none")]
-    active_manifest: Option<StatusCodes>, // Validation status codes for the ingredient's active manifest. Present if ingredient is a C2PA asset. Not present if the ingredient is not a C2PA asset.
+    active_manifest: Option<StatusCodes>,
 
+    /// List of any changes/deltas between the current and previous validation results for each ingredient's
+    /// manifest. Present if the the ingredient is a C2PA asset.
     #[serde(rename = "ingredientDeltas", skip_serializing_if = "Option::is_none")]
-    ingredient_deltas: Option<Vec<IngredientDeltaValidationResult>>, // List of any changes/deltas between the current and previous validation results for each ingredient's manifest. Present if the the ingredient is a C2PA asset.
+    ingredient_deltas: Option<Vec<IngredientDeltaValidationResult>>,
+
+    /// Time when the validation was performed (RFC 3339 date-time). Used only for document-level validationInfo; not serialized in validationResults (e.g. ingredient assertions).
+    #[serde(rename = "validationTime", skip_serializing)]
+    validation_time: Option<String>,
 }
 
 impl ValidationResults {
@@ -110,7 +131,12 @@ impl ValidationResults {
             .collect();
 
         // Filter out any status that is already captured in an ingredient assertion.
+        // There is always an active manifest in a manifest store; ensure active_manifest is set
+        // so serialization (e.g. crJSON) always includes activeManifest when validationResults exist.
         if let Some(claim) = store.provenance_claim() {
+            let _ = results
+                .active_manifest
+                .get_or_insert_with(StatusCodes::default);
             let active_manifest = Some(claim.label().to_string());
 
             // This closure returns true if the URI references the store's active manifest.
@@ -176,33 +202,65 @@ impl ValidationResults {
                 results.add_status(status);
             }
         }
+        results.validation_time = Some(Utc::now().to_rfc3339());
         results
     }
 
     /// Returns the [ValidationState] of the manifest store based on the validation results.
+    ///
+    /// See [Validation states - C2PA Technical Specification](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_validation_states).
     pub fn validation_state(&self) -> ValidationState {
-        let mut is_trusted = true; // Assume the state is trusted until proven otherwise
         if let Some(active_manifest) = self.active_manifest.as_ref() {
-            if !active_manifest.failure().is_empty() {
-                return ValidationState::Invalid;
+            // https://spec.c2pa.org/specifications/specifications/2.2/specs/C2PA_Specification.html#_valid_manifest
+            let is_valid = active_manifest
+                // First check if the claim is valid and the certificate hasn't expired.
+                .success()
+                .iter()
+                .any(|status| status.code() == validation_status::CLAIM_SIGNATURE_VALIDATED)
+                && active_manifest.success().iter().any(|status| {
+                    status.code() == validation_status::CLAIM_SIGNATURE_INSIDE_VALIDITY
+                })
+                // Then check if the manifest contains either no failures or that it's only untrusted.
+                && (active_manifest.failure().is_empty()
+                    || active_manifest.failure().iter().all(|status| {
+                        status.code() == validation_status::SIGNING_CREDENTIAL_UNTRUSTED
+                    }))
+                // Finally check if the ingredients contain either no failures or the only failure is
+                // that the ingredient is untrusted.
+                && self.ingredient_deltas.as_ref().iter().all(|deltas| {
+                    deltas.iter().all(|idv| {
+                        let deltas = idv.validation_deltas();
+                        deltas.failure().is_empty()
+                            || deltas.failure().iter().all(|status| {
+                                status.code() == validation_status::SIGNING_CREDENTIAL_UNTRUSTED
+                            })
+                    })
+                });
+
+            // https://spec.c2pa.org/specifications/specifications/2.2/specs/C2PA_Specification.html#_trusted_manifest
+            let is_trusted = active_manifest
+                // First check if the signing certificate is trusted.
+                .success()
+                .iter()
+                .any(|status| status.code() == validation_status::SIGNING_CREDENTIAL_TRUSTED)
+                // Then check that there are no errors.
+                && active_manifest.failure().is_empty()
+                // Finally check if the ingredients contain no failures.
+                && self.ingredient_deltas.as_ref().iter().all(|deltas| {
+                    deltas.iter().all(|idv| {
+                        idv.validation_deltas().failure().is_empty()
+                    })
+                })
+                && is_valid;
+
+            if is_trusted {
+                return ValidationState::Trusted;
+            } else if is_valid {
+                return ValidationState::Valid;
             }
-            // There must be a trusted credential in the active manifest for the state to be trusted
-            is_trusted = active_manifest.success().iter().any(|status| {
-                status.code() == crate::validation_status::SIGNING_CREDENTIAL_TRUSTED
-            });
         }
-        if let Some(ingredient_deltas) = self.ingredient_deltas.as_ref() {
-            for idv in ingredient_deltas.iter() {
-                if !idv.validation_deltas().failure().is_empty() {
-                    return ValidationState::Invalid;
-                }
-            }
-        }
-        if is_trusted {
-            ValidationState::Trusted
-        } else {
-            ValidationState::Valid
-        }
+
+        ValidationState::Invalid
     }
 
     /// Returns a list of all validation errors in [ValidationResults].
@@ -283,6 +341,11 @@ impl ValidationResults {
         self.ingredient_deltas.as_ref()
     }
 
+    /// Returns the time when validation was performed (RFC 3339), if set.
+    pub fn validation_time(&self) -> Option<&str> {
+        self.validation_time.as_deref()
+    }
+
     pub fn add_active_manifest(mut self, scm: StatusCodes) -> Self {
         self.active_manifest = Some(scm);
         self
@@ -337,9 +400,7 @@ impl IngredientDeltaValidationResult {
 
 /// Implements validation status for specific parts of a manifest.
 ///
-/// See [§15.2.1, “Standard Status Codes.”]
-///
-/// [§15.2.1, “Standard Status Codes.”]: https://c2pa.org/specifications/specifications/2.2/specs/C2PA_Specification.html#_standard_status_codes
+/// See [Standard Status Codes - C2PA Technical Specification](https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_standard_status_codes).
 pub mod validation_codes {
     use crate::status_tracker::LogKind;
 
@@ -907,5 +968,231 @@ pub mod validation_codes {
             | ASSERTION_DATAHASH_ADDITIONAL_EXCLUSIONS => LogKind::Informational,
             _ => LogKind::Failure,
         }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::validation_status::{
+        ASSERTION_DATAHASH_MISMATCH, CLAIM_MALFORMED, CLAIM_SIGNATURE_INSIDE_VALIDITY,
+        CLAIM_SIGNATURE_VALIDATED, SIGNING_CREDENTIAL_TRUSTED, SIGNING_CREDENTIAL_UNTRUSTED,
+    };
+
+    #[test]
+    fn trusted_state() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(SIGNING_CREDENTIAL_TRUSTED).set_kind(LogKind::Success),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Trusted
+        );
+    }
+
+    #[test]
+    fn not_trusted_state_with_failure() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(SIGNING_CREDENTIAL_TRUSTED).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(ValidationStatus::new_failure(SIGNING_CREDENTIAL_UNTRUSTED));
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Valid
+        );
+    }
+
+    #[test]
+    fn not_trusted_state_with_failure_delta() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(SIGNING_CREDENTIAL_TRUSTED).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(
+            ValidationStatus::new_failure(SIGNING_CREDENTIAL_UNTRUSTED).set_ingredient_uri("1"),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Valid
+        );
+    }
+
+    #[test]
+    fn valid_state() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Valid
+        );
+    }
+
+    #[test]
+    fn valid_state_with_untrusted_delta() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(
+            ValidationStatus::new_failure(SIGNING_CREDENTIAL_UNTRUSTED).set_ingredient_uri("1"),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Valid
+        );
+    }
+
+    #[test]
+    fn not_valid_state_with_failure() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(ValidationStatus::new_failure(CLAIM_MALFORMED));
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn valid_state_with_failure_delta_and_untrusted_delta() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(
+            ValidationStatus::new_failure(SIGNING_CREDENTIAL_UNTRUSTED).set_ingredient_uri("1"),
+        );
+        validation_results.add_status(
+            ValidationStatus::new_failure(ASSERTION_DATAHASH_MISMATCH).set_ingredient_uri("1"),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn not_valid_state_with_failure_delta() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        validation_results.add_status(
+            ValidationStatus::new_failure(ASSERTION_DATAHASH_MISMATCH).set_ingredient_uri("1"),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn not_valid_state_with_no_inside_validity() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_VALIDATED).set_kind(LogKind::Success),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn not_valid_state_with_no_validated() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(
+            ValidationStatus::new(CLAIM_SIGNATURE_INSIDE_VALIDITY).set_kind(LogKind::Success),
+        );
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn invalid_state() {
+        let mut validation_results = ValidationResults::default();
+
+        validation_results.add_status(ValidationStatus::new_failure(ASSERTION_DATAHASH_MISMATCH));
+
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
+    }
+
+    #[test]
+    fn invalid_state_with_nothing() {
+        let validation_results = ValidationResults::default();
+        assert_eq!(
+            validation_results.validation_state(),
+            ValidationState::Invalid
+        );
     }
 }

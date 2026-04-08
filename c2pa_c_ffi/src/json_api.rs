@@ -10,10 +10,8 @@
 // specific language governing permissions and limitations under
 // each license.
 
-use std::path::PathBuf;
-
 use c2pa::{identity::validator::CawgValidator, Ingredient, Reader, Relationship};
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 use crate::{Error, Result, SignerInfo};
 
@@ -23,10 +21,23 @@ use crate::{Error, Result, SignerInfo};
 /// Any Validation errors will be reported in the validation_status field.
 pub fn read_file(path: &str, data_dir: Option<String>) -> Result<String> {
     let mut reader = Reader::from_file(path).map_err(Error::from_c2pa_error)?;
-    let runtime = Runtime::new().map_err(|e| Error::Other(e.to_string()))?;
+
+    #[cfg(target_arch = "wasm32")]
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Other(e.to_string()))?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Other(e.to_string()))?;
+
     runtime
         .block_on(reader.post_validate_async(&CawgValidator {}))
         .map_err(Error::from_c2pa_error)?;
+
     Ok(if let Some(dir) = data_dir {
         let json = reader.json();
         reader.to_folder(&dir).map_err(Error::from_c2pa_error)?;
@@ -53,7 +64,7 @@ pub fn sign_file(
 
     // if data_dir is provided, set the base path for the manifest
     if let Some(path) = data_dir {
-        builder.base_path = Some(PathBuf::from(path));
+        builder.set_base_path(path);
     }
 
     // If the source file has a manifest store, and no parent is specified, treat the source's manifest store as the parent.

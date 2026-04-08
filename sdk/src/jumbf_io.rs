@@ -31,11 +31,13 @@ use crate::asset_handlers::sfnt_io::SfntIO;
 use crate::asset_handlers::woff_io::WoffIO;
 use crate::{
     asset_handlers::{
-        bmff_io::BmffIO, c2pa_io::C2paIO, gif_io::GifIO, jpeg_io::JpegIO, mp3_io::Mp3IO,
-        png_io::PngIO, riff_io::RiffIO, svg_io::SvgIO, tiff_io::TiffIO,
+        bmff_io::BmffIO, c2pa_io::C2paIO, flac_io::FlacIO, gif_io::GifIO, jpeg_io::JpegIO,
+        jpegxl_io::JpegXlIO, mp3_io::Mp3IO, png_io::PngIO, riff_io::RiffIO, svg_io::SvgIO,
+        tiff_io::TiffIO,
     },
     asset_io::{AssetIO, CAIRead, CAIReadWrite, CAIReader, CAIWriter, HashObjectPositions},
     error::{Error, Result},
+    maybe_send_sync::MaybeSend,
 };
 
 // initialize asset handlers
@@ -47,12 +49,14 @@ lazy_static! {
             Box::new(BmffIO::new("")),
             Box::new(C2paIO::new("")),
             Box::new(JpegIO::new("")),
+            Box::new(JpegXlIO::new("")),
             Box::new(PngIO::new("")),
             Box::new(RiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
             Box::new(GifIO::new("")),
+            Box::new(FlacIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
             #[cfg(feature = "woff")]
@@ -80,11 +84,13 @@ lazy_static! {
             Box::new(BmffIO::new("")),
             Box::new(C2paIO::new("")),
             Box::new(JpegIO::new("")),
+            Box::new(JpegXlIO::new("")),
             Box::new(PngIO::new("")),
             Box::new(RiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(FlacIO::new("")),
             Box::new(GifIO::new("")),
             #[cfg(feature = "sfnt")]
             Box::new(SfntIO::new("")),
@@ -148,6 +154,7 @@ pub fn save_jumbf_to_stream(
 /// writes the jumbf data in store_bytes into an asset in data and returns the newly created asset
 pub fn save_jumbf_to_memory(asset_type: &str, data: &[u8], store_bytes: &[u8]) -> Result<Vec<u8>> {
     let mut input_stream = Cursor::new(data);
+
     let output_vec: Vec<u8> = Vec::with_capacity(data.len() + store_bytes.len() + 1024);
     let mut output_stream = Cursor::new(output_vec);
 
@@ -326,28 +333,12 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn object_locations_from_stream<R>(
     format: &str,
     stream: &mut R,
 ) -> Result<Vec<HashObjectPositions>>
 where
-    R: Read + Seek + Send + ?Sized,
-{
-    let mut reader = CAIReadAdapter { reader: stream };
-    match get_caiwriter_handler(format) {
-        Some(handler) => handler.get_object_locations_from_stream(&mut reader),
-        _ => Err(Error::UnsupportedType),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn object_locations_from_stream<R>(
-    format: &str,
-    stream: &mut R,
-) -> Result<Vec<HashObjectPositions>>
-where
-    R: Read + Seek + ?Sized,
+    R: Read + Seek + MaybeSend + ?Sized,
 {
     let mut reader = CAIReadAdapter { reader: stream };
     match get_caiwriter_handler(format) {
@@ -396,11 +387,13 @@ pub mod tests {
             Box::new(C2paIO::new("")),
             Box::new(BmffIO::new("")),
             Box::new(JpegIO::new("")),
+            Box::new(JpegXlIO::new("")),
             Box::new(PngIO::new("")),
             Box::new(RiffIO::new("")),
             Box::new(TiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(FlacIO::new("")),
         ];
 
         // build handler map
@@ -418,6 +411,7 @@ pub mod tests {
             Box::new(C2paIO::new("")),
             Box::new(BmffIO::new("")),
             Box::new(JpegIO::new("")),
+            Box::new(JpegXlIO::new("")),
             #[cfg(feature = "pdf")]
             Box::new(PdfIO::new("")),
             Box::new(PngIO::new("")),
@@ -425,6 +419,7 @@ pub mod tests {
             Box::new(TiffIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(FlacIO::new("")),
         ];
 
         // build handler map
@@ -440,8 +435,10 @@ pub mod tests {
     fn test_get_writer() {
         let handlers: Vec<Box<dyn AssetIO>> = vec![
             Box::new(JpegIO::new("")),
+            Box::new(JpegXlIO::new("")),
             Box::new(PngIO::new("")),
             Box::new(Mp3IO::new("")),
+            Box::new(FlacIO::new("")),
             Box::new(SvgIO::new("")),
             Box::new(RiffIO::new("")),
             Box::new(GifIO::new("")),
@@ -499,6 +496,7 @@ pub mod tests {
         assert!(supported.iter().any(|s| s == "dng"));
         assert!(supported.iter().any(|s| s == "svg"));
         assert!(supported.iter().any(|s| s == "mp3"));
+        assert!(supported.iter().any(|s| s == "jxl"));
     }
 
     fn test_jumbf(asset_type: &str, reader: &mut dyn CAIRead) {
@@ -636,6 +634,17 @@ pub mod tests {
         test_jumbf("mp4", &mut reader);
         reader.rewind().unwrap();
         test_remote_ref("mp4", &mut reader);
+    }
+
+    #[test]
+    fn test_streams_jxl() {
+        // Build a minimal JPEG XL container in memory for testing
+        use crate::asset_handlers::jpegxl_io;
+        let container = jpegxl_io::tests::build_test_jxl_container();
+        let mut reader = Cursor::new(container);
+        test_jumbf("jxl", &mut reader);
+        reader.rewind().unwrap();
+        test_remote_ref("jxl", &mut reader);
     }
 
     #[test]

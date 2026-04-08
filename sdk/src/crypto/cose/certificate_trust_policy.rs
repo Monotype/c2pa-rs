@@ -58,6 +58,9 @@ pub struct CertificateTrustPolicy {
 
     /// passthrough mode
     passthrough: bool,
+
+    /// Use only system trust for this check
+    trust_anchors_only: bool,
 }
 
 impl Default for CertificateTrustPolicy {
@@ -68,6 +71,7 @@ impl Default for CertificateTrustPolicy {
             end_entity_cert_set: HashSet::default(),
             additional_ekus: HashSet::default(),
             passthrough: false,
+            trust_anchors_only: false,
         };
 
         this.add_valid_ekus(include_bytes!("./valid_eku_oids.cfg"));
@@ -98,6 +102,7 @@ impl CertificateTrustPolicy {
             end_entity_cert_set: HashSet::default(),
             additional_ekus: HashSet::default(),
             passthrough: false,
+            trust_anchors_only: false,
         }
     }
 
@@ -109,6 +114,7 @@ impl CertificateTrustPolicy {
             end_entity_cert_set: HashSet::default(),
             additional_ekus: HashSet::default(),
             passthrough: true,
+            trust_anchors_only: false,
         }
     }
 
@@ -196,12 +202,16 @@ impl CertificateTrustPolicy {
     ///
     ///  The function can be called multiple times to add multiple trust anchors. For example,
     ///  the C2PA trust anchors and timestamping trust anchors can be added separately.
-    /// [§14.4.1, C2PA Signers]: <https://c2pa.org/specifications/specifications/2.1/specs/C2PA_Specification.html#_c2pa_signers>
+    /// [§14.4.1, C2PA Signers]: <https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_c2pa_signers>
     pub fn add_trust_anchors(
         &mut self,
         trust_anchor_pems: &[u8],
     ) -> Result<(), InvalidCertificateError> {
-        for maybe_pem in Pem::iter_from_buffer(trust_anchor_pems) {
+        // allow for JSON-encoded PEMs with \n
+        let trust_anchor_pems = String::from_utf8_lossy(trust_anchor_pems)
+            .replace("\\n", "\n")
+            .into_bytes();
+        for maybe_pem in Pem::iter_from_buffer(&trust_anchor_pems) {
             // NOTE: The `x509_parser::pem::Pem` struct's `contents` field contains the
             // decoded PEM content, which is expected to be in DER format.
             match maybe_pem {
@@ -261,7 +271,7 @@ impl CertificateTrustPolicy {
     ///
     /// Lines that match neither format (PEM or hash) are ignored.
     ///
-    /// [§14.4.3, Private Credential Storage]: https://c2pa.org/specifications/specifications/2.1/specs/C2PA_Specification.html#_private_credential_storage
+    /// [§14.4.3, Private Credential Storage]: https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_private_credential_storage
     pub fn add_end_entity_credentials(
         &mut self,
         end_entity_cert_pems: &[u8],
@@ -328,7 +338,7 @@ impl CertificateTrustPolicy {
     /// input or lines within the input such as comments or blank lines that can
     /// not be parsed as OIDs.
     ///
-    /// [§14.4.1, C2PA Signers]: https://c2pa.org/specifications/specifications/2.1/specs/C2PA_Specification.html#_c2pa_signers
+    /// [§14.4.1, C2PA Signers]: https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html#_c2pa_signers
     pub fn add_valid_ekus(&mut self, eku_oids: &[u8]) {
         let Ok(eku_oids) = std::str::from_utf8(eku_oids) else {
             return;
@@ -339,6 +349,24 @@ impl CertificateTrustPolicy {
                 self.additional_ekus.insert(line.to_string());
             }
         }
+    }
+
+    /// Remove the current EKUs
+    pub fn clear_ekus(&mut self) {
+        self.additional_ekus.clear();
+    }
+
+    /// Set whether we only want to use system trust_achors and ignores user_anchors,
+    /// returns last trust_anchors_value
+    pub fn set_trust_anchors_only(&mut self, trust_anchors_only: bool) -> bool {
+        let val = self.trust_anchors_only;
+        self.trust_anchors_only = trust_anchors_only;
+        val
+    }
+
+    /// Get whether we only want to use system trust_achors and ignores user_anchors
+    pub fn trust_anchors_only(&self) -> bool {
+        self.trust_anchors_only
     }
 
     /// Remove all trust anchors, private credentials, and EKUs previously
