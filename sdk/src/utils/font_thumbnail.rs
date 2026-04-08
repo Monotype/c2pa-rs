@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(mime_type, ThumbnailFormat::Png);
         // And the image data is NOT empty
         assert!(!image_data.is_empty());
-        
+
         // Compare decoded PNG content, not compressed bytes
         // This allows for compression differences while ensuring visual identity
         let expected_png = png_thumbnail_bytes();
