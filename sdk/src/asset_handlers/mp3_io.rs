@@ -239,7 +239,7 @@ pub mod tests {
         error::Error,
         utils::{
             io_utils::tempdirectory,
-            test::{fixture_path, temp_dir_path},
+            test::fixture_path,
         },
     };
 
